@@ -1,0 +1,11 @@
+chromadb~=1.5.0
+sentence-transformers~=4.1.0
+openai~=2.36.0
+docx2txt~=0.9.0
+python-docx~=1.2.0
+streamlit~=1.57.0
+python-dotenv~=1.2.0
+openpyxl~=3.1.0
+markdownify~=1.2.0
+pytest~=9.0.0
+pytest-bdd~=8.1.0
