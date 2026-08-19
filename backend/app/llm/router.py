@@ -68,14 +68,6 @@ def chat(req: ChatRequest, authorization: str | None = Header(default=None), db:
     model = req.model or (allowlist[0] if allowlist else "")
     if not model or model not in allowlist:
         raise HTTPException(status_code=422, detail={"error": "model 不在白名单", "allowed": allowlist})
-    day = metering.utc_today()
-    used = metering.get_day_usage(db, user.id, day)
-    limit = settings.user_daily_token_limit
-    if used >= limit:
-        raise HTTPException(
-            status_code=429,
-            detail={"error": "当日 token 用量已达上限", "date": day.isoformat(), "used_tokens": used, "limit": limit},
-        )
     key = gateway.next_key()
     if key is None:
         raise HTTPException(status_code=503, detail="LLM Key 池未配置（LLM_API_KEYS）")
@@ -113,14 +105,11 @@ def chat(req: ChatRequest, authorization: str | None = Header(default=None), db:
 
 @llm_router.get("/usage")
 def usage(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
-    """当前用户当日（UTC 日）已用 token 与上限。"""
+    """当前用户当日（UTC 日）已用 token（纯可见性，无上限语义）。"""
     user = current_user(authorization, db)
     day = metering.utc_today()
     used = metering.get_day_usage(db, user.id, day)
-    limit = settings.user_daily_token_limit
     return {
         "date": day.isoformat(),
         "used_tokens": used,
-        "limit": limit,
-        "remaining_tokens": max(0, limit - used),
     }

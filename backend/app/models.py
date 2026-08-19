@@ -34,7 +34,7 @@ class AuthCode(Base):
 
 
 class UsageLog(Base):
-    """LLM 调用计量记录：按 user_id + UTC 日聚合，支撑每日 token 硬上限。"""
+    """LLM 调用计量记录：按 user_id + UTC 日聚合，支撑用量可见性统计。"""
 
     __tablename__ = "usage_log"
 

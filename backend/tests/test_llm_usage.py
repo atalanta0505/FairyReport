@@ -1,5 +1,4 @@
-"""GET /api/llm/usage 与每日 token 硬上限测试。"""
-from backend.app.config import settings
+"""GET /api/llm/usage 测试（纯可见性：只报当日已用 token，无上限语义）。"""
 
 
 def _auth(token: str) -> dict:
@@ -12,7 +11,7 @@ def test_usage_requires_auth(client):
 
 
 def test_usage_reports_zero_initially(client, mail_stub, register_user, login_token):
-    """无调用时当日已用为 0，上限取配置值。"""
+    """无调用时当日已用为 0，且响应不含上限字段。"""
     email = "llm-usage-zero@example.com"
     register_user(email)
     token = login_token(email)
@@ -20,34 +19,29 @@ def test_usage_reports_zero_initially(client, mail_stub, register_user, login_to
     assert resp.status_code == 200
     body = resp.json()
     assert body["used_tokens"] == 0
-    assert body["limit"] == settings.user_daily_token_limit
-    assert body["remaining_tokens"] == settings.user_daily_token_limit
+    assert "limit" not in body
+    assert "remaining_tokens" not in body
 
 
-def test_daily_limit_enforced_and_usage_consistent(
-    client, mail_stub, register_user, login_token, llm_upstream, monkeypatch
+def test_usage_accumulates_and_never_blocks(
+    client, mail_stub, register_user, login_token, llm_upstream
 ):
-    """超当日上限 → 429（含用量信息），且与 /api/llm/usage 数值一致。"""
-    email = "llm-limit@example.com"
+    """连续调用不因用量被拒（无 429），usage 持续累计且不含上限字段。"""
+    email = "llm-usage-accumulate@example.com"
     register_user(email)
     token = login_token(email)
-    monkeypatch.setattr(settings, "user_daily_token_limit", 50)
     llm_upstream.set_json({
         "choices": [{"message": {"role": "assistant", "content": "long answer"}}],
         "usage": {"prompt_tokens": 35, "completion_tokens": 25, "total_tokens": 60},
     })
     payload = {"messages": [{"role": "user", "content": "q"}]}
-    first = client.post("/api/llm/chat", json=payload, headers=_auth(token))
-    assert first.status_code == 200
-    blocked = client.post("/api/llm/chat", json=payload, headers=_auth(token))
-    assert blocked.status_code == 429
-    detail = blocked.json()["detail"]
-    assert detail["used_tokens"] == 60
-    assert detail["limit"] == 50
-    assert len(llm_upstream.requests) == 1
+    for _ in range(3):
+        resp = client.post("/api/llm/chat", json=payload, headers=_auth(token))
+        assert resp.status_code == 200
+    assert len(llm_upstream.requests) == 3
     usage_resp = client.get("/api/llm/usage", headers=_auth(token))
     assert usage_resp.status_code == 200
     body = usage_resp.json()
-    assert body["used_tokens"] == 60
-    assert body["limit"] == 50
-    assert body["remaining_tokens"] == 0
+    assert body["used_tokens"] == 180
+    assert "limit" not in body
+    assert "remaining_tokens" not in body

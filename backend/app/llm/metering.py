@@ -12,7 +12,7 @@ from ..models import UsageLog
 
 
 def utc_today() -> date:
-    """当前 UTC 日期（每日上限聚合键）。"""
+    """当前 UTC 日期（用量统计聚合键）。"""
     return datetime.now(timezone.utc).date()
 
 

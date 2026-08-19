@@ -37,7 +37,6 @@ class Settings(BaseSettings):
     llm_api_keys: str = ""
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_model_allowlist: str = "deepseek-v4-flash"
-    user_daily_token_limit: int = 200000
     llm_timeout: int = 120
 
     model_config = SettingsConfigDict(
