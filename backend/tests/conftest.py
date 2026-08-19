@@ -1,13 +1,16 @@
 """
-测试夹具：SQLite 内存库 + FastAPI TestClient + SMTP 打桩。
+测试夹具：SQLite 内存库 + FastAPI TestClient + SMTP/LLM 上游打桩。
 
-全部测试不依赖网络、Docker、Postgres，不真实发信。
+全部测试不依赖网络、Docker、Postgres，不真实发信，不真实调用模型 API。
 """
 import os
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["JWT_SECRET"] = "test-jwt-secret-0123456789abcdef"
+os.environ["LLM_API_KEYS"] = "sk-test-alpha-0001,sk-test-beta-0002"
+os.environ["LLM_BASE_URL"] = "https://llm.stub.invalid/v1"
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -72,3 +75,49 @@ def login_token(client):
         assert resp.status_code == 200
         return resp.json()["access_token"]
     return _login
+
+
+class LLMUpstreamStub:
+    """上游 LLM API 打桩（httpx.MockTransport handler）；记录收到的全部请求。"""
+
+    def __init__(self):
+        self.requests: list[httpx.Request] = []
+        self._handler = None
+
+    def set_json(self, body: dict, status_code: int = 200) -> None:
+        """打桩返回 JSON 响应。"""
+        self._handler = lambda request: httpx.Response(status_code, json=body)
+
+    def set_sse(self, chunks: list[str], include_done: bool = True) -> None:
+        """打桩返回 SSE 流；chunks 为 data: 后的载荷，默认末尾补 data: [DONE]。"""
+        events = [f"data: {chunk}\n\n" for chunk in chunks]
+        if include_done:
+            events.append("data: [DONE]\n\n")
+        body = "".join(events)
+        self._handler = lambda request: httpx.Response(
+            200, text=body, headers={"Content-Type": "text/event-stream"}
+        )
+
+    def set_status(self, status_code: int, text: str = "") -> None:
+        """打桩返回指定状态码与文本体。"""
+        self._handler = lambda request: httpx.Response(status_code, text=text)
+
+    def set_timeout(self) -> None:
+        """打桩模拟上游超时。"""
+        def _raise(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("stub upstream timeout", request=request)
+        self._handler = _raise
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        """MockTransport 入口：记录请求后交由已设置的 handler。"""
+        self.requests.append(request)
+        assert self._handler is not None, "测试未设置上游打桩响应"
+        return self._handler(request)
+
+
+@pytest.fixture()
+def llm_upstream(monkeypatch):
+    """以 MockTransport 替换网关传输层；用例不得真实访问上游。"""
+    stub = LLMUpstreamStub()
+    monkeypatch.setattr("backend.app.llm.gateway._transport", httpx.MockTransport(stub.handle))
+    return stub

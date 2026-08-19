@@ -82,7 +82,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     return TokenResponse(access_token=security.create_access_token(user.id, user.email))
 
 
-def _current_user(authorization: str | None, db: Session) -> User:
+def current_user(authorization: str | None, db: Session) -> User:
     """解析 Bearer JWT 并返回当前用户；缺失/无效/过期一律 401。"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="未提供认证凭据")
@@ -104,5 +104,5 @@ def _current_user(authorization: str | None, db: Session) -> User:
 @users_router.get("/me", response_model=UserResponse)
 def me(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
     """依据有效 JWT 返回当前用户信息。"""
-    user = _current_user(authorization, db)
+    user = current_user(authorization, db)
     return UserResponse(id=user.id, email=user.email, created_at=user.created_at)

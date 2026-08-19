@@ -33,11 +33,28 @@ class Settings(BaseSettings):
     smtp_auth_code: str = ""
     smtp_from_name: str = "FairyReport"
 
+    # ── LLM 网关（Key 只从环境变量/.env 读取，禁止硬编码）──
+    llm_api_keys: str = ""
+    llm_base_url: str = "https://api.deepseek.com/v1"
+    llm_model_allowlist: str = "deepseek-v4-flash"
+    user_daily_token_limit: int = 200000
+    llm_timeout: int = 120
+
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @property
+    def llm_key_list(self) -> list[str]:
+        """LLM_API_KEYS 逗号分隔的 Key 池（去除空白与空项）。"""
+        return [k.strip() for k in self.llm_api_keys.split(",") if k.strip()]
+
+    @property
+    def llm_model_allowlist_items(self) -> list[str]:
+        """LLM_MODEL_ALLOWLIST 逗号分隔的模型白名单。"""
+        return [m.strip() for m in self.llm_model_allowlist.split(",") if m.strip()]
 
 
 settings = Settings()

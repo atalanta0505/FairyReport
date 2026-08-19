@@ -1,9 +1,9 @@
 """
-FairyReport Backend — ORM 模型（User / AuthCode）
+FairyReport Backend — ORM 模型（User / AuthCode / UsageLog）
 """
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base, utcnow
@@ -31,3 +31,18 @@ class AuthCode(Base):
     code: Mapped[str] = mapped_column(String(6), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class UsageLog(Base):
+    """LLM 调用计量记录：按 user_id + UTC 日聚合，支撑每日 token 硬上限。"""
+
+    __tablename__ = "usage_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    day: Mapped[date] = mapped_column(Date, index=True, nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    estimated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
