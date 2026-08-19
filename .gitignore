@@ -19,12 +19,16 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+*.spec
 
 # Virtual environments
 venv/
 ENV/
 env/
 .venv/
+
+# Testing
+.pytest_cache/
 
 # IDE
 .vscode/
@@ -36,6 +40,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Logs and databases
 *.log
@@ -44,4 +49,7 @@ Thumbs.db
 
 # Environment variables
 .env
-.env.local
+.env.*
+
+# FairyReport runtime data (projects, vector DBs, generated reports)
+data/
