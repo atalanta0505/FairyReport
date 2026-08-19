@@ -1,0 +1,35 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://fairyreport:${POSTGRES_PASSWORD:-fairyreport}@db:5432/fairyreport
+      JWT_SECRET: ${JWT_SECRET:?请在部署环境设置 JWT_SECRET}
+      JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
+      SMTP_HOST: ${SMTP_HOST:-smtp.qq.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_AUTH_CODE: ${SMTP_AUTH_CODE:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fairyreport
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fairyreport}
+      POSTGRES_DB: fairyreport
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fairyreport -d fairyreport"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  pgdata:
