@@ -13,12 +13,14 @@ from .config import settings
 from .generic.router import router as generic_router
 from .materials.router import router as materials_router
 from .projects.router import router as projects_router
+from .writing.router import router as writing_router
 
 app = FastAPI(title="FairyReport Engine", version="1.0.0")
 
 app.include_router(projects_router)
 app.include_router(materials_router)
 app.include_router(generic_router)
+app.include_router(writing_router)
 
 db.create_tables()
 

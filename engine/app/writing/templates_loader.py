@@ -1,0 +1,181 @@
+"""
+模板加载 — 从已安装通用知识包目录读模板 JSON（替代根目录 config.py 的 _load_template）。
+
+未安装通用包 → 抛 TemplatesNotInstalled，调用方映射 409。
+模板缓存挂在已装版本上，版本变化自动失效。
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from ..generic.store import GenericStore
+from .prompts import (
+    DEFAULT_MAX_WORDS_PER_CHAPTER,
+    DEFAULT_SUMMARY_CHAPTER_LIMIT,
+    MAX_WORDS_PER_CHAPTER,
+    REPORT_WORD_LIMITS,
+    TEMPLATE_MAP,
+)
+
+
+class TemplatesNotInstalled(Exception):
+    """通用知识包未安装，无法读取模板。"""
+
+
+def _templates_dir() -> Path:
+    """返回已安装通用包的 templates 目录；未装则抛异常。"""
+    state = GenericStore._read_state()
+    if not state or not state.get("version"):
+        raise TemplatesNotInstalled("通用知识包未安装，请先 /generic/update")
+    vdir = GenericStore._version_dir(state["version"])
+    tdir = vdir / "templates"
+    if not tdir.is_dir():
+        raise TemplatesNotInstalled("通用知识包缺少 templates 目录")
+    return tdir
+
+
+# ── 模板缓存（按版本隔离，版本变化失效）──
+_cache: dict[str, dict | None] = {}
+_cache_version: str | None = None
+
+
+def _current_version() -> str | None:
+    state = GenericStore._read_state()
+    return state.get("version") if state else None
+
+
+def _ensure_cache_fresh() -> None:
+    """版本变化时清缓存。"""
+    v = _current_version()
+    if v != _cache_version:
+        _cache.clear()
+        _cache_version_set(v)
+
+
+def _cache_version_set(v: str | None) -> None:
+    global _cache_version
+    _cache_version = v
+
+
+def load_template(report_type: str) -> dict | None:
+    """加载指定报告类型的模板 JSON；未装返回 None 由调用方判定。
+
+    注：未装时静默返回 None（与现版 _load_template 一致），由调用方决定是否报 409。
+    """
+    try:
+        _ensure_cache_fresh()
+    except Exception:
+        return None
+
+    if report_type in _cache:
+        return _cache[report_type]
+
+    filename = TEMPLATE_MAP.get(report_type)
+    if not filename:
+        _cache[report_type] = None
+        return None
+
+    try:
+        tdir = _templates_dir()
+    except TemplatesNotInstalled:
+        _cache[report_type] = None
+        return None
+
+    tpath = tdir / filename
+    if not tpath.exists():
+        _cache[report_type] = None
+        return None
+    with open(tpath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    _cache[report_type] = data
+    return data
+
+
+def get_word_limit(report_type: str) -> int:
+    tmpl = load_template(report_type)
+    if tmpl and tmpl.get("total_words_max"):
+        return tmpl["total_words_max"]
+    return REPORT_WORD_LIMITS.get(report_type, 40000)
+
+
+def get_chapter_word_limit(report_type: str) -> int:
+    tmpl = load_template(report_type)
+    if tmpl and tmpl.get("per_chapter_max"):
+        return tmpl["per_chapter_max"]
+    return MAX_WORDS_PER_CHAPTER.get(report_type, DEFAULT_MAX_WORDS_PER_CHAPTER)
+
+
+def get_summary_chapter_limit(report_type: str) -> int:
+    tmpl = load_template(report_type)
+    if tmpl and tmpl.get("summary_chapter_max"):
+        return tmpl["summary_chapter_max"]
+    return DEFAULT_SUMMARY_CHAPTER_LIMIT
+
+
+def is_summary_chapter(report_type: str, chapter_seq: int) -> bool:
+    tmpl = load_template(report_type)
+    if not tmpl or "chapters" not in tmpl:
+        return False
+    for ch in tmpl["chapters"]:
+        if ch.get("seq") == chapter_seq:
+            return ch.get("is_summary", False)
+    return False
+
+
+def get_template_notes(report_type: str) -> str:
+    tmpl = load_template(report_type)
+    if not tmpl:
+        return ""
+    return tmpl.get("notes", "")
+
+
+def get_template_outline_md(report_type: str) -> str:
+    tmpl = load_template(report_type)
+    if not tmpl:
+        return ""
+    return tmpl.get("outline_md", "")
+
+
+def get_chapter_template_prompt(report_type: str) -> str:
+    tmpl = load_template(report_type)
+    if not tmpl or "chapters" not in tmpl:
+        return ""
+    chapters = tmpl["chapters"]
+    lines = [f"**{report_type}必须严格遵循以下{len(chapters)}章结构：**\n"]
+    for ch in chapters:
+        title = ch["title"]
+        desc = ch.get("description", "")
+        budget = ch.get("word_budget", 0)
+        budget_str = f" — {budget:,}字" if budget > 0 else ""
+        if desc:
+            lines.append(f"{title}（{desc}）{budget_str}")
+        else:
+            lines.append(f"{title}{budget_str}")
+    lines.append("\n章标题可微调以适应具体项目，但章数、顺序和每章字数预算须与以上模板一致。")
+    return "\n".join(lines)
+
+
+def get_chapter_word_budget(report_type: str, chapter_seq: int) -> int:
+    tmpl = load_template(report_type)
+    if tmpl and "chapters" in tmpl:
+        for ch in tmpl["chapters"]:
+            if ch.get("seq") == chapter_seq:
+                budget = ch.get("word_budget")
+                if budget is not None and budget > 0:
+                    return budget
+                if ch.get("is_summary"):
+                    return get_summary_chapter_limit(report_type)
+                return get_chapter_word_limit(report_type)
+    if is_summary_chapter(report_type, chapter_seq):
+        return get_summary_chapter_limit(report_type)
+    return get_chapter_word_limit(report_type)
+
+
+def require_installed() -> None:
+    """显式要求通用包已安装；未装抛 TemplatesNotInstalled（路由映射 409）。"""
+    state = GenericStore._read_state()
+    if not state or not state.get("version"):
+        raise TemplatesNotInstalled("通用知识包未安装，请先 /generic/update")
+    if not GenericStore._version_dir(state["version"]).exists():
+        raise TemplatesNotInstalled("通用知识包目录缺失")

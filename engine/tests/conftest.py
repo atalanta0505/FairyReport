@@ -21,6 +21,7 @@ from engine.app.embedding import DeterministicStubEmbedder, set_embedder  # noqa
 from engine.app.generic.store import GenericStore  # noqa: E402
 from engine.app.main import app  # noqa: E402
 from engine.app.materials.vectorstore import ProjectVectorStore  # noqa: E402
+from engine.app.writing.llm_client import set_transport as set_llm_transport  # noqa: E402
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -49,6 +50,7 @@ def client(tmp_path):
     from engine.app.generic.store import set_transport
 
     set_transport(None)
+    set_llm_transport(None)
     gc.collect()
 
     with TestClient(app) as c:
@@ -58,6 +60,7 @@ def client(tmp_path):
     ProjectVectorStore._cache.clear()
     GenericStore.close()
     set_transport(None)
+    set_llm_transport(None)
     gc.collect()
 
 
