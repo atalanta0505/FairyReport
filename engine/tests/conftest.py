@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from engine.app import db  # noqa: E402
 from engine.app.config import settings  # noqa: E402
 from engine.app.embedding import DeterministicStubEmbedder, set_embedder  # noqa: E402
+from engine.app.generic.store import GenericStore  # noqa: E402
 from engine.app.main import app  # noqa: E402
 from engine.app.materials.vectorstore import ProjectVectorStore  # noqa: E402
 
@@ -43,6 +44,11 @@ def client(tmp_path):
 
     # 清向量库缓存 + 释放上一用例可能的 sqlite 锁
     ProjectVectorStore._cache.clear()
+    GenericStore.close()
+    # 重置通用知识 HTTP 传输层（避免泄漏 MockTransport）
+    from engine.app.generic.store import set_transport
+
+    set_transport(None)
     gc.collect()
 
     with TestClient(app) as c:
@@ -50,6 +56,8 @@ def client(tmp_path):
 
     # 用例后再次清理缓存
     ProjectVectorStore._cache.clear()
+    GenericStore.close()
+    set_transport(None)
     gc.collect()
 
 

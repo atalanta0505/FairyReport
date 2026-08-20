@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from . import db, models  # noqa: F401（注册 ORM 模型）
 from .config import settings
+from .generic.router import router as generic_router
 from .materials.router import router as materials_router
 from .projects.router import router as projects_router
 
@@ -17,6 +18,7 @@ app = FastAPI(title="FairyReport Engine", version="1.0.0")
 
 app.include_router(projects_router)
 app.include_router(materials_router)
+app.include_router(generic_router)
 
 db.create_tables()
 

@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     llm_model_allowlist: str = "deepseek-v4-flash"
     llm_timeout: int = 120
 
+    # ── 通用知识包目录（JWT 保护下发；manifest.json + pack.zip）──
+    pack_dir: str = "pack"
+
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
