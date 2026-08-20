@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     chunk_overlap: int = 100
 
     # ── 嵌入模型 ──
-    embed_model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    embed_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
     # ── 服务绑定（仅本机）──
     host: str = "127.0.0.1"

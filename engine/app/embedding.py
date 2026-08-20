@@ -1,7 +1,7 @@
 """
 FairyReport 本地引擎 — 嵌入封装（可注入/可打桩）。
 
-默认实现走 fastembed（paraphrase-multilingual-MiniLM-L12-v2，dim=384）。
+默认实现走 fastembed（sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2，dim=384）。
 测试通过 set_embedder() 注入确定性假向量，不下载模型、不联网。
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ class FastEmbedEmbedder:
 
     dim = 384
 
-    def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2") -> None:
+    def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") -> None:
         self._model_name = model_name
         self._model = None
 
