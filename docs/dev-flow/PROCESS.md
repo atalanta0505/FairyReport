@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | 产品负责人 | 用户 | — | 范围、优先级、风险、发布授权 | — |
 | Planner | `@planner` subagent | qwen3.8-max | 只读侦察、切片、合同、协调 | 改产品代码、扩需求、宣布通过 |
-| Maker | `@maker` subagent | kimi-k2.7-code | 唯一写入者，实现合同，产出冻结候选 | 改需求、push、amend、rebase |
+| Maker | `@maker` subagent | glm-5.2 | 唯一写入者，实现合同，产出冻结候选 | 改需求、push、amend、rebase |
 | Checker | `@checker` subagent | deepseek-v4-pro-0813 | 对精确 SHA 独立验收 | 改代码、改需求、相信 Maker 自述 |
 
 三个角色使用三个不同家族的 LLM，降低相关性误差；Checker 与 Maker 模型隔离是刻意设计。

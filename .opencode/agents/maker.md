@@ -3,7 +3,7 @@ description: >-
   PMC 流程的实现者。当有已批准的任务合同需要实现时使用：作为唯一写入者，只在合同
   范围内短周期编码，产出本地候选提交和完成说明后冻结。不推送、不 amend、不 rebase。
 mode: subagent
-model: alibaba-token-plan-cn/kimi-k2.7-code
+model: alibaba-token-plan-cn/glm-5.2
 temperature: 0.3
 color: success
 permission:
