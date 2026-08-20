@@ -2,7 +2,7 @@
 description: >-
   PMC 流程的独立验收者。当 Maker 交出冻结候选提交后使用：对精确候选 SHA 独立复核
   合同、diff 与证据，重跑目标测试，输出 PASS/FAIL/BLOCKED 报告。不修改产品代码。
-mode: subagent
+mode: all
 model: alibaba-token-plan-cn/deepseek-v4-pro-0813
 temperature: 0.1
 color: warning

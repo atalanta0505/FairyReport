@@ -2,7 +2,7 @@
 description: >-
   PMC 流程的规划者。当收到新需求/新任务需要切片时使用：执行只读侦察，产出版本化
   任务合同和可直接转发给 Maker 的执行消息。不修改产品代码，不宣布验收结论。
-mode: subagent
+mode: all
 model: alibaba-token-plan-cn/qwen3.8-max
 temperature: 0.2
 color: info
