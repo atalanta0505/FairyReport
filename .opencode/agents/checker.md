@@ -16,8 +16,12 @@ permission:
     "git log*": allow
     "git diff*": allow
     "git show*": allow
+    "git ls-files*": allow
     "pytest*": allow
     "python -m pytest*": allow
+    "npx vitest*": allow
+    "npx vue-tsc*": allow
+    "cargo check*": allow
   task: deny
 ---
 
