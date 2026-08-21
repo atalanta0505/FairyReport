@@ -22,6 +22,7 @@ permission:
     "npx vitest*": allow
     "npx vue-tsc*": allow
     "cargo check*": allow
+    "npm run tauri*": allow
   task: deny
 ---
 

@@ -1,6 +1,6 @@
 # 任务合同 V2-T8 v2 — 范围增补：@tauri-apps/cli（第 2 轮验收基线）
 
-- 状态：READY_FOR_MAKER（产品负责人 2026-08-21 批准方案 B："批准"）
+- 状态：READY_FOR_CHECKER（第 2 轮；候选 fa541fd83e8189a40c543159351a33945643b904，完成说明 6404597）
 - 变更说明：v1 第 1 轮 Checker PASS（锁定 `a10e900605ace1d226a892ffe5d3237bd913439d`），但 B 级人工验证发现 `npm run tauri dev` 报 `'tauri' 不是内部或外部命令` —— `desktop/package.json` 仅含 `@tauri-apps/api`（前端绑定），缺 `@tauri-apps/cli`（v1 §7 "tauri" 被理解为运行时绑定，漏 CLI）。v2 将该窄修复合法化；其余条款不变，v1 保留作历史。
 - 产品决定来源：2026-08-21 产品负责人对"项目完整性方案 B"的明确批准。
 - 精确起始 SHA：本合同提交后的 master HEAD
