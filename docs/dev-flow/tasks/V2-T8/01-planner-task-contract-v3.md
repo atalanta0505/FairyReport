@@ -1,6 +1,6 @@
 # 任务合同 V2-T8 v3 — 范围增补：shell scope 配置修复（第 3 轮验收基线）
 
-- 状态：READY_FOR_CHECKER（第 3 轮；候选 b0c3b40d9355f74da29f9e2e5cb5f8178c0ddcd3，完成说明 ba06e72）
+- 状态：ACCEPTED（第 3 轮 Checker PASS，锁定候选 b0c3b40d9355f74da29f9e2e5cb5f8178c0ddcd3；剩余 B 级人工项见 rounds/03/checker-report.md）
 - 批准记录：产品负责人 2026-08-21 以"请执行"指令启动第 3 轮，视为批准本合同（状态字段补记于第 3 轮交付后）
 - 变更说明：v2 第 2 轮 PASS 锁定 `fa541fd83e8189a40c543159351a33945643b904`；B 级人工验证捕获首次运行时失败（A 级静态检查不可见，运行时反序列化错误）：
 
