@@ -1,6 +1,6 @@
 # 任务合同 V2-T8 v1 — Tauri 桌面壳 + 认证 UI + 引擎生命周期 + 设置
 
-- 状态：ACCEPTED（第 1 轮 Checker PASS，锁定候选 a10e900605ace1d226a892ffe5d3237bd913439d；剩余 B 级人工项 3 项见 rounds/01/checker-report.md）
+- 状态：ACCEPTED（第 1 轮 Checker PASS，锁定候选 a10e900605ace1d226a892ffe5d3237bd913439d；剩余 B 级人工项 3 项见 rounds/01/checker-report.md）— 合同已被 v2 增补取代（@tauri-apps/cli 窄修复），B 级人工验证改对 v2 候选执行
 - 产品决定来源：`00-product-decision-v4.md` D18、`00-product-decision-v5.md` D21
 - 精确起始 SHA：本合同提交后的 master HEAD
 - 工作树门禁：`git status --short` 必须干净
