@@ -1,6 +1,6 @@
 # 任务合同 V2-T8 v1 — Tauri 桌面壳 + 认证 UI + 引擎生命周期 + 设置
 
-- 状态：DRAFT（待产品负责人批准；批准即视为批准 §7 工具链与依赖清单）
+- 状态：READY_FOR_MAKER（产品负责人 2026-08-21 以"T8 开工"指令批准；§7 工具链与依赖清单随批准生效）
 - 产品决定来源：`00-product-decision-v4.md` D18、`00-product-decision-v5.md` D21
 - 精确起始 SHA：本合同提交后的 master HEAD
 - 工作树门禁：`git status --short` 必须干净
