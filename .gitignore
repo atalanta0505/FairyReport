@@ -6,7 +6,7 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
@@ -53,3 +53,8 @@ desktop.ini
 
 # FairyReport runtime data (projects, vector DBs, generated reports)
 data/
+
+# Desktop (Tauri) build artifacts
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
