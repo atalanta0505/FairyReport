@@ -28,16 +28,5 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.png", "icons/icon.ico"]
-  },
-  "plugins": {
-    "shell": {
-      "scope": [
-        {
-          "name": "python-uvicorn",
-          "command": "python",
-          "args": true
-        }
-      ]
-    }
   }
 }
