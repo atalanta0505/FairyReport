@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ENGINE_HEALTH_MAX_ATTEMPTS,
   pollHealth,
@@ -12,14 +12,6 @@ function okResponse(): Response {
 function failResponse(): Response {
   return { ok: false, status: 500 } as unknown as Response;
 }
-
-beforeEach(() => {
-  globalThis.fetch = vi.fn();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe("pollHealth", () => {
   it("首次即 ok → 立即返回", async () => {

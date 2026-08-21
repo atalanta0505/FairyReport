@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口默认能力：核心 + shell spawn（python 子进程白名单）",
+  "description": "主窗口默认能力：核心 + shell spawn/kill（python 子进程白名单）+ http fetch（云服务器 + 引擎健康）",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,13 @@
       "identifier": "shell:allow-spawn",
       "allow": [{ "name": "python-uvicorn", "cmd": "python", "args": true }]
     },
-    "shell:allow-kill"
+    "shell:allow-kill",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "http://101.42.9.223/*" },
+        { "url": "http://127.0.0.1:*/*" }
+      ]
+    }
   ]
 }

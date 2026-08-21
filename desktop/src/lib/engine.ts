@@ -1,0 +1,103 @@
+/**
+ * 引擎生命周期 — 选空闲端口 → 子进程启动 uvicorn → 轮询 /health → 退出时 kill。
+ *
+ * 默认实现走 Tauri（pickFreePort/engineCwd 用 @tauri-apps/api/core invoke；
+ * spawn 用 @tauri-apps/plugin-shell Command，scope "python-uvicorn" → python；
+ * 健康检查用 @tauri-apps/plugin-http fetch（原生通道，绕开 CORS/混合内容））。
+ * 所有依赖可注入，测试打桩 spawn/fetch/端口，不联网、不依赖 Tauri 运行时。
+ */
+
+import { fetch as pluginFetch } from "@tauri-apps/plugin-http";
+
+export interface EngineChild {
+  kill: () => Promise<void> | void;
+}
+
+export interface EngineDeps {
+  pickFreePort: () => Promise<number>;
+  cwdProvider: () => Promise<string>;
+  spawnProcess: (args: string[], cwd: string) => Promise<EngineChild>;
+  fetcher: (url: string) => Promise<Response>;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export interface EngineHandle {
+  port: number;
+  baseUrl: string;
+  stop: () => Promise<void>;
+}
+
+export const ENGINE_HEALTH_MAX_ATTEMPTS = 30;
+export const ENGINE_HEALTH_INTERVAL_MS = 500;
+
+/** 选空闲端口（默认：Rust 命令 pick_free_port，绑定 127.0.0.1:0 取系统分配端口）。 */
+export async function pickFreePort(): Promise<number> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<number>("pick_free_port");
+}
+
+/** 引擎子进程工作目录（默认：Rust 命令 engine_cwd，MVP 开发形态=仓库根）。 */
+export async function engineCwd(): Promise<string> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string>("engine_cwd");
+}
+
+/** 默认 spawn：经 tauri-plugin-shell 启动 python（scope 白名单 python-uvicorn → python）。 */
+export async function defaultSpawn(args: string[], cwd: string): Promise<EngineChild> {
+  const { Command } = await import("@tauri-apps/plugin-shell");
+  const cmd = Command.create("python-uvicorn", args, { cwd });
+  const child = await cmd.spawn();
+  return {
+    kill: async () => {
+      await child.kill();
+    },
+  };
+}
+
+/** 轮询 /health 直到 ok 或超时（默认 fetcher 走 plugin-http 原生 fetch）。 */
+export async function pollHealth(
+  baseUrl: string,
+  deps?: Partial<EngineDeps>,
+): Promise<void> {
+  const fetcher = deps?.fetcher ?? pluginFetch;
+  const sleep = deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let i = 0; i < ENGINE_HEALTH_MAX_ATTEMPTS; i++) {
+    try {
+      const resp = await fetcher(`${baseUrl}/health`);
+      if (resp.ok) return;
+    } catch {
+      /* 引擎尚未就绪，重试 */
+    }
+    await sleep(ENGINE_HEALTH_INTERVAL_MS);
+  }
+  throw new Error(`引擎健康检查超时：${baseUrl}/health`);
+}
+
+/** 启动引擎：选端口 → 取 cwd → spawn uvicorn → 轮询健康 → 返回 handle。 */
+export async function startEngine(deps?: Partial<EngineDeps>): Promise<EngineHandle> {
+  const pickPort = deps?.pickFreePort ?? pickFreePort;
+  const cwdProvider = deps?.cwdProvider ?? engineCwd;
+  const spawn = deps?.spawnProcess ?? defaultSpawn;
+
+  const port = await pickPort();
+  const cwd = await cwdProvider();
+  const args = [
+    "-m",
+    "uvicorn",
+    "engine.app.main:app",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    String(port),
+  ];
+  const child = await spawn(args, cwd);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  await pollHealth(baseUrl, deps);
+  return {
+    port,
+    baseUrl,
+    stop: async () => {
+      await child.kill();
+    },
+  };
+}
