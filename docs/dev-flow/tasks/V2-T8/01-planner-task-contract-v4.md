@@ -1,6 +1,6 @@
 # 任务合同 V2-T8 v4 — 范围增补：plugin-http 原生 HTTP 通路（第 4 轮验收基线）
 
-- 状态：READY_FOR_MAKER（产品负责人 2026-08-21 "开工"指令批准；§7 增补依赖随批准生效）
+- 状态：READY_FOR_CHECKER（第 4 轮；候选 808c8d50ff70dad6e74c134790e01e179ae23a1f，完成说明 a71115f）
 - 变更说明：v3 第 3 轮 PASS 锁定 `b0c3b40d9355f74da29f9e2e5cb5f8178c0ddcd3`；B 级实跑捕获第二次运行时失败：登录报 `网络错误: Failed to fetch`。根因（协调者只读核查）：① 后端无 CORS（仓库无 CORSMiddleware，预检 OPTIONS 405），WebView 跨域 fetch 被浏览器拦截；② 打包版 `tauri://` 安全源 fetch `http://` 另有混合内容阻断。浏览器 fetch 通路不成立，改用 Tauri 官方 plugin-http（Rust 原生 fetch，不受 CORS/混合内容约束）。v1–v3 保留作历史。
 - 产品决定来源：2026-08-21 产品负责人选定"plugin-http（推荐）"方案
 - 精确起始 SHA：本合同提交后的 master HEAD
