@@ -1,6 +1,6 @@
 # 任务合同 V2-T9 v6 — 窄修复：向导组件改用稳健 v-show 架构（根除空白屏与 KeepAlive 运行时异常）
 
-- 状态：READY_FOR_MAKER（2026-08-25 产品负责人反馈应用主页面白屏）
+- 状态：ACCEPTED（第 6 轮 PASS；锁定候选 d5101078662b3bb193df98eb21423bd602782ffe）
 - 依据：用户截图反馈主窗口空白，排查确认为 KeepAlive 动态组件在 Vite/Vue 3 渲染阶段异常导致的挂载中断
 - 精确起始 SHA：`3964f808f9723ec083b9e4a3d758d4a65c40134b`
 - 工作树门禁：`git status --short` 必须干净
