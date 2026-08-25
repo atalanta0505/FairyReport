@@ -414,4 +414,42 @@ def test_chapters_persistence_delete(client):
     assert not ch1_file.exists()
 
 
+def test_markdown_formatting_rules_in_prompts():
+    """验证章节写作与修改的系统提示词中包含标题独占行与表格标准换行强约束。"""
+    from engine.app.writing.prompts import _MODIFY_SYSTEM_PROMPT
+    from engine.app.writing.writer import ChapterWriter, _build_writing_system_prompt
+
+    # 1. 验证 _build_writing_system_prompt 包含 Markdown 格式规则
+    system_prompt = _build_writing_system_prompt(
+        report_type="可行性研究报告",
+        chapter_budget=3000,
+        chapter_title="第1章 概述",
+        topic="水利枢纽",
+    )
+    assert "Markdown 格式规范" in system_prompt
+    assert "严禁标题与正文连在同一行" in system_prompt
+    assert "严禁使用 || 连写在同一行" in system_prompt
+
+    # 2. 验证 _MODIFY_SYSTEM_PROMPT 包含 Markdown 格式规则
+    mod_prompt = _MODIFY_SYSTEM_PROMPT.format(word_constraint="保持约1000字")
+    assert "严禁标题与正文连在同一行" in mod_prompt
+    assert "严禁使用 || 连写在同一行" in mod_prompt
+
+    # 3. 验证 _build_chapter_write_args 的 user prompt 包含格式要求
+    class FakeLLM:
+        pass
+
+    writer = ChapterWriter(FakeLLM(), report_type="可行性研究报告")
+    prompt, sys = writer._build_chapter_write_args(
+        chapter_title="第1章 概述",
+        outline_md="# 第1章 概述\n## 1.1 项目概况\n### 1.1.1 建设地点",
+        predecessor_chapters={},
+        rag_context="",
+        topic="水利枢纽",
+    )
+    assert "格式规范（极重要）" in prompt
+    assert "严禁使用 || 连写在同一行" in prompt
+
+
+
 

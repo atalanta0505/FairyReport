@@ -96,25 +96,57 @@ function isTableSeparator(line: string): boolean {
   return cells.every((cell) => /^:?-{1,}:?$/.test(cell.trim()));
 }
 
-export function normalizeMarkdown(md: string): string {
+export function normalizeMarkdown(md: string, knownHeadings?: string[]): string {
   if (!md || typeof md !== "string") return "";
   let text = md.replace(/\r\n/g, "\n");
-  // 核心：在所有非换行符紧邻的 #{1,6}\s+ 前面强制补双换行符
-  text = text.replace(/([^\n])\s*(#{1,6}\s+)/g, "$1\n\n$2");
-  // 表格与前置文本粘连时规范化换行
+
+  // 1. 核心：在所有非换行符/非#紧邻的 #{1,6}\s+ 前面强制补双换行符
+  text = text.replace(/([^#\n])\s*(#{1,6}\s+)/g, "$1\n\n$2");
+
+  // 2. 表格单行粘连还原：将单行用 || 连接的全部表格行（表头、分隔线、数据行）还原为标准换行
+  // 例如：|序号|指标名称|...||------|...|| 1 | ... || 2 | ... |
+  text = text.replace(/\|\s*\|/g, "|\n|");
+
+  // 3. 表格与前置文本粘连时规范化换行
   text = text.replace(/^([^|\n].*?)(\|.+?\|\s*\n\s*\|[-: ]+?\|)/gm, "$1\n\n$2");
+
+  // 4. 标题与加粗/引用/表格粘连拆解（如 ### 1.1.1 建设地点**项目名称**）
+  text = text.replace(/(#{1,6}\s+[^\n*|【]*?)\s*(\*\*|【源|\|)/g, "$1\n\n$2");
+
+  // 5. 最低级标题（H3/H4）与正文粘连拆解（解决 ### 1.1.6 主要技术经济指标项目主要技术经济指标...）
+  text = text.replace(
+    /(#{1,6}\s+\d+(?:\.\d+)*\s+[^\s#\n]{2,20}?)\s*(项目|本项目|该项目|本工程|工程|根据|按照|依据|经查|经核实|经测算|经评估|经分析|经过|为贯彻|为实现|为满足|为了?|为进一步|总投资|总用地|总建筑面积|规划建设|建设内容|建设规模为|建设地点位于|主要建设内容|主要指标如下|主要包括|涵盖|包含|如下表|如下所示|如下：|由|针对)([\u4e00-\u9fa5])/g,
+    "$1\n\n$2$3"
+  );
+
+  // 6. 若传入已知大纲标题库，进行精确前缀断行
+  if (knownHeadings && Array.isArray(knownHeadings)) {
+    for (const h of knownHeadings) {
+      if (!h || typeof h !== "string") continue;
+      const cleanH = h.replace(/^#+\s*/, "").trim();
+      if (!cleanH) continue;
+      const escaped = cleanH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const reg = new RegExp(`^(#{1,6}\\s+${escaped})\\s*([^\\n]+)$`, "gm");
+      text = text.replace(reg, "$1\n\n$2");
+    }
+  }
+
   return text;
 }
 
 /**
  * 提取 Markdown 中的子标题列表（H1~H4），带锚点 ID
  */
-export function extractSubHeadings(md: string, chapterSeq?: number): SubHeading[] {
+export function extractSubHeadings(
+  md: string,
+  chapterSeq?: number,
+  knownHeadings?: string[]
+): SubHeading[] {
   if (!md || typeof md !== "string") {
     return [];
   }
 
-  const normalized = normalizeMarkdown(md);
+  const normalized = normalizeMarkdown(md, knownHeadings);
   const lines = normalized.split("\n");
   const headings: SubHeading[] = [];
   let index = 0;
@@ -159,12 +191,16 @@ export function extractSubHeadings(md: string, chapterSeq?: number): SubHeading[
 /**
  * 将 Markdown 文本解析转换为语义化且安全的 HTML（标题带锚点 ID）
  */
-export function markdownToHtml(md: string, chapterSeq?: number): string {
+export function markdownToHtml(
+  md: string,
+  chapterSeq?: number,
+  knownHeadings?: string[]
+): string {
   if (!md || typeof md !== "string" || !md.trim()) {
     return "";
   }
 
-  const normalized = normalizeMarkdown(md);
+  const normalized = normalizeMarkdown(md, knownHeadings);
   const lines = normalized.split("\n");
   const htmlParts: string[] = [];
   let i = 0;

@@ -47,10 +47,11 @@ describe("Markdown 解析与排版工具", () => {
       expect(html).toContain('<h4 id="h-ch1-idx3">详细测绘数据</h4>');
     });
 
-    it("标题中包含来源引用标签与粗体", () => {
+    it("标题与加粗/来源标签粘连时自动拆分为独立标题与正文段落", () => {
       const md = "# 第一章 建设背景 **重点** 【源:规划纲要.docx】";
       const html = markdownToHtml(md, 2);
-      expect(html).toContain('<h1 id="h-ch2-idx0">第一章 建设背景 <strong>重点</strong> <span class="ref-badge">🏷️ 【源:规划纲要.docx】</span></h1>');
+      expect(html).toContain('<h1 id="h-ch2-idx0">第一章 建设背景</h1>');
+      expect(html).toContain('<p><strong>重点</strong> <span class="ref-badge">🏷️ 【源:规划纲要.docx】</span></p>');
     });
   });
 
@@ -208,7 +209,7 @@ describe("Markdown 解析与排版工具", () => {
         id: "h-ch2-idx4",
         level: 2,
         title: "2.2 泄洪设施",
-        raw: "## 2.2 泄洪设施 【源:规划.docx】",
+        raw: "## 2.2 泄洪设施",
         index: 4,
       });
     });
@@ -259,7 +260,7 @@ describe("Markdown 解析与排版工具", () => {
     it("自动解开粘连的各级标题", () => {
       const glued = "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称\n本工程位于长江中下游流域。";
       const normalized = normalizeMarkdown(glued);
-      expect(normalized).toContain("# 第一章 概述\n\n## 1.1 项目概况\n\n### 1.1.1 项目名称\n本工程位于长江中下游流域。");
+      expect(normalized).toContain("# 第一章 概述\n\n## 1.1 项目概况\n\n### 1.1.1 项目名称\n\n本工程位于长江中下游流域。");
     });
 
     it("正文紧邻标题自动补双换行", () => {
@@ -274,48 +275,88 @@ describe("Markdown 解析与排版工具", () => {
       expect(normalized).toContain("说明文字\n\n| 表头1 | 表头2 |\n| --- | --- |\n| 单元格1 | 单元格2 |");
     });
 
+    it("单行用 || 连接的表格自动还原为标准多行 GFM 表格", () => {
+      const singleLineTable = "| 序号 | 指标名称 | 单位 | 目标值 || :--- | :--- | :--- | :--- || 1 | 规划面积 | 平方公里 | 25.4 || 2 | 总投资 | 亿元 | 120 |";
+      const normalized = normalizeMarkdown(singleLineTable);
+      expect(normalized).toBe(
+        "| 序号 | 指标名称 | 单位 | 目标值 |\n| :--- | :--- | :--- | :--- |\n| 1 | 规划面积 | 平方公里 | 25.4 |\n| 2 | 总投资 | 亿元 | 120 |"
+      );
+
+      const html = markdownToHtml(singleLineTable);
+      expect(html).toContain("<table>");
+      expect(html).toContain("<thead><tr><th>序号</th><th>指标名称</th><th>单位</th><th>目标值</th></tr></thead>");
+      expect(html).toContain("<tbody>");
+      expect(html).toContain("<td>规划面积</td>");
+      expect(html).toContain("<td>120</td>");
+    });
+
+    it("标题与加粗、来源引用、表格粘连自动拆分", () => {
+      const gluedBold = "### 1.1.1 建设地点**项目名称**：本项目位于武汉市。";
+      expect(normalizeMarkdown(gluedBold)).toBe("### 1.1.1 建设地点\n\n**项目名称**：本项目位于武汉市。");
+
+      const gluedRef = "### 1.1.2 编制依据【源:批复文件.docx】根据发改委文件...";
+      expect(normalizeMarkdown(gluedRef)).toBe("### 1.1.2 编制依据\n\n【源:批复文件.docx】根据发改委文件...");
+
+      const gluedTable = "### 1.1.6 主要技术经济指标| 序号 | 指标 || --- | --- || 1 | 产能 |";
+      const normTable = normalizeMarkdown(gluedTable);
+      expect(normTable).toContain("### 1.1.6 主要技术经济指标\n\n| 序号 | 指标 |");
+      expect(normTable).toContain("| 1 | 产能 |");
+    });
+
+    it("最低级标题（H3/H4）与中文句式词粘连自动拆解", () => {
+      const glued1 = "### 1.1.6 主要技术经济指标项目主要技术经济指标如下表所示：";
+      expect(normalizeMarkdown(glued1)).toBe("### 1.1.6 主要技术经济指标\n\n项目主要技术经济指标如下表所示：");
+
+      const glued2 = "### 1.1.7 绩效目标本项目绩效目标涵盖生态效益与经济效益。";
+      expect(normalizeMarkdown(glued2)).toBe("### 1.1.7 绩效目标\n\n本项目绩效目标涵盖生态效益与经济效益。");
+
+      const glued3 = "### 1.2.1 基本信息项目单位为省水利投资集团有限公司。";
+      expect(normalizeMarkdown(glued3)).toBe("### 1.2.1 基本信息\n\n项目单位为省水利投资集团有限公司。");
+
+      const glued4 = "### 1.1.3 建设规模根据批复规划，总用地面积为 500 亩。";
+      expect(normalizeMarkdown(glued4)).toBe("### 1.1.3 建设规模\n\n根据批复规划，总用地面积为 500 亩。");
+
+      const glued5 = "### 1.1.4 投资估算总投资约为 3.5 亿元。";
+      expect(normalizeMarkdown(glued5)).toBe("### 1.1.4 投资估算\n\n总投资约为 3.5 亿元。");
+    });
+
+    it("支持已知大纲标题库精确断行", () => {
+      const customGlued = "### 1.1.6 特殊定制标题这里是自定义的正文开始...";
+      const knownHeadings = ["1.1.6 特殊定制标题"];
+      const normalized = normalizeMarkdown(customGlued, knownHeadings);
+      expect(normalized).toBe("### 1.1.6 特殊定制标题\n\n这里是自定义的正文开始...");
+    });
+
     it("空值或非字符串防御", () => {
       expect(normalizeMarkdown("")).toBe("");
       expect(normalizeMarkdown(null as unknown as string)).toBe("");
       expect(normalizeMarkdown(undefined as unknown as string)).toBe("");
     });
 
-    it("粘连标题在 extractSubHeadings 中被精准拆分为独立各级标题", () => {
-      const glued = "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称\n正文描述信息...";
+    it("粘连标题在 extractSubHeadings 中被精准拆分为独立纯净标题（不含正文）", () => {
+      const glued = [
+        "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称",
+        "### 1.1.6 主要技术经济指标项目主要技术经济指标如下表所示：",
+        "| 序号 | 指标 || --- | --- || 1 | 库容 |",
+      ].join("\n");
+
       const headings = extractSubHeadings(glued, 1);
-      expect(headings).toHaveLength(3);
-      expect(headings[0]).toEqual({
-        id: "h-ch1-idx0",
-        level: 1,
-        title: "第一章 概述",
-        raw: "# 第一章 概述",
-        index: 0,
-      });
-      expect(headings[1]).toEqual({
-        id: "h-ch1-idx1",
-        level: 2,
-        title: "1.1 项目概况",
-        raw: "## 1.1 项目概况",
-        index: 1,
-      });
-      expect(headings[2]).toEqual({
-        id: "h-ch1-idx2",
-        level: 3,
-        title: "1.1.1 项目名称",
-        raw: "### 1.1.1 项目名称",
-        index: 2,
-      });
+      expect(headings).toHaveLength(4);
+      expect(headings[0].title).toBe("第一章 概述");
+      expect(headings[1].title).toBe("1.1 项目概况");
+      expect(headings[2].title).toBe("1.1.1 项目名称");
+      expect(headings[3].title).toBe("1.1.6 主要技术经济指标");
+      expect(headings[3].title).not.toContain("项目主要技术经济指标如下表所示");
     });
 
-    it("粘连标题在 markdownToHtml 中被正确渲染为独立 HTML 标签而非通篇 h1", () => {
-      const glued = "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称\n正文第一段。\n\n正文第二段。";
+    it("粘连标题与单行表格在 markdownToHtml 中被正确渲染为独立 HTML 标签与表格", () => {
+      const glued = "### 1.1.6 主要技术经济指标项目主要技术经济指标如下：| 序号 | 指标 || --- | --- || 1 | 投资 |";
       const html = markdownToHtml(glued, 1);
-      expect(html).toContain('<h1 id="h-ch1-idx0">第一章 概述</h1>');
-      expect(html).toContain('<h2 id="h-ch1-idx1">1.1 项目概况</h2>');
-      expect(html).toContain('<h3 id="h-ch1-idx2">1.1.1 项目名称</h3>');
-      expect(html).toContain('<p>正文第一段。</p>');
-      expect(html).toContain('<p>正文第二段。</p>');
-      expect(html).not.toContain('<h1 id="h-ch1-idx0">第一章 概述## 1.1');
+      expect(html).toContain('<h3 id="h-ch1-idx0">1.1.6 主要技术经济指标</h3>');
+      expect(html).toContain('<p>项目主要技术经济指标如下：</p>');
+      expect(html).toContain('<table>');
+      expect(html).toContain('<td>投资</td>');
+      expect(html).not.toContain('<h3 id="h-ch1-idx0">1.1.6 主要技术经济指标项目主要技术经济指标');
     });
   });
 });
