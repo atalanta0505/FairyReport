@@ -1,6 +1,6 @@
 # 任务合同 V2-T9 v3 — 窄修复：本地项目资料文件夹系统级唤起（os.startfile 通路）
 
-- 状态：READY_FOR_MAKER（2026-08-25 协调者发现 Tauri shell open 对本地目录 URL pattern 限制，改走引擎端系统级 os.startfile 通路）
+- 状态：ACCEPTED（第 3 轮 PASS；锁定候选 e3a7d6e47f2ba78d47f522546a05dc09e3e4a343）
 - 依据：用户实测截图反馈 `打开资料目录失败: undefined`
 - 精确起始 SHA：`f6137f394142f1cf1b4cfc24d3fe3a4f6be59299`
 - 工作树门禁：`git status --short` 必须干净
