@@ -1,6 +1,6 @@
 # 任务合同 V2-T9 v1 — 桌面主流程 UI（第 1 切片：向导框架 + 项目与资料管理 + 通用知识包同步）
 
-- 状态：READY_FOR_MAKER（2026-08-25 产品负责人批准）
+- 状态：ACCEPTED（第 1 轮 PASS；锁定候选 6736512931bf00855b4c4122021c9e296a7bab49）
 - 依据：`docs/dev-flow/tasks/V2-DESKTOP/00-product-decision-v4.md`（D14/D15/D18 架构 C 桌面主流程定案）
 - 精确起始 SHA：`813b28f1677319cf0ff6e5df195ea3dd572486aa`（已推送远端 master）
 - 工作树门禁：`git status --short` 必须干净
