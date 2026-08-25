@@ -1,6 +1,6 @@
 # 任务合同 V2-T9 v5 — 窄修复：Home.vue 中 KeepAlive 语法合规化（<component :is> 动态组件模式）
 
-- 状态：READY_FOR_MAKER（2026-08-25 产品负责人反馈 KeepAlive 编译报错）
+- 状态：ACCEPTED（第 5 轮 PASS；锁定候选 bb154a0594d611b09a16d4626fb60761e15ad296）
 - 依据：用户截图反馈 `[plugin:vite:vue] <KeepAlive> expects exactly one child component.`
 - 精确起始 SHA：`14d3040c1110034a781b0a82ec4581cbb47c5035`
 - 工作树门禁：`git status --short` 必须干净
