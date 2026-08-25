@@ -1,6 +1,6 @@
 # 任务合同 V2-T9 v2 — 桌面主流程 UI（第 2 切片：Step 1 文件夹协同增强 + Step 2 模板选择与大纲生成/在线编辑）
 
-- 状态：READY_FOR_MAKER（2026-08-25 产品负责人批准）
+- 状态：ACCEPTED（第 2 轮 PASS；锁定候选 ed86991a68bfced448853ca9bc5590b655fc5df5）
 - 依据：`docs/dev-flow/tasks/V2-DESKTOP/00-product-decision-v4.md` 及 2026-08-25 产品负责人关于“本地文件夹协同”与大纲设计的明确反馈
 - 精确起始 SHA：`b8be9b42211910ef61e1273966fbdf1c3bc938b8`（已验收锁定第 1 轮 6736512）
 - 工作树门禁：`git status --short` 必须干净
