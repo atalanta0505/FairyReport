@@ -84,6 +84,44 @@ function setStoredProjectName(name: string | null): void {
   }
 }
 
+export function getOutlineStorageKey(projectName: string): string {
+  return `frl_outline_${projectName}`;
+}
+
+export function loadOutlineFromLocal(
+  projectName: string,
+): { report_type?: string; outline_md?: string; chapters?: ChapterInfo[]; updated_at?: string } | null {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(getOutlineStorageKey(projectName));
+      if (raw) {
+        return JSON.parse(raw);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function saveOutlineToLocal(
+  projectName: string,
+  data: {
+    report_type: string;
+    outline_md: string;
+    chapters: ChapterInfo[];
+    updated_at?: string;
+  },
+): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(getOutlineStorageKey(projectName), JSON.stringify(data));
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export const useProjectStore = defineStore("project", () => {
   const currentStep = ref<number>(getStoredStep());
   const projects = ref<ProjectOut[]>([]);
@@ -98,6 +136,9 @@ export const useProjectStore = defineStore("project", () => {
   const outlineMd = ref<string>("");
   const outlineChapters = ref<ChapterInfo[]>([]);
   const generatingOutline = ref<boolean>(false);
+
+  const lastBaseUrl = ref<string>("");
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const loadingProjects = ref<boolean>(false);
   const loadingMaterials = ref<boolean>(false);
@@ -114,6 +155,7 @@ export const useProjectStore = defineStore("project", () => {
 
   async function loadProjects(baseUrl: string) {
     if (!baseUrl) return;
+    lastBaseUrl.value = baseUrl;
     loadingProjects.value = true;
     error.value = null;
     try {
@@ -129,23 +171,30 @@ export const useProjectStore = defineStore("project", () => {
           currentProject.value = found;
           setStoredProjectName(found.name);
           await loadMaterials(baseUrl, found.name);
+          await loadOutline(baseUrl, found.name);
         } else if (list.length > 0) {
           currentProject.value = list[0];
           setStoredProjectName(list[0].name);
           await loadMaterials(baseUrl, list[0].name);
+          await loadOutline(baseUrl, list[0].name);
         } else {
           currentProject.value = null;
           setStoredProjectName(null);
           materials.value = [];
+          outlineMd.value = "";
+          outlineChapters.value = [];
         }
       } else if (list.length > 0) {
         currentProject.value = list[0];
         setStoredProjectName(list[0].name);
         await loadMaterials(baseUrl, list[0].name);
+        await loadOutline(baseUrl, list[0].name);
       } else {
         currentProject.value = null;
         setStoredProjectName(null);
         materials.value = [];
+        outlineMd.value = "";
+        outlineChapters.value = [];
       }
     } catch (e) {
       error.value = (e as Error).message;
@@ -156,16 +205,19 @@ export const useProjectStore = defineStore("project", () => {
   }
 
   async function selectProject(baseUrl: string, projectName: string) {
+    if (baseUrl) lastBaseUrl.value = baseUrl;
     const p = projects.value.find((item) => item.name === projectName);
     if (p) {
       currentProject.value = p;
       setStoredProjectName(projectName);
       await loadMaterials(baseUrl, projectName);
+      await loadOutline(baseUrl, projectName);
     }
   }
 
   async function createProject(baseUrl: string, name: string): Promise<ProjectOut> {
     if (!baseUrl) throw new Error("引擎未就绪");
+    lastBaseUrl.value = baseUrl;
     error.value = null;
     try {
       const created = await engineApi.createProject(baseUrl, name);
@@ -180,13 +232,23 @@ export const useProjectStore = defineStore("project", () => {
 
   async function deleteProject(baseUrl: string, name: string): Promise<void> {
     if (!baseUrl) throw new Error("引擎未就绪");
+    lastBaseUrl.value = baseUrl;
     error.value = null;
     try {
       await engineApi.deleteProject(baseUrl, name);
+      if (typeof localStorage !== "undefined") {
+        try {
+          localStorage.removeItem(getOutlineStorageKey(name));
+        } catch {
+          // ignore
+        }
+      }
       if (currentProject.value?.name === name) {
         currentProject.value = null;
         setStoredProjectName(null);
         materials.value = [];
+        outlineMd.value = "";
+        outlineChapters.value = [];
       }
       await loadProjects(baseUrl);
     } catch (e) {
@@ -342,7 +404,11 @@ export const useProjectStore = defineStore("project", () => {
     reportTypeOverride?: string,
     projectNameOverride?: string,
   ): Promise<OutlineResult> {
-    const targetProject = projectNameOverride !== undefined ? projectNameOverride : (currentProject.value?.name || "");
+    if (baseUrl) lastBaseUrl.value = baseUrl;
+    const targetProject =
+      projectNameOverride !== undefined
+        ? projectNameOverride
+        : currentProject.value?.name || "";
     const targetType = reportTypeOverride || reportType.value;
     if (!baseUrl) throw new Error("引擎未就绪");
     if (!targetType) throw new Error("请先选择报告类型");
@@ -357,6 +423,9 @@ export const useProjectStore = defineStore("project", () => {
       });
       outlineMd.value = res.outline_md;
       outlineChapters.value = res.chapters;
+      if (targetProject) {
+        await saveOutline(baseUrl, targetProject);
+      }
       return res;
     } catch (e) {
       error.value = (e as Error).message;
@@ -366,13 +435,127 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
-  function setOutlineMd(md: string) {
-    outlineMd.value = md;
-    outlineChapters.value = parseChaptersFromOutline(md);
+  async function loadOutline(
+    baseUrl?: string,
+    projectName?: string,
+  ): Promise<OutlineResult | null> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = projectName || currentProject.value?.name;
+    if (!targetName) {
+      outlineMd.value = "";
+      outlineChapters.value = [];
+      return null;
+    }
+
+    let loaded = false;
+    if (targetUrl) {
+      try {
+        const res = await engineApi.getProjectOutline(targetUrl, targetName);
+        if (
+          res &&
+          (res.outline_md || res.report_type || (res.chapters && res.chapters.length > 0))
+        ) {
+          outlineMd.value = res.outline_md || "";
+          outlineChapters.value =
+            res.chapters && res.chapters.length > 0
+              ? res.chapters
+              : parseChaptersFromOutline(res.outline_md || "");
+          if (res.report_type) {
+            reportType.value = res.report_type;
+          }
+          saveOutlineToLocal(targetName, {
+            report_type: reportType.value,
+            outline_md: outlineMd.value,
+            chapters: outlineChapters.value,
+            updated_at: res.updated_at,
+          });
+          loaded = true;
+          return {
+            outline_md: outlineMd.value,
+            chapters: outlineChapters.value,
+          };
+        }
+      } catch (e) {
+        // engine call failed, fallback to local storage
+      }
+    }
+
+    if (!loaded) {
+      const local = loadOutlineFromLocal(targetName);
+      if (local) {
+        if (local.report_type) {
+          reportType.value = local.report_type;
+        }
+        outlineMd.value = local.outline_md || "";
+        outlineChapters.value =
+          local.chapters && local.chapters.length > 0
+            ? local.chapters
+            : parseChaptersFromOutline(local.outline_md || "");
+        return {
+          outline_md: outlineMd.value,
+          chapters: outlineChapters.value,
+        };
+      } else {
+        outlineMd.value = "";
+        outlineChapters.value = [];
+      }
+    }
+    return null;
   }
 
-  function setReportType(type: string) {
+  async function saveOutline(baseUrl?: string, projectName?: string): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = projectName || currentProject.value?.name;
+    if (!targetName) return;
+
+    const payload = {
+      report_type: reportType.value,
+      outline_md: outlineMd.value,
+      chapters: outlineChapters.value,
+      updated_at: new Date().toISOString(),
+    };
+
+    saveOutlineToLocal(targetName, payload);
+
+    if (targetUrl) {
+      try {
+        await engineApi.saveProjectOutline(targetUrl, targetName, payload);
+      } catch (e) {
+        // non-fatal error
+      }
+    }
+  }
+
+  function triggerAutoSaveOutline(baseUrl?: string, projectName?: string, delayMs = 300) {
+    const targetName = projectName || currentProject.value?.name;
+    if (!targetName) return;
+
+    saveOutlineToLocal(targetName, {
+      report_type: reportType.value,
+      outline_md: outlineMd.value,
+      chapters: outlineChapters.value,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      saveOutline(baseUrl, targetName).catch(() => {});
+    }, delayMs);
+  }
+
+  function setOutlineMd(md: string, baseUrl?: string) {
+    outlineMd.value = md;
+    outlineChapters.value = parseChaptersFromOutline(md);
+    triggerAutoSaveOutline(baseUrl);
+  }
+
+  function setReportType(type: string, baseUrl?: string) {
     reportType.value = type;
+    triggerAutoSaveOutline(baseUrl);
   }
 
   async function openProjectDir(
@@ -404,6 +587,7 @@ export const useProjectStore = defineStore("project", () => {
     outlineMd,
     outlineChapters,
     generatingOutline,
+    lastBaseUrl,
     loadingProjects,
     loadingMaterials,
     ingesting,
@@ -423,7 +607,10 @@ export const useProjectStore = defineStore("project", () => {
     updateGeneric,
     loadTemplates,
     generateOutline,
+    loadOutline,
+    saveOutline,
     setOutlineMd,
     setReportType,
   };
 });
+

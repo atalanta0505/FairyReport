@@ -236,3 +236,46 @@ export async function openProjectDir(
   );
 }
 
+export interface OutlineData {
+  report_type: string;
+  outline_md: string;
+  chapters: ChapterInfo[];
+  updated_at?: string;
+}
+
+/** 获取项目持久化大纲数据 */
+export async function getProjectOutline(
+  baseUrl: string,
+  projectName: string,
+): Promise<OutlineResult & { report_type?: string; updated_at?: string }> {
+  return request<OutlineResult & { report_type?: string; updated_at?: string }>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/outline`,
+    {
+      method: "GET",
+    },
+  );
+}
+
+/** 保存项目大纲数据 */
+export async function saveProjectOutline(
+  baseUrl: string,
+  projectName: string,
+  data: {
+    report_type: string;
+    outline_md: string;
+    chapters?: ChapterInfo[];
+    updated_at?: string;
+  },
+): Promise<OutlineResult & { report_type?: string; updated_at?: string }> {
+  return request<OutlineResult & { report_type?: string; updated_at?: string }>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/outline`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+

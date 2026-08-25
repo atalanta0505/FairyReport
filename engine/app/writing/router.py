@@ -7,11 +7,13 @@
 - 上游 5xx/超时 → 502/504；key 不落盘（仅请求内持有）
 """
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from ..config import settings
 from ..embedding import get_embedder
 from . import templates_loader as tmpl
 from .llm_client import LLMClient, LLMError
@@ -29,10 +31,17 @@ from .refs import strip_fabricated_labels
 from .templates_loader import TemplatesNotInstalled
 from .writer import ChapterWriter, parse_tech_review_result, _build_writing_system_prompt
 
-router = APIRouter(prefix="/writing", tags=["writing"])
+router = APIRouter(tags=["writing"])
 
 
 # ── 请求与响应模型 ──
+class OutlineData(BaseModel):
+    report_type: str = "可行性研究报告"
+    outline_md: str = ""
+    chapters: list[dict] = Field(default_factory=list)
+    updated_at: str = ""
+
+
 class TemplateItemOut(BaseModel):
     report_type: str
     total_words_max: int
@@ -106,8 +115,46 @@ def _sse_event(data: str) -> str:
     return f"data: {data}\n\n"
 
 
-# ── 端点 ──
-@router.get("/templates", response_model=list[TemplateItemOut])
+def _read_outline_file(name: str) -> OutlineData:
+    p = settings.project_dir(name) / "outline.json"
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return OutlineData(**data)
+        except Exception:
+            pass
+    return OutlineData()
+
+
+def _write_outline_file(name: str, data: OutlineData) -> OutlineData:
+    pdir = settings.project_dir(name)
+    pdir.mkdir(parents=True, exist_ok=True)
+    p = pdir / "outline.json"
+    if not data.updated_at:
+        data.updated_at = datetime.now(timezone.utc).isoformat()
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
+    return data
+
+
+# ── 大纲持久化端点 ──
+@router.get("/projects/{name}/outline", response_model=OutlineData)
+@router.get("/writing/projects/{name}/outline", response_model=OutlineData)
+def get_project_outline(name: str):
+    """读取项目大纲持久化文件；不存在则返回默认空数据。"""
+    return _read_outline_file(name)
+
+
+@router.post("/projects/{name}/outline", response_model=OutlineData)
+@router.post("/writing/projects/{name}/outline", response_model=OutlineData)
+def save_project_outline(name: str, data: OutlineData):
+    """保存项目大纲与模板类型到 outline.json。"""
+    return _write_outline_file(name, data)
+
+
+# ── 写作端点 ──
+@router.get("/writing/templates", response_model=list[TemplateItemOut])
 def list_templates():
     """返回 14 种标准投前咨询报告类型及其建议字数预算列表。"""
     items = []
@@ -122,9 +169,9 @@ def list_templates():
     return items
 
 
-@router.post("/outline")
+@router.post("/writing/outline")
 def outline(req: OutlineRequest):
-    """生成大纲 → outline_md + 章节列表。通用包未装→409。"""
+    """生成大纲 → outline_md + 章节列表。通用包未装→409。若 req.project 存在，自动落盘保存。"""
     _require_pack()
     llm = _make_llm(req.llm_config)
     gen = OutlineGenerator(llm, req.report_type, tmpl.get_word_limit(req.report_type))
@@ -135,10 +182,25 @@ def outline(req: OutlineRequest):
 
     titles = _extract_chapter_titles(outline_md)
     chapters = [{"seq": seq, "title": t} for seq, t in sorted(titles.items())]
+
+    if req.project:
+        try:
+            _write_outline_file(
+                req.project,
+                OutlineData(
+                    report_type=req.report_type,
+                    outline_md=outline_md,
+                    chapters=chapters,
+                    updated_at=datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        except Exception:
+            pass
+
     return {"outline_md": outline_md, "chapters": chapters}
 
 
-@router.post("/chapter")
+@router.post("/writing/chapter")
 def chapter(req: ChapterRequest):
     """流式/非流式写作章节（含 RAG、字数预算、适用时技术分析框架）。"""
     _require_pack()
@@ -201,7 +263,7 @@ def _stream_chapter(writer, llm, req, chapter_title, rag_context,
         yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}))
 
 
-@router.post("/review")
+@router.post("/writing/review")
 def review(req: ReviewRequest):
     """技术审阅 → 结构化结果。"""
     llm = _make_llm(req.llm_config)
@@ -217,7 +279,7 @@ def review(req: ReviewRequest):
     return {"raw": raw, "review": parsed}
 
 
-@router.post("/revise")
+@router.post("/writing/revise")
 def revise(req: ReviseRequest):
     """按指令修订章节 → 修订文本。"""
     llm = _make_llm(req.llm_config)
@@ -229,7 +291,7 @@ def revise(req: ReviseRequest):
     return {"revised_text": revised}
 
 
-@router.post("/hints")
+@router.post("/writing/hints")
 def save_hint_endpoint(req: HintSaveRequest):
     """保存章节提示（本地，不需 llm_config）。"""
     from .hints import save_hint
@@ -237,9 +299,10 @@ def save_hint_endpoint(req: HintSaveRequest):
     return {"saved": path}
 
 
-@router.get("/hints/{project}/{ch_seq}")
+@router.get("/writing/hints/{project}/{ch_seq}")
 def get_hint_endpoint(project: str, ch_seq: int):
     """读取章节提示（本地，不需 llm_config）。"""
     from .hints import load_hint, get_predecessor_hints
     hint = load_hint(project, ch_seq)
     return {"ch_seq": ch_seq, "hint": hint}
+

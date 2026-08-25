@@ -291,3 +291,66 @@ def test_list_templates_with_installed_pack(client, installed_pack):
     assert fe["total_words_max"] == 50000
     assert "测试模板规范" in fe["notes"]
 
+
+# ── outline 持久化 ──
+def test_outline_persistence_get_default_when_missing(client):
+    """项目大纲不存在时返回默认结构。"""
+    resp = client.get("/projects/nonexistent_proj/outline")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["report_type"] == "可行性研究报告"
+    assert data["outline_md"] == ""
+    assert data["chapters"] == []
+    assert data["updated_at"] == ""
+
+
+def test_outline_persistence_save_and_get(client):
+    """保存并读取项目大纲持久化数据。"""
+    client.post("/projects", json={"name": "persist_proj"})
+    payload = {
+        "report_type": "产业发展规划报告",
+        "outline_md": "# 第一章 总述\n# 第二章 规划布局",
+        "chapters": [
+            {"seq": 1, "title": "第一章 总述"},
+            {"seq": 2, "title": "第二章 规划布局"},
+        ],
+        "updated_at": "2026-08-25T12:00:00Z",
+    }
+    save_resp = client.post("/projects/persist_proj/outline", json=payload)
+    assert save_resp.status_code == 200
+    saved = save_resp.json()
+    assert saved["report_type"] == "产业发展规划报告"
+    assert saved["outline_md"] == payload["outline_md"]
+    assert len(saved["chapters"]) == 2
+
+    get_resp = client.get("/projects/persist_proj/outline")
+    assert get_resp.status_code == 200
+    loaded = get_resp.json()
+    assert loaded["report_type"] == "产业发展规划报告"
+    assert loaded["outline_md"] == payload["outline_md"]
+    assert len(loaded["chapters"]) == 2
+    assert loaded["chapters"][0]["title"] == "第一章 总述"
+
+
+def test_outline_auto_save_on_generate(client, installed_pack):
+    """调用 /writing/outline 生成大纲时，若包含 project 则自动持久化至项目 outline.json。"""
+    client.post("/projects", json={"name": "auto_save_proj"})
+    _set_llm(LLMStub())
+    gen_resp = client.post("/writing/outline", json={
+        "project": "auto_save_proj",
+        "report_type": "可行性研究报告",
+        "llm_config": LLM_CONFIG,
+    })
+    assert gen_resp.status_code == 200
+    gen_data = gen_resp.json()
+
+    # 验证已自动落盘
+    get_resp = client.get("/projects/auto_save_proj/outline")
+    assert get_resp.status_code == 200
+    outline_data = get_resp.json()
+    assert outline_data["report_type"] == "可行性研究报告"
+    assert outline_data["outline_md"] == gen_data["outline_md"]
+    assert len(outline_data["chapters"]) == len(gen_data["chapters"])
+    assert outline_data["updated_at"] != ""
+
+

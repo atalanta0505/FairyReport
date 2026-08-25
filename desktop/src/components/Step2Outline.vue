@@ -19,7 +19,7 @@ function showMsg(text: string, type: "success" | "error" = "success") {
   }, 4000);
 }
 
-async function ensureTemplates() {
+async function ensureStep2State() {
   if (engine.baseUrl && projectStore.templates.length === 0) {
     try {
       await projectStore.loadTemplates(engine.baseUrl);
@@ -27,15 +27,31 @@ async function ensureTemplates() {
       showMsg(`加载模板失败: ${(e as Error).message}`, "error");
     }
   }
+  if (projectStore.currentProject?.name && !projectStore.outlineMd) {
+    try {
+      await projectStore.loadOutline(engine.baseUrl, projectStore.currentProject.name);
+    } catch {
+      // ignore
+    }
+  }
 }
 
-onMounted(ensureTemplates);
+onMounted(ensureStep2State);
 
 watch(
   () => projectStore.currentStep,
   (step) => {
     if (step === 2) {
-      ensureTemplates();
+      ensureStep2State();
+    }
+  },
+);
+
+watch(
+  () => projectStore.currentProject?.name,
+  (projectName) => {
+    if (projectName && projectStore.currentStep === 2) {
+      projectStore.loadOutline(engine.baseUrl, projectName).catch(() => {});
     }
   },
 );
@@ -44,7 +60,7 @@ watch(
   () => engine.baseUrl,
   (url) => {
     if (url && projectStore.currentStep === 2) {
-      ensureTemplates();
+      ensureStep2State();
     }
   },
 );
@@ -62,7 +78,7 @@ const lineCount = computed(() => {
 });
 
 function onSelectTemplate(reportType: string) {
-  projectStore.setReportType(reportType);
+  projectStore.setReportType(reportType, engine.baseUrl);
 }
 
 async function handleGenerateOutline() {
@@ -89,7 +105,7 @@ async function handleGenerateOutline() {
 
 function onOutlineInput(e: Event) {
   const target = e.target as HTMLTextAreaElement;
-  projectStore.setOutlineMd(target.value);
+  projectStore.setOutlineMd(target.value, engine.baseUrl);
 }
 
 function prevStep() {

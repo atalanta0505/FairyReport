@@ -34,10 +34,13 @@ class MockSessionStorage {
 }
 
 const mockStorage = new MockSessionStorage();
+const mockLocalStorage = new MockSessionStorage();
 (globalThis as any).sessionStorage = mockStorage;
+(globalThis as any).localStorage = mockLocalStorage;
 
 beforeEach(() => {
   mockStorage.clear();
+  mockLocalStorage.clear();
   setActivePinia(createPinia());
   mockFetch.mockReset();
 });
@@ -216,6 +219,52 @@ describe("engineApi 基础接口", () => {
     });
     expect(res.outline_md).toContain("第一章");
     expect(res.chapters).toHaveLength(2);
+  });
+
+  it("getProjectOutline: 获取项目大纲数据", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        report_type: "可行性研究报告",
+        outline_md: "# 第一章 概述",
+        chapters: [{ seq: 1, title: "第一章 概述" }],
+        updated_at: "2026-08-25T12:00:00Z",
+      }),
+    );
+    const res = await engineApi.getProjectOutline(BASE_URL, "项目A");
+    expect(res.report_type).toBe("可行性研究报告");
+    expect(res.outline_md).toBe("# 第一章 概述");
+    expect(res.chapters).toHaveLength(1);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/projects/%E9%A1%B9%E7%9B%AEA/outline`,
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("saveProjectOutline: 保存项目大纲数据", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        report_type: "产业发展规划报告",
+        outline_md: "# 第一章 总述",
+        chapters: [{ seq: 1, title: "第一章 总述" }],
+        updated_at: "2026-08-25T12:00:00Z",
+      }),
+    );
+    await engineApi.saveProjectOutline(BASE_URL, "项目A", {
+      report_type: "产业发展规划报告",
+      outline_md: "# 第一章 总述",
+      chapters: [{ seq: 1, title: "第一章 总述" }],
+    });
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/projects/%E9%A1%B9%E7%9B%AEA/outline`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          report_type: "产业发展规划报告",
+          outline_md: "# 第一章 总述",
+          chapters: [{ seq: 1, title: "第一章 总述" }],
+        }),
+      }),
+    );
   });
 
   it("openProjectDir: 请求引擎在本地打开文件夹", async () => {
@@ -649,5 +698,155 @@ describe("Pinia useProjectStore", () => {
       expect(mockStorage.getItem("frl_current_project")).toBeNull();
     });
   });
+
+  describe("大纲全链路持久化与自动恢复", () => {
+    it("loadOutline: 从引擎成功加载大纲并同步更新 localStorage 备份", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "持久化项目", created_at: "2026-08-25T00:00:00Z" };
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/outline")) {
+          return jsonResponse({
+            report_type: "可行性研究报告",
+            outline_md: "# 第一章 概述\n## 1.1 背景\n# 第二章 结论",
+            chapters: [
+              { seq: 1, title: "第一章 概述" },
+              { seq: 2, title: "第二章 结论" },
+            ],
+            updated_at: "2026-08-25T10:00:00Z",
+          });
+        }
+        return jsonResponse({});
+      });
+
+      const res = await store.loadOutline(BASE_URL, "持久化项目");
+      expect(res).not.toBeNull();
+      expect(store.outlineMd).toContain("第一章 概述");
+      expect(store.outlineChapters).toHaveLength(2);
+      expect(store.reportType).toBe("可行性研究报告");
+
+      // 验证 localStorage 备份写入
+      const localRaw = mockLocalStorage.getItem("frl_outline_持久化项目");
+      expect(localRaw).not.toBeNull();
+      const localData = JSON.parse(localRaw!);
+      expect(localData.outline_md).toContain("第一章 概述");
+    });
+
+    it("loadOutline: 引擎接口异常时自动降级从 localStorage 恢复", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "本地离线项目", created_at: "2026-08-25T00:00:00Z" };
+
+      mockLocalStorage.setItem(
+        "frl_outline_本地离线项目",
+        JSON.stringify({
+          report_type: "产业发展规划报告",
+          outline_md: "# 第一章 规划总论\n# 第二章 产业体系",
+          chapters: [
+            { seq: 1, title: "第一章 规划总论" },
+            { seq: 2, title: "第二章 产业体系" },
+          ],
+        }),
+      );
+
+      mockFetch.mockRejectedValue(new Error("Network Error"));
+
+      const res = await store.loadOutline(BASE_URL, "本地离线项目");
+      expect(res).not.toBeNull();
+      expect(store.reportType).toBe("产业发展规划报告");
+      expect(store.outlineMd).toContain("第一章 规划总论");
+      expect(store.outlineChapters).toHaveLength(2);
+    });
+
+    it("saveOutline: 同步写入引擎与 localStorage", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "保存测试项目", created_at: "2026-08-25T00:00:00Z" };
+      store.reportType = "可行性研究报告";
+      store.setOutlineMd("# 第一章 建设内容");
+
+      mockFetch.mockResolvedValue(jsonResponse({}));
+
+      await store.saveOutline(BASE_URL, "保存测试项目");
+
+      // 验证 localStorage
+      const savedLocal = mockLocalStorage.getItem("frl_outline_保存测试项目");
+      expect(savedLocal).not.toBeNull();
+      expect(JSON.parse(savedLocal!).outline_md).toBe("# 第一章 建设内容");
+
+      // 验证引擎请求
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${BASE_URL}/projects/%E4%BF%9D%E5%AD%98%E6%B5%8B%E8%AF%95%E9%A1%B9%E7%9B%AE/outline`,
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining("第一章 建设内容"),
+        }),
+      );
+    });
+
+    it("setOutlineMd & setReportType: 立即写入 localStorage", () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "实时编辑项目", created_at: "2026-08-25T00:00:00Z" };
+
+      store.setOutlineMd("# 第一章 实时测试");
+      let local = JSON.parse(mockLocalStorage.getItem("frl_outline_实时编辑项目") || "{}");
+      expect(local.outline_md).toBe("# 第一章 实时测试");
+
+      store.setReportType("节能评估报告");
+      local = JSON.parse(mockLocalStorage.getItem("frl_outline_实时编辑项目") || "{}");
+      expect(local.report_type).toBe("节能评估报告");
+    });
+
+    it("selectProject: 切换项目时自动加载并回填目标项目大纲", async () => {
+      const store = useProjectStore();
+      store.projects = [
+        { id: 1, name: "项目甲", created_at: "2026-08-25T00:00:00Z" },
+        { id: 2, name: "项目乙", created_at: "2026-08-25T01:00:00Z" },
+      ];
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/projects/%E9%A1%B9%E7%9B%AE%E4%B9%99/outline")) {
+          return jsonResponse({
+            report_type: "产业发展规划报告",
+            outline_md: "# 第一章 乙项目大纲",
+            chapters: [{ seq: 1, title: "第一章 乙项目大纲" }],
+          });
+        }
+        return jsonResponse([]);
+      });
+
+      await store.selectProject(BASE_URL, "项目乙");
+
+      expect(store.currentProject?.name).toBe("项目乙");
+      expect(store.outlineMd).toBe("# 第一章 乙项目大纲");
+      expect(store.outlineChapters[0].title).toBe("第一章 乙项目大纲");
+      expect(store.reportType).toBe("产业发展规划报告");
+    });
+
+    it("deleteProject: 删除项目时清除其对应 localStorage 大纲备份", async () => {
+      const store = useProjectStore();
+      store.projects = [{ id: 1, name: "废弃项目", created_at: "2026-08-25T00:00:00Z" }];
+      store.currentProject = store.projects[0];
+      mockLocalStorage.setItem("frl_outline_废弃项目", JSON.stringify({ outline_md: "old" }));
+
+      mockFetch.mockImplementation(async (url, opts) => {
+        const u = String(url);
+        const method = opts?.method || "GET";
+        if (method === "DELETE") {
+          return { ok: true, status: 204, json: () => Promise.resolve({}) } as unknown as Response;
+        }
+        if (u.endsWith("/projects") && method === "GET") {
+          return jsonResponse([]);
+        }
+        return jsonResponse({});
+      });
+
+      await store.deleteProject(BASE_URL, "废弃项目");
+      expect(mockLocalStorage.getItem("frl_outline_废弃项目")).toBeNull();
+      expect(store.outlineMd).toBe("");
+      expect(store.outlineChapters).toHaveLength(0);
+    });
+  });
 });
+
 
