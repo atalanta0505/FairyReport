@@ -198,6 +198,18 @@ describe("engineApi 基础接口", () => {
     expect(res.chapters).toHaveLength(2);
   });
 
+  it("openProjectDir: 请求引擎在本地打开文件夹", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ path: "C:\\projects\\项目A\\files" }),
+    );
+    const res = await engineApi.openProjectDir(BASE_URL, "项目A");
+    expect(res.path).toBe("C:\\projects\\项目A\\files");
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/projects/%E9%A1%B9%E7%9B%AEA/open-folder`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("错误响应 → 抛出 EngineApiError 包含 detail", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ detail: "项目已存在：重复项目" }, 409),
@@ -500,6 +512,22 @@ describe("Pinia useProjectStore", () => {
 
     store.setOutlineMd("");
     expect(store.outlineChapters).toHaveLength(0);
+  });
+
+  it("openProjectDir: 通过 store 唤起项目文件夹", async () => {
+    const store = useProjectStore();
+    store.currentProject = { id: 1, name: "项目1", created_at: "2026-08-25T00:00:00Z" };
+
+    mockFetch.mockResolvedValue(
+      jsonResponse({ path: "D:\\projects\\项目1\\files" }),
+    );
+
+    const res = await store.openProjectDir(BASE_URL);
+    expect(res.path).toBe("D:\\projects\\项目1\\files");
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/projects/%E9%A1%B9%E7%9B%AE1/open-folder`,
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 });
 

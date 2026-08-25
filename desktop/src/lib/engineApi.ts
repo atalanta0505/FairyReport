@@ -222,20 +222,17 @@ export async function generateOutline(
   });
 }
 
-/** 获取项目本地 files 目录绝对路径（用于打开文件夹等） */
-export async function getProjectFilesDir(projectName: string): Promise<string> {
-  try {
-    const { localDataDir, join } = await import("@tauri-apps/api/path");
-    const local = await localDataDir();
-    return await join(local, "FairyReport", "projects", projectName, "files");
-  } catch {
-    return `C:\\Users\\Default\\AppData\\Local\\FairyReport\\projects\\${projectName}\\files`;
-  }
+/** 在系统资源管理器中打开项目 files 目录 */
+export async function openProjectDir(
+  baseUrl: string,
+  projectName: string,
+): Promise<{ path: string }> {
+  return request<{ path: string }>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/open-folder`,
+    {
+      method: "POST",
+    },
+  );
 }
 
-/** 在系统资源管理器中打开项目 files 目录 */
-export async function openProjectDir(projectName: string): Promise<void> {
-  const dir = await getProjectFilesDir(projectName);
-  const { open } = await import("@tauri-apps/plugin-shell");
-  await open(dir);
-}

@@ -1,6 +1,8 @@
 """项目路由测试：创建/列出/删除。"""
 import os
 
+from unittest.mock import patch
+
 from engine.app.config import settings
 
 
@@ -29,6 +31,23 @@ def test_list_projects(client):
     assert names == ["a", "b"]
 
 
+def test_open_project_folder(client):
+    client.post("/projects", json={"name": "folder_proj"})
+    with patch("os.startfile", create=True) as mock_startfile:
+        resp = client.post("/projects/folder_proj/open-folder")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "path" in data
+        assert str(settings.files_dir("folder_proj").resolve()) == data["path"]
+        if os.name == "nt":
+            mock_startfile.assert_called_once()
+
+
+def test_open_nonexistent_project_folder_returns_404(client):
+    resp = client.post("/projects/nope/open-folder")
+    assert resp.status_code == 404
+
+
 def test_delete_project_removes_dirs(client):
     client.post("/projects", json={"name": "gone"})
     pdir = settings.project_dir("gone")
@@ -43,3 +62,4 @@ def test_delete_project_removes_dirs(client):
 def test_delete_nonexistent_returns_404(client):
     resp = client.delete("/projects/nope")
     assert resp.status_code == 404
+

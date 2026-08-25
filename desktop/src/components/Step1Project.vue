@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import * as engineApi from "../lib/engineApi";
 import { useAuthStore } from "../stores/auth";
 import { useEngineStore } from "../stores/engine";
 import { useSettingsStore } from "../stores/settings";
@@ -90,8 +89,12 @@ async function handleOpenProjectDir() {
     showMsg("请先创建或选择项目", "error");
     return;
   }
+  if (!engine.baseUrl) {
+    showMsg("引擎未就绪", "error");
+    return;
+  }
   try {
-    await engineApi.openProjectDir(projectStore.currentProject.name);
+    await projectStore.openProjectDir(engine.baseUrl);
   } catch (err) {
     showMsg(`打开资料目录失败: ${(err as Error).message}`, "error");
   }

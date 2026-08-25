@@ -310,6 +310,23 @@ export const useProjectStore = defineStore("project", () => {
     reportType.value = type;
   }
 
+  async function openProjectDir(
+    baseUrl: string,
+    projectName?: string,
+  ): Promise<{ path: string }> {
+    const targetName = projectName || currentProject.value?.name;
+    if (!baseUrl || !targetName) {
+      throw new Error("请先选择项目");
+    }
+    error.value = null;
+    try {
+      return await engineApi.openProjectDir(baseUrl, targetName);
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    }
+  }
+
   return {
     currentStep,
     projects,
@@ -335,6 +352,7 @@ export const useProjectStore = defineStore("project", () => {
     loadMaterials,
     ingestFiles,
     scanMaterials,
+    openProjectDir,
     deleteMaterial,
     checkGenericStatus,
     updateGeneric,

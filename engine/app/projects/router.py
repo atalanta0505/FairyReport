@@ -1,7 +1,10 @@
 """
 项目路由 — 创建/列出/删除项目。
 """
+import os
 import re
+import subprocess
+import sys
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -17,6 +20,15 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 # 项目名：禁止路径分隔符与特殊字符，防目录穿越
 _NAME_RE = re.compile(r"^[^/\\:*?\"<>|\s]+$")
+
+
+def _get_project(session: Session, name: str) -> models.Project:
+    proj = session.execute(
+        select(models.Project).where(models.Project.name == name)
+    ).scalars().first()
+    if not proj:
+        raise HTTPException(status_code=404, detail=f"项目不存在：{name}")
+    return proj
 
 
 class ProjectCreate(BaseModel):
@@ -72,14 +84,31 @@ def list_projects(session: Session = Depends(db_module.get_db)):
     return [ProjectOut.from_orm(r) for r in rows]
 
 
+@router.post("/{name}/open-folder")
+def open_project_folder(name: str, session: Session = Depends(db_module.get_db)):
+    """在系统资源管理器中打开项目 files 目录。"""
+    proj = _get_project(session, name)
+    fdir = settings.files_dir(proj.name)
+    fdir.mkdir(parents=True, exist_ok=True)
+    fpath = str(fdir.resolve())
+    try:
+        if os.name == "nt":
+            os.startfile(fpath)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", fpath])
+        else:
+            subprocess.Popen(["xdg-open", fpath])
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"打开文件夹失败: {e}"
+        )
+    return {"path": fpath}
+
+
 @router.delete("/{name}", status_code=204)
 def delete_project(name: str, session: Session = Depends(db_module.get_db)):
     """删除项目（连同 files 与 vector 目录）。"""
-    proj = session.execute(
-        select(models.Project).where(models.Project.name == name)
-    ).scalars().first()
-    if not proj:
-        raise HTTPException(status_code=404, detail=f"项目不存在：{name}")
+    proj = _get_project(session, name)
 
     session.delete(proj)
     session.commit()
