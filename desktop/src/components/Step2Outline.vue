@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useEngineStore } from "../stores/engine";
 import { useProjectStore } from "../stores/project";
 import { useSettingsStore } from "../stores/settings";
@@ -30,7 +30,24 @@ async function ensureTemplates() {
 }
 
 onMounted(ensureTemplates);
-onActivated(ensureTemplates);
+
+watch(
+  () => projectStore.currentStep,
+  (step) => {
+    if (step === 2) {
+      ensureTemplates();
+    }
+  },
+);
+
+watch(
+  () => engine.baseUrl,
+  (url) => {
+    if (url && projectStore.currentStep === 2) {
+      ensureTemplates();
+    }
+  },
+);
 
 const currentTemplate = computed(() => {
   return projectStore.templates.find((t) => t.report_type === projectStore.reportType);

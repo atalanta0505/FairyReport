@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 import { useAuthStore } from "../stores/auth";
 import { useEngineStore } from "../stores/engine";
 import { useProjectStore } from "../stores/project";
@@ -10,12 +10,6 @@ import Step2Outline from "../components/Step2Outline.vue";
 const auth = useAuthStore();
 const engine = useEngineStore();
 const projectStore = useProjectStore();
-
-const activeStepComp = computed(() => {
-  if (projectStore.currentStep === 1) return Step1Project;
-  if (projectStore.currentStep === 2) return Step2Outline;
-  return null;
-});
 
 const view = ref<"wizard" | "settings">("wizard");
 const mainContentRef = ref<HTMLElement | null>(null);
@@ -161,12 +155,14 @@ async function onLogout() {
     <!-- 主视口内容 -->
     <main ref="mainContentRef" class="main-content">
       <div v-if="view === 'wizard'" class="wizard-content">
-        <KeepAlive>
-          <component :is="activeStepComp" v-if="activeStepComp" />
-        </KeepAlive>
+        <!-- 步骤 1：项目与资料管理 -->
+        <Step1Project v-show="projectStore.currentStep === 1" />
+
+        <!-- 步骤 2：模板与大纲 -->
+        <Step2Outline v-show="projectStore.currentStep === 2" />
 
         <!-- 步骤 3：章节写作（占位） -->
-        <div v-if="projectStore.currentStep === 3" class="step-placeholder">
+        <div v-show="projectStore.currentStep === 3" class="step-placeholder">
           <div class="placeholder-card">
             <span class="placeholder-icon">✍️</span>
             <h3>Step 3：章节流式写作</h3>
@@ -179,7 +175,7 @@ async function onLogout() {
         </div>
 
         <!-- 步骤 4：审阅修改（占位） -->
-        <div v-else-if="projectStore.currentStep === 4" class="step-placeholder">
+        <div v-show="projectStore.currentStep === 4" class="step-placeholder">
           <div class="placeholder-card">
             <span class="placeholder-icon">🔍</span>
             <h3>Step 4：专家审阅与修改</h3>
@@ -192,7 +188,7 @@ async function onLogout() {
         </div>
 
         <!-- 步骤 5：成果导出（占位） -->
-        <div v-else-if="projectStore.currentStep === 5" class="step-placeholder">
+        <div v-show="projectStore.currentStep === 5" class="step-placeholder">
           <div class="placeholder-card">
             <span class="placeholder-icon">📦</span>
             <h3>Step 5：成果格式化导出</h3>
