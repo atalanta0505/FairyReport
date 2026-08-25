@@ -150,13 +150,13 @@ const isCurrentChapterWriting = computed(() => {
   );
 });
 
-// 提取当前所有章节的子标题树
+// 提取当前所有章节的子标题树（过滤掉 H1 级别，因卡片头部已展示章标题）
 const chapterSubHeadingsMap = computed<Record<number, SubHeading[]>>(() => {
   const map: Record<number, SubHeading[]> = {};
   for (const ch of projectStore.outlineChapters) {
     const text = projectStore.chapters[ch.seq];
     if (text && text.trim().length > 0) {
-      map[ch.seq] = extractSubHeadings(text, ch.seq);
+      map[ch.seq] = extractSubHeadings(text, ch.seq).filter((h) => h.level > 1);
     } else {
       map[ch.seq] = [];
     }
@@ -497,7 +497,7 @@ function nextStep() {
                 :title="sub.title"
                 @click="handleSubHeadingClick(ch.seq, sub.id, $event)"
               >
-                <span class="subheading-bullet">{{ sub.level === 1 ? '📌' : sub.level === 2 ? '🔹' : '▪' }}</span>
+                <span class="subheading-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
                 <span class="subheading-text">{{ sub.title }}</span>
               </div>
             </div>
@@ -952,31 +952,31 @@ function nextStep() {
   gap: 6px;
   padding: 3px 8px;
   border-radius: 4px;
-  font-size: 12px;
-  color: #475569;
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
+  overflow: hidden;
 }
 .subheading-item:hover {
   background: #eff6ff;
   color: #2563eb;
 }
-.subheading-item.level-1 {
-  font-weight: 600;
-  color: #1e293b;
-}
 .subheading-item.level-2 {
   padding-left: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
 }
 .subheading-item.level-3 {
-  padding-left: 18px;
+  padding-left: 20px;
   font-size: 11.5px;
+  font-weight: 400;
   color: #64748b;
 }
 .subheading-item.level-4 {
-  padding-left: 26px;
+  padding-left: 28px;
   font-size: 11px;
+  font-weight: 400;
   color: #94a3b8;
 }
 
@@ -1186,13 +1186,13 @@ function nextStep() {
 /* 排版模式就地富文本编辑画布样式 */
 .rich-rendered-editor {
   flex: 1;
-  padding: 24px 32px;
+  padding: 28px 36px;
   min-height: 480px;
   max-height: calc(100vh - 250px);
   overflow-y: auto;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
-  font-size: 15px;
-  line-height: 1.85;
+  font-size: 10.5pt;
+  line-height: 1.8;
   color: #1e293b;
   background: #ffffff;
   outline: none;
@@ -1211,94 +1211,103 @@ function nextStep() {
 }
 
 /* 深度排版元素样式 */
-:deep(.rich-rendered-editor h1) {
-  font-size: 22px;
+.rich-rendered-editor :deep(h1) {
+  font-size: 16pt;
   font-weight: 700;
   color: #0f172a;
-  margin: 24px 0 14px 0;
+  margin: 24px 0 12px 0;
   padding-bottom: 8px;
   border-bottom: 2px solid #e2e8f0;
   scroll-margin-top: 16px;
 }
-:deep(.rich-rendered-editor h2) {
-  font-size: 18px;
+.rich-rendered-editor :deep(h2) {
+  font-size: 14pt;
   font-weight: 600;
   color: #1e293b;
   margin: 20px 0 10px 0;
-  padding-bottom: 6px;
+  padding-bottom: 4px;
   border-bottom: 1px solid #f1f5f9;
   scroll-margin-top: 16px;
 }
-:deep(.rich-rendered-editor h3) {
-  font-size: 16px;
+.rich-rendered-editor :deep(h3) {
+  font-size: 12pt;
   font-weight: 600;
   color: #334155;
   margin: 16px 0 8px 0;
   scroll-margin-top: 16px;
 }
-:deep(.rich-rendered-editor h4) {
-  font-size: 15px;
+.rich-rendered-editor :deep(h4) {
+  font-size: 10.5pt;
   font-weight: 600;
   color: #475569;
   margin: 12px 0 6px 0;
   scroll-margin-top: 16px;
 }
-:deep(.rich-rendered-editor p) {
-  margin: 0 0 14px 0;
+.rich-rendered-editor :deep(p) {
+  font-size: 10.5pt;
+  font-weight: 400;
   color: #334155;
+  line-height: 1.8;
+  margin: 0 0 14px 0;
+  text-indent: 2em;
   text-align: justify;
 }
-:deep(.rich-rendered-editor strong) {
-  font-weight: 700;
+.rich-rendered-editor :deep(strong) {
+  font-weight: 600;
   color: #0f172a;
 }
-:deep(.rich-rendered-editor em) {
+.rich-rendered-editor :deep(em) {
   font-style: italic;
   color: #475569;
 }
-:deep(.rich-rendered-editor blockquote) {
+.rich-rendered-editor :deep(blockquote) {
   margin: 14px 0;
   padding: 10px 16px;
   background: #f8fafc;
   border-left: 4px solid #3b82f6;
   border-radius: 0 6px 6px 0;
   color: #475569;
-  font-size: 14px;
+  font-size: 10.5pt;
 }
-:deep(.rich-rendered-editor blockquote p) {
+.rich-rendered-editor :deep(blockquote p) {
   margin: 0;
+  text-indent: 0;
+  font-size: 10.5pt;
 }
-:deep(.rich-rendered-editor table) {
+.rich-rendered-editor :deep(table) {
   width: 100%;
   border-collapse: collapse;
   margin: 16px 0;
-  font-size: 14px;
+  font-size: 10.5pt;
 }
-:deep(.rich-rendered-editor th),
-:deep(.rich-rendered-editor td) {
+.rich-rendered-editor :deep(th),
+.rich-rendered-editor :deep(td) {
   border: 1px solid #cbd5e1;
   padding: 8px 12px;
   text-align: left;
+  font-size: 10.5pt;
 }
-:deep(.rich-rendered-editor th) {
+.rich-rendered-editor :deep(th) {
   background: #f1f5f9;
   font-weight: 600;
   color: #1e293b;
 }
-:deep(.rich-rendered-editor tr:nth-child(even)) {
+.rich-rendered-editor :deep(tr:nth-child(even)) {
   background: #f8fafc;
 }
-:deep(.rich-rendered-editor ul),
-:deep(.rich-rendered-editor ol) {
+.rich-rendered-editor :deep(ul),
+.rich-rendered-editor :deep(ol) {
   margin: 0 0 14px 0;
   padding-left: 24px;
   color: #334155;
 }
-:deep(.rich-rendered-editor li) {
+.rich-rendered-editor :deep(li) {
+  font-size: 10.5pt;
+  font-weight: 400;
   margin-bottom: 6px;
-  line-height: 1.7;
+  line-height: 1.8;
 }
-:deep(.rich-rendered-editor pre) {
+.rich-rendered-editor :deep(pre) {
   background: #0f172a;
   color: #e2e8f0;
   padding: 12px 16px;
@@ -1308,7 +1317,7 @@ function nextStep() {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
 }
-:deep(.rich-rendered-editor code) {
+.rich-rendered-editor :deep(code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   background: #f1f5f9;
   color: #0969da;
@@ -1316,17 +1325,17 @@ function nextStep() {
   border-radius: 4px;
   font-size: 0.9em;
 }
-:deep(.rich-rendered-editor pre code) {
+.rich-rendered-editor :deep(pre code) {
   background: transparent;
   color: inherit;
   padding: 0;
 }
-:deep(.rich-rendered-editor hr) {
+.rich-rendered-editor :deep(hr) {
   border: none;
   border-top: 1px solid #e2e8f0;
   margin: 20px 0;
 }
-:deep(.rich-rendered-editor .ref-badge) {
+.rich-rendered-editor :deep(.ref-badge) {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -1358,6 +1367,7 @@ function nextStep() {
     box-shadow: none;
   }
 }
+.rich-rendered-editor :deep(.heading-anchor-pulse),
 :deep(.heading-anchor-pulse) {
   animation: headingPulse 1.5s ease-out forwards;
 }

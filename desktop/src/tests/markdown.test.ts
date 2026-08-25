@@ -5,6 +5,7 @@ import {
   formatInline,
   htmlToMarkdown,
   markdownToHtml,
+  normalizeMarkdown,
   renderMarkdown,
   unescapeHtml,
 } from "../lib/markdown";
@@ -251,6 +252,70 @@ describe("Markdown 解析与排版工具", () => {
       const md = htmlToMarkdown(html);
       expect(md).toContain("> 重点指示第一条\n> 重点指示第二条");
       expect(md).toContain("```rust\nfn main() {\n    println!(\"hello\");\n}\n```");
+    });
+  });
+
+  describe("Markdown 预处理与标题断行规范化 (normalizeMarkdown)", () => {
+    it("自动解开粘连的各级标题", () => {
+      const glued = "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称\n本工程位于长江中下游流域。";
+      const normalized = normalizeMarkdown(glued);
+      expect(normalized).toContain("# 第一章 概述\n\n## 1.1 项目概况\n\n### 1.1.1 项目名称\n本工程位于长江中下游流域。");
+    });
+
+    it("正文紧邻标题自动补双换行", () => {
+      const text = "这是前置段落描述。## 2.1 建设规划### 2.1.1 总体布局";
+      const normalized = normalizeMarkdown(text);
+      expect(normalized).toBe("这是前置段落描述。\n\n## 2.1 建设规划\n\n### 2.1.1 总体布局");
+    });
+
+    it("表格与前文粘连时自动规范化换行", () => {
+      const text = "说明文字| 表头1 | 表头2 |\n| --- | --- |\n| 单元格1 | 单元格2 |";
+      const normalized = normalizeMarkdown(text);
+      expect(normalized).toContain("说明文字\n\n| 表头1 | 表头2 |\n| --- | --- |\n| 单元格1 | 单元格2 |");
+    });
+
+    it("空值或非字符串防御", () => {
+      expect(normalizeMarkdown("")).toBe("");
+      expect(normalizeMarkdown(null as unknown as string)).toBe("");
+      expect(normalizeMarkdown(undefined as unknown as string)).toBe("");
+    });
+
+    it("粘连标题在 extractSubHeadings 中被精准拆分为独立各级标题", () => {
+      const glued = "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称\n正文描述信息...";
+      const headings = extractSubHeadings(glued, 1);
+      expect(headings).toHaveLength(3);
+      expect(headings[0]).toEqual({
+        id: "h-ch1-idx0",
+        level: 1,
+        title: "第一章 概述",
+        raw: "# 第一章 概述",
+        index: 0,
+      });
+      expect(headings[1]).toEqual({
+        id: "h-ch1-idx1",
+        level: 2,
+        title: "1.1 项目概况",
+        raw: "## 1.1 项目概况",
+        index: 1,
+      });
+      expect(headings[2]).toEqual({
+        id: "h-ch1-idx2",
+        level: 3,
+        title: "1.1.1 项目名称",
+        raw: "### 1.1.1 项目名称",
+        index: 2,
+      });
+    });
+
+    it("粘连标题在 markdownToHtml 中被正确渲染为独立 HTML 标签而非通篇 h1", () => {
+      const glued = "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称\n正文第一段。\n\n正文第二段。";
+      const html = markdownToHtml(glued, 1);
+      expect(html).toContain('<h1 id="h-ch1-idx0">第一章 概述</h1>');
+      expect(html).toContain('<h2 id="h-ch1-idx1">1.1 项目概况</h2>');
+      expect(html).toContain('<h3 id="h-ch1-idx2">1.1.1 项目名称</h3>');
+      expect(html).toContain('<p>正文第一段。</p>');
+      expect(html).toContain('<p>正文第二段。</p>');
+      expect(html).not.toContain('<h1 id="h-ch1-idx0">第一章 概述## 1.1');
     });
   });
 });

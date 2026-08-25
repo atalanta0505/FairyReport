@@ -96,6 +96,16 @@ function isTableSeparator(line: string): boolean {
   return cells.every((cell) => /^:?-{1,}:?$/.test(cell.trim()));
 }
 
+export function normalizeMarkdown(md: string): string {
+  if (!md || typeof md !== "string") return "";
+  let text = md.replace(/\r\n/g, "\n");
+  // 核心：在所有非换行符紧邻的 #{1,6}\s+ 前面强制补双换行符
+  text = text.replace(/([^\n])\s*(#{1,6}\s+)/g, "$1\n\n$2");
+  // 表格与前置文本粘连时规范化换行
+  text = text.replace(/^([^|\n].*?)(\|.+?\|\s*\n\s*\|[-: ]+?\|)/gm, "$1\n\n$2");
+  return text;
+}
+
 /**
  * 提取 Markdown 中的子标题列表（H1~H4），带锚点 ID
  */
@@ -104,7 +114,8 @@ export function extractSubHeadings(md: string, chapterSeq?: number): SubHeading[
     return [];
   }
 
-  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  const normalized = normalizeMarkdown(md);
+  const lines = normalized.split("\n");
   const headings: SubHeading[] = [];
   let index = 0;
   let inCodeBlock = false;
@@ -153,7 +164,8 @@ export function markdownToHtml(md: string, chapterSeq?: number): string {
     return "";
   }
 
-  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  const normalized = normalizeMarkdown(md);
+  const lines = normalized.split("\n");
   const htmlParts: string[] = [];
   let i = 0;
   let headingIndex = 0;
