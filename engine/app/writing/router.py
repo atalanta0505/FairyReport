@@ -42,6 +42,15 @@ class OutlineData(BaseModel):
     updated_at: str = ""
 
 
+class ChaptersData(BaseModel):
+    chapters: dict[str, str] = Field(default_factory=dict)
+    updated_at: str = ""
+
+
+class ChapterSaveRequest(BaseModel):
+    text: str = ""
+
+
 class TemplateItemOut(BaseModel):
     report_type: str
     total_words_max: int
@@ -138,6 +147,29 @@ def _write_outline_file(name: str, data: OutlineData) -> OutlineData:
     return data
 
 
+def _read_chapters_file(name: str) -> ChaptersData:
+    p = settings.project_dir(name) / "chapters.json"
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return ChaptersData(**data)
+        except Exception:
+            pass
+    return ChaptersData()
+
+
+def _write_chapters_file(name: str, data: ChaptersData) -> ChaptersData:
+    pdir = settings.project_dir(name)
+    pdir.mkdir(parents=True, exist_ok=True)
+    p = pdir / "chapters.json"
+    if not data.updated_at:
+        data.updated_at = datetime.now(timezone.utc).isoformat()
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
+    return data
+
+
 # ── 大纲持久化端点 ──
 @router.get("/projects/{name}/outline", response_model=OutlineData)
 @router.get("/writing/projects/{name}/outline", response_model=OutlineData)
@@ -151,6 +183,56 @@ def get_project_outline(name: str):
 def save_project_outline(name: str, data: OutlineData):
     """保存项目大纲与模板类型到 outline.json。"""
     return _write_outline_file(name, data)
+
+
+# ── 章节持久化端点 ──
+@router.get("/projects/{name}/chapters", response_model=ChaptersData)
+@router.get("/writing/projects/{name}/chapters", response_model=ChaptersData)
+def get_project_chapters(name: str):
+    """读取项目章节持久化数据；不存在则返回空映射。"""
+    return _read_chapters_file(name)
+
+
+@router.post("/projects/{name}/chapters/{seq}", response_model=ChaptersData)
+@router.post("/writing/projects/{name}/chapters/{seq}", response_model=ChaptersData)
+def save_project_chapter(name: str, seq: int, req: ChapterSaveRequest):
+    """保存单章 markdown 内容到 chapters.json 并落盘 chapters/chapter_{seq}.md。"""
+    data = _read_chapters_file(name)
+    data.chapters[str(seq)] = req.text
+    data.updated_at = datetime.now(timezone.utc).isoformat()
+    _write_chapters_file(name, data)
+
+    ch_dir = settings.project_dir(name) / "chapters"
+    ch_dir.mkdir(parents=True, exist_ok=True)
+    md_file = ch_dir / f"chapter_{seq}.md"
+    try:
+        with open(md_file, "w", encoding="utf-8") as f:
+            f.write(req.text)
+    except Exception:
+        pass
+
+    return data
+
+
+@router.delete("/projects/{name}/chapters/{seq}")
+@router.delete("/writing/projects/{name}/chapters/{seq}")
+def delete_project_chapter(name: str, seq: int):
+    """从 chapters.json 中移除单章并删除对应 markdown 文件。"""
+    data = _read_chapters_file(name)
+    if str(seq) in data.chapters:
+        del data.chapters[str(seq)]
+        data.updated_at = datetime.now(timezone.utc).isoformat()
+        _write_chapters_file(name, data)
+
+    md_file = settings.project_dir(name) / "chapters" / f"chapter_{seq}.md"
+    if md_file.exists():
+        try:
+            md_file.unlink()
+        except Exception:
+            pass
+
+    return {"ok": True, "seq": seq}
+
 
 
 # ── 写作端点 ──

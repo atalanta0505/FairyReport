@@ -88,6 +88,10 @@ export function getOutlineStorageKey(projectName: string): string {
   return `frl_outline_${projectName}`;
 }
 
+export function getChaptersStorageKey(projectName: string): string {
+  return `frl_chapters_${projectName}`;
+}
+
 export function loadOutlineFromLocal(
   projectName: string,
 ): { report_type?: string; outline_md?: string; chapters?: ChapterInfo[]; updated_at?: string } | null {
@@ -122,6 +126,46 @@ export function saveOutlineToLocal(
   }
 }
 
+export function loadChaptersFromLocal(
+  projectName: string,
+): Record<number, string> | null {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(getChaptersStorageKey(projectName));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const result: Record<number, string> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          const num = Number(k);
+          if (!isNaN(num) && typeof v === "string") {
+            result[num] = v;
+          }
+        }
+        return result;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function saveChaptersToLocal(
+  projectName: string,
+  chapters: Record<number, string>,
+): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(
+        getChaptersStorageKey(projectName),
+        JSON.stringify(chapters),
+      );
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export const useProjectStore = defineStore("project", () => {
   const currentStep = ref<number>(getStoredStep());
   const projects = ref<ProjectOut[]>([]);
@@ -136,6 +180,15 @@ export const useProjectStore = defineStore("project", () => {
   const outlineMd = ref<string>("");
   const outlineChapters = ref<ChapterInfo[]>([]);
   const generatingOutline = ref<boolean>(false);
+
+  // Step 3 章节流式写作状态
+  const chapters = ref<Record<number, string>>({});
+  const chapterStatuses = ref<Record<number, "idle" | "writing" | "completed" | "error">>({});
+  const selectedChapterSeq = ref<number>(1);
+  const batchWriting = ref<boolean>(false);
+  const currentWritingSeq = ref<number | null>(null);
+  let activeStopWriting: (() => void) | null = null;
+  const chapterDebounceTimers: Record<number, ReturnType<typeof setTimeout>> = {};
 
   const lastBaseUrl = ref<string>("");
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -172,29 +225,36 @@ export const useProjectStore = defineStore("project", () => {
           setStoredProjectName(found.name);
           await loadMaterials(baseUrl, found.name);
           await loadOutline(baseUrl, found.name);
+          await loadChapters(baseUrl, found.name);
         } else if (list.length > 0) {
           currentProject.value = list[0];
           setStoredProjectName(list[0].name);
           await loadMaterials(baseUrl, list[0].name);
           await loadOutline(baseUrl, list[0].name);
+          await loadChapters(baseUrl, list[0].name);
         } else {
           currentProject.value = null;
           setStoredProjectName(null);
           materials.value = [];
           outlineMd.value = "";
           outlineChapters.value = [];
+          chapters.value = {};
+          chapterStatuses.value = {};
         }
       } else if (list.length > 0) {
         currentProject.value = list[0];
         setStoredProjectName(list[0].name);
         await loadMaterials(baseUrl, list[0].name);
         await loadOutline(baseUrl, list[0].name);
+        await loadChapters(baseUrl, list[0].name);
       } else {
         currentProject.value = null;
         setStoredProjectName(null);
         materials.value = [];
         outlineMd.value = "";
         outlineChapters.value = [];
+        chapters.value = {};
+        chapterStatuses.value = {};
       }
     } catch (e) {
       error.value = (e as Error).message;
@@ -212,6 +272,7 @@ export const useProjectStore = defineStore("project", () => {
       setStoredProjectName(projectName);
       await loadMaterials(baseUrl, projectName);
       await loadOutline(baseUrl, projectName);
+      await loadChapters(baseUrl, projectName);
     }
   }
 
@@ -239,6 +300,7 @@ export const useProjectStore = defineStore("project", () => {
       if (typeof localStorage !== "undefined") {
         try {
           localStorage.removeItem(getOutlineStorageKey(name));
+          localStorage.removeItem(getChaptersStorageKey(name));
         } catch {
           // ignore
         }
@@ -249,6 +311,8 @@ export const useProjectStore = defineStore("project", () => {
         materials.value = [];
         outlineMd.value = "";
         outlineChapters.value = [];
+        chapters.value = {};
+        chapterStatuses.value = {};
       }
       await loadProjects(baseUrl);
     } catch (e) {
@@ -558,6 +622,252 @@ export const useProjectStore = defineStore("project", () => {
     triggerAutoSaveOutline(baseUrl);
   }
 
+  async function loadChapters(
+    baseUrl?: string,
+    projectName?: string,
+  ): Promise<Record<number, string>> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = projectName || currentProject.value?.name;
+    if (!targetName) {
+      chapters.value = {};
+      chapterStatuses.value = {};
+      return {};
+    }
+
+    let loaded = false;
+    if (targetUrl) {
+      try {
+        const res = await engineApi.getProjectChapters(targetUrl, targetName);
+        if (res && res.chapters) {
+          const newChaps: Record<number, string> = {};
+          const newStatuses: Record<number, "idle" | "writing" | "completed" | "error"> = {};
+          for (const [k, v] of Object.entries(res.chapters)) {
+            const seq = Number(k);
+            if (!isNaN(seq)) {
+              newChaps[seq] = v;
+              newStatuses[seq] = v.trim().length > 0 ? "completed" : "idle";
+            }
+          }
+          chapters.value = newChaps;
+          chapterStatuses.value = newStatuses;
+          saveChaptersToLocal(targetName, newChaps);
+          loaded = true;
+          return newChaps;
+        }
+      } catch {
+        // fallback to local
+      }
+    }
+
+    if (!loaded) {
+      const local = loadChaptersFromLocal(targetName);
+      if (local) {
+        chapters.value = local;
+        const newStatuses: Record<number, "idle" | "writing" | "completed" | "error"> = {};
+        for (const [seqStr, v] of Object.entries(local)) {
+          const seq = Number(seqStr);
+          newStatuses[seq] = v.trim().length > 0 ? "completed" : "idle";
+        }
+        chapterStatuses.value = newStatuses;
+        return local;
+      } else {
+        chapters.value = {};
+        chapterStatuses.value = {};
+      }
+    }
+    return {};
+  }
+
+  async function saveChapter(
+    baseUrl?: string,
+    seq?: number,
+    text?: string,
+    immediate = false,
+  ): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = currentProject.value?.name;
+    const targetSeq = seq !== undefined ? seq : selectedChapterSeq.value;
+    const targetText = text !== undefined ? text : chapters.value[targetSeq] || "";
+
+    chapters.value[targetSeq] = targetText;
+    if (targetText.trim().length > 0) {
+      chapterStatuses.value[targetSeq] = "completed";
+    }
+
+    if (targetName) {
+      saveChaptersToLocal(targetName, chapters.value);
+    }
+
+    if (!targetUrl || !targetName) return;
+
+    const doSave = async () => {
+      try {
+        await engineApi.saveProjectChapter(targetUrl, targetName, targetSeq, targetText);
+      } catch {
+        // non-fatal
+      }
+    };
+
+    if (immediate) {
+      await doSave();
+    } else {
+      if (chapterDebounceTimers[targetSeq]) {
+        clearTimeout(chapterDebounceTimers[targetSeq]);
+      }
+      chapterDebounceTimers[targetSeq] = setTimeout(doSave, 300);
+    }
+  }
+
+  async function deleteChapter(baseUrl?: string, seq?: number): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    const targetName = currentProject.value?.name;
+    const targetSeq = seq !== undefined ? seq : selectedChapterSeq.value;
+
+    delete chapters.value[targetSeq];
+    chapterStatuses.value[targetSeq] = "idle";
+
+    if (targetName) {
+      saveChaptersToLocal(targetName, chapters.value);
+      if (targetUrl) {
+        try {
+          await engineApi.deleteProjectChapter(targetUrl, targetName, targetSeq);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  function selectChapter(seq: number) {
+    selectedChapterSeq.value = seq;
+  }
+
+  function stopWriting() {
+    batchWriting.value = false;
+    if (activeStopWriting) {
+      activeStopWriting();
+      activeStopWriting = null;
+    }
+    currentWritingSeq.value = null;
+  }
+
+  async function writeSingleChapterStream(
+    baseUrl: string,
+    seq: number,
+    llmConfig: LLMConfig,
+    hint?: string,
+  ): Promise<void> {
+    if (baseUrl) lastBaseUrl.value = baseUrl;
+    const targetName = currentProject.value?.name || "";
+    if (!baseUrl) throw new Error("引擎未就绪");
+    if (!outlineMd.value) throw new Error("请先生成或设置大纲内容");
+
+    if (activeStopWriting) {
+      activeStopWriting();
+      activeStopWriting = null;
+    }
+
+    selectedChapterSeq.value = seq;
+    currentWritingSeq.value = seq;
+    chapterStatuses.value[seq] = "writing";
+    chapters.value[seq] = "";
+    if (targetName) {
+      saveChaptersToLocal(targetName, chapters.value);
+    }
+
+    // 汇总前序章节
+    const predecessor_chapters: Record<string, string> = {};
+    for (let i = 1; i < seq; i++) {
+      if (chapters.value[i]) {
+        predecessor_chapters[String(i)] = chapters.value[i];
+      }
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const stop = engineApi.streamChapterWriting(
+        baseUrl,
+        {
+          project: targetName,
+          report_type: reportType.value,
+          outline_md: outlineMd.value,
+          chapter_seq: seq,
+          stream: true,
+          llm_config: llmConfig,
+          topic: targetName,
+          predecessor_chapters,
+          writing_hint: hint || "",
+        },
+        (chunk) => {
+          chapters.value[seq] = (chapters.value[seq] || "") + chunk;
+          if (targetName) {
+            saveChaptersToLocal(targetName, chapters.value);
+          }
+        },
+        async () => {
+          chapterStatuses.value[seq] = "completed";
+          currentWritingSeq.value = null;
+          activeStopWriting = null;
+          if (targetName) {
+            saveChaptersToLocal(targetName, chapters.value);
+            try {
+              await engineApi.saveProjectChapter(baseUrl, targetName, seq, chapters.value[seq]);
+            } catch {
+              // ignore
+            }
+          }
+          resolve();
+        },
+        (err) => {
+          chapterStatuses.value[seq] = "error";
+          currentWritingSeq.value = null;
+          activeStopWriting = null;
+          error.value = err.message;
+          reject(err);
+        },
+      );
+
+      activeStopWriting = () => {
+        stop();
+        if (chapterStatuses.value[seq] === "writing") {
+          chapterStatuses.value[seq] = chapters.value[seq] ? "completed" : "idle";
+        }
+        currentWritingSeq.value = null;
+        activeStopWriting = null;
+        resolve();
+      };
+    });
+  }
+
+  async function writeAllChapters(
+    baseUrl: string,
+    llmConfig: LLMConfig,
+  ): Promise<void> {
+    if (batchWriting.value) return;
+    const targetChapters = outlineChapters.value;
+    if (targetChapters.length === 0) {
+      throw new Error("大纲中暂无章节");
+    }
+
+    batchWriting.value = true;
+    error.value = null;
+
+    try {
+      for (const ch of targetChapters) {
+        if (!batchWriting.value) break;
+        selectedChapterSeq.value = ch.seq;
+        await writeSingleChapterStream(baseUrl, ch.seq, llmConfig);
+      }
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      batchWriting.value = false;
+      currentWritingSeq.value = null;
+    }
+  }
+
   async function openProjectDir(
     baseUrl: string,
     projectName?: string,
@@ -587,6 +897,11 @@ export const useProjectStore = defineStore("project", () => {
     outlineMd,
     outlineChapters,
     generatingOutline,
+    chapters,
+    chapterStatuses,
+    selectedChapterSeq,
+    batchWriting,
+    currentWritingSeq,
     lastBaseUrl,
     loadingProjects,
     loadingMaterials,
@@ -611,6 +926,13 @@ export const useProjectStore = defineStore("project", () => {
     saveOutline,
     setOutlineMd,
     setReportType,
+    loadChapters,
+    saveChapter,
+    deleteChapter,
+    selectChapter,
+    writeSingleChapterStream,
+    writeAllChapters,
+    stopWriting,
   };
 });
 

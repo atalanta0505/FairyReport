@@ -354,3 +354,64 @@ def test_outline_auto_save_on_generate(client, installed_pack):
     assert outline_data["updated_at"] != ""
 
 
+# ── chapters 持久化 ──
+def test_chapters_persistence_get_default_when_missing(client):
+    """项目章节不存在时返回空字典映射。"""
+    resp = client.get("/projects/nonexistent_ch_proj/chapters")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["chapters"] == {}
+    assert data["updated_at"] == ""
+
+
+def test_chapters_persistence_save_and_get(client):
+    """保存章节内容并在 chapters.json 与单个 markdown 文件中落盘。"""
+    from engine.app.config import settings
+    client.post("/projects", json={"name": "persist_ch_proj"})
+
+    r1 = client.post("/projects/persist_ch_proj/chapters/1", json={"text": "# 第一章 概述\n项目总体概述正文。"})
+    assert r1.status_code == 200
+    assert r1.json()["chapters"]["1"] == "# 第一章 概述\n项目总体概述正文。"
+
+    r2 = client.post("/projects/persist_ch_proj/chapters/2", json={"text": "# 第二章 建设背景\n建设必要性分析。"})
+    assert r2.status_code == 200
+    assert r2.json()["chapters"]["2"] == "# 第二章 建设背景\n建设必要性分析。"
+
+    # 验证 GET 获取全部章节
+    get_resp = client.get("/projects/persist_ch_proj/chapters")
+    assert get_resp.status_code == 200
+    all_chapters = get_resp.json()
+    assert len(all_chapters["chapters"]) == 2
+    assert all_chapters["chapters"]["1"] == "# 第一章 概述\n项目总体概述正文。"
+    assert all_chapters["chapters"]["2"] == "# 第二章 建设背景\n建设必要性分析。"
+
+    # 验证 markdown 单文件存在
+    ch1_file = settings.project_dir("persist_ch_proj") / "chapters" / "chapter_1.md"
+    assert ch1_file.exists()
+    assert ch1_file.read_text(encoding="utf-8") == "# 第一章 概述\n项目总体概述正文。"
+
+
+def test_chapters_persistence_delete(client):
+    """删除单章内容，同时更新 chapters.json 并删除 markdown 文件。"""
+    from engine.app.config import settings
+    client.post("/projects", json={"name": "del_ch_proj"})
+
+    client.post("/projects/del_ch_proj/chapters/1", json={"text": "章1"})
+    client.post("/projects/del_ch_proj/chapters/2", json={"text": "章2"})
+
+    del_resp = client.delete("/projects/del_ch_proj/chapters/1")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["ok"] is True
+    assert del_resp.json()["seq"] == 1
+
+    get_resp = client.get("/projects/del_ch_proj/chapters")
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert "1" not in data["chapters"]
+    assert data["chapters"]["2"] == "章2"
+
+    ch1_file = settings.project_dir("del_ch_proj") / "chapters" / "chapter_1.md"
+    assert not ch1_file.exists()
+
+
+

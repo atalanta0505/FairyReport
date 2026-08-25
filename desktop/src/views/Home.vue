@@ -6,6 +6,7 @@ import { useProjectStore } from "../stores/project";
 import Settings from "./Settings.vue";
 import Step1Project from "../components/Step1Project.vue";
 import Step2Outline from "../components/Step2Outline.vue";
+import Step3Writing from "../components/Step3Writing.vue";
 
 const auth = useAuthStore();
 const engine = useEngineStore();
@@ -161,18 +162,8 @@ async function onLogout() {
         <!-- 步骤 2：模板与大纲 -->
         <Step2Outline v-show="projectStore.currentStep === 2" />
 
-        <!-- 步骤 3：章节写作（占位） -->
-        <div v-show="projectStore.currentStep === 3" class="step-placeholder">
-          <div class="placeholder-card">
-            <span class="placeholder-icon">✍️</span>
-            <h3>Step 3：章节流式写作</h3>
-            <p>结合工程底稿向量检索与大模型并发撰写完整水利安全鉴定报告章节。</p>
-            <div class="btn-group">
-              <button class="btn btn-secondary" @click="projectStore.setStep(2)">&larr; 返回上一步</button>
-              <button class="btn btn-primary" @click="projectStore.setStep(4)">下一步：审阅修改 &rarr;</button>
-            </div>
-          </div>
-        </div>
+        <!-- 步骤 3：章节流式写作 -->
+        <Step3Writing v-show="projectStore.currentStep === 3" />
 
         <!-- 步骤 4：审阅修改（占位） -->
         <div v-show="projectStore.currentStep === 4" class="step-placeholder">

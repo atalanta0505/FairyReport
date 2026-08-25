@@ -823,11 +823,12 @@ describe("Pinia useProjectStore", () => {
       expect(store.reportType).toBe("产业发展规划报告");
     });
 
-    it("deleteProject: 删除项目时清除其对应 localStorage 大纲备份", async () => {
+    it("deleteProject: 删除项目时清除其对应 localStorage 大纲与章节备份", async () => {
       const store = useProjectStore();
       store.projects = [{ id: 1, name: "废弃项目", created_at: "2026-08-25T00:00:00Z" }];
       store.currentProject = store.projects[0];
       mockLocalStorage.setItem("frl_outline_废弃项目", JSON.stringify({ outline_md: "old" }));
+      mockLocalStorage.setItem("frl_chapters_废弃项目", JSON.stringify({ 1: "ch1" }));
 
       mockFetch.mockImplementation(async (url, opts) => {
         const u = String(url);
@@ -843,10 +844,285 @@ describe("Pinia useProjectStore", () => {
 
       await store.deleteProject(BASE_URL, "废弃项目");
       expect(mockLocalStorage.getItem("frl_outline_废弃项目")).toBeNull();
+      expect(mockLocalStorage.getItem("frl_chapters_废弃项目")).toBeNull();
       expect(store.outlineMd).toBe("");
       expect(store.outlineChapters).toHaveLength(0);
+      expect(store.chapters).toEqual({});
+    });
+  });
+
+  describe("章节持久化与流式写作 (Step 3)", () => {
+    function mockSSEResponse(chunks: string[]): Response {
+      const events = chunks.map((c) => `data: ${c}\n\n`).join("") + "data: [DONE]\n\n";
+      const encoder = new TextEncoder();
+      const uint8 = encoder.encode(events);
+
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => {
+            let sent = false;
+            return {
+              read: async () => {
+                if (!sent) {
+                  sent = true;
+                  return { done: false, value: uint8 };
+                }
+                return { done: true, value: undefined };
+              },
+            };
+          },
+        },
+        text: () => Promise.resolve(events),
+      } as unknown as Response;
+    }
+
+    it("getProjectChapters & saveProjectChapter & deleteProjectChapter: 客户端 API 请求", async () => {
+      mockFetch.mockImplementation(async (url, opts) => {
+        const u = String(url);
+        const method = opts?.method || "GET";
+        if (u.endsWith("/chapters") && method === "GET") {
+          return jsonResponse({ chapters: { "1": "章1正文" }, updated_at: "2026-08-25T00:00:00Z" });
+        }
+        if (u.includes("/chapters/1") && method === "POST") {
+          return jsonResponse({ chapters: { "1": "新章1正文" } });
+        }
+        if (u.includes("/chapters/1") && method === "DELETE") {
+          return jsonResponse({ ok: true, seq: 1 });
+        }
+        return jsonResponse({});
+      });
+
+      const getRes = await engineApi.getProjectChapters(BASE_URL, "测试项目");
+      expect(getRes.chapters["1"]).toBe("章1正文");
+
+      const saveRes = await engineApi.saveProjectChapter(BASE_URL, "测试项目", 1, "新章1正文");
+      expect(saveRes.chapters["1"]).toBe("新章1正文");
+
+      const delRes = await engineApi.deleteProjectChapter(BASE_URL, "测试项目", 1);
+      expect(delRes.ok).toBe(true);
+      expect(delRes.seq).toBe(1);
+    });
+
+    it("streamChapterWriting: 正确解析 SSE 数据流并在完成时触发 onDone", async () => {
+      mockFetch.mockResolvedValue(mockSSEResponse(["第一段内容", "第二段内容"]));
+
+      const chunks: string[] = [];
+      let done = false;
+
+      await new Promise<void>((resolve) => {
+        engineApi.streamChapterWriting(
+          BASE_URL,
+          {
+            project: "项目A",
+            report_type: "可行性研究报告",
+            outline_md: "# 第一章",
+            chapter_seq: 1,
+            llm_config: { api_key: "sk-key", base_url: "http://api", model: "m" },
+          },
+          (c) => chunks.push(c),
+          () => {
+            done = true;
+            resolve();
+          },
+          () => {},
+        );
+      });
+
+      expect(chunks).toEqual(["第一段内容", "第二段内容"]);
+      expect(done).toBe(true);
+    });
+
+    it("streamChapterWriting: 异常时触发 onError", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ detail: "LLM 超时" }, 504));
+
+      let errorMsg = "";
+      await new Promise<void>((resolve) => {
+        engineApi.streamChapterWriting(
+          BASE_URL,
+          {
+            project: "项目A",
+            report_type: "可行性研究报告",
+            outline_md: "# 第一章",
+            chapter_seq: 1,
+            llm_config: { api_key: "sk-key", base_url: "http://api", model: "m" },
+          },
+          () => {},
+          () => {},
+          (err) => {
+            errorMsg = err.message;
+            resolve();
+          },
+        );
+      });
+
+      expect(errorMsg).toContain("LLM 超时");
+    });
+
+    it("loadChapters: 从引擎成功加载章节并更新状态与 localStorage", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "章节项目", created_at: "2026-08-25T00:00:00Z" };
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/chapters")) {
+          return jsonResponse({
+            chapters: { "1": "章1正文", "2": "章2正文" },
+            updated_at: "2026-08-25T10:00:00Z",
+          });
+        }
+        return jsonResponse({});
+      });
+
+      const res = await store.loadChapters(BASE_URL, "章节项目");
+      expect(res[1]).toBe("章1正文");
+      expect(res[2]).toBe("章2正文");
+      expect(store.chapters[1]).toBe("章1正文");
+      expect(store.chapterStatuses[1]).toBe("completed");
+      expect(store.chapterStatuses[2]).toBe("completed");
+
+      // 验证 localStorage 备份
+      const local = mockLocalStorage.getItem("frl_chapters_章节项目");
+      expect(local).not.toBeNull();
+      expect(JSON.parse(local!)["1"]).toBe("章1正文");
+    });
+
+    it("loadChapters: 引擎异常时自动从 localStorage 恢复", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "离线章节项目", created_at: "2026-08-25T00:00:00Z" };
+
+      mockLocalStorage.setItem(
+        "frl_chapters_离线章节项目",
+        JSON.stringify({ 1: "本地缓存章1", 2: "本地缓存章2" }),
+      );
+
+      mockFetch.mockRejectedValue(new Error("Offline"));
+
+      const res = await store.loadChapters(BASE_URL, "离线章节项目");
+      expect(res[1]).toBe("本地缓存章1");
+      expect(store.chapters[1]).toBe("本地缓存章1");
+      expect(store.chapterStatuses[1]).toBe("completed");
+    });
+
+    it("saveChapter: 写入 state、localStorage 并向引擎提交", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "保存章节项目", created_at: "2026-08-25T00:00:00Z" };
+
+      mockFetch.mockResolvedValue(jsonResponse({}));
+
+      await store.saveChapter(BASE_URL, 1, "手动编辑的章1内容", true);
+
+      expect(store.chapters[1]).toBe("手动编辑的章1内容");
+      expect(store.chapterStatuses[1]).toBe("completed");
+
+      const local = JSON.parse(mockLocalStorage.getItem("frl_chapters_保存章节项目") || "{}");
+      expect(local["1"]).toBe("手动编辑的章1内容");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/chapters/1"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ text: "手动编辑的章1内容" }),
+        }),
+      );
+    });
+
+    it("deleteChapter: 清除指定章节并同步至引擎", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "清空章节项目", created_at: "2026-08-25T00:00:00Z" };
+      store.chapters = { 1: "旧章1", 2: "章2" };
+      store.chapterStatuses = { 1: "completed", 2: "completed" };
+
+      mockFetch.mockResolvedValue(jsonResponse({ ok: true, seq: 1 }));
+
+      await store.deleteChapter(BASE_URL, 1);
+
+      expect(store.chapters[1]).toBeUndefined();
+      expect(store.chapterStatuses[1]).toBe("idle");
+      expect(store.chapters[2]).toBe("章2");
+
+      const local = JSON.parse(mockLocalStorage.getItem("frl_chapters_清空章节项目") || "{}");
+      expect(local["1"]).toBeUndefined();
+    });
+
+    it("writeSingleChapterStream: 单章流式写作全流程", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "流式写作项目", created_at: "2026-08-25T00:00:00Z" };
+      store.outlineMd = "# 第一章 概述\n# 第二章 建设背景";
+      store.outlineChapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 建设背景" },
+      ];
+
+      mockFetch.mockImplementation(async (url, opts) => {
+        const u = String(url);
+        const method = opts?.method || "GET";
+        if (u.includes("/writing/chapter") && method === "POST") {
+          return mockSSEResponse(["第一章开头。", "第一章正文分析。"]);
+        }
+        if (u.includes("/chapters/1") && method === "POST") {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      await store.writeSingleChapterStream(BASE_URL, 1, {
+        api_key: "sk-test",
+        base_url: "http://api",
+        model: "m",
+      });
+
+      expect(store.chapters[1]).toBe("第一章开头。第一章正文分析。");
+      expect(store.chapterStatuses[1]).toBe("completed");
+      expect(store.currentWritingSeq).toBeNull();
+    });
+
+    it("writeAllChapters: 批量顺序流式写作所有章节", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "全书写作项目", created_at: "2026-08-25T00:00:00Z" };
+      store.outlineMd = "# 第一章 概述\n# 第二章 建设背景";
+      store.outlineChapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 建设背景" },
+      ];
+
+      mockFetch.mockImplementation(async (url, opts) => {
+        const u = String(url);
+        const method = opts?.method || "GET";
+        if (u.includes("/writing/chapter") && method === "POST") {
+          const body = JSON.parse(String(opts?.body || "{}"));
+          return mockSSEResponse([`第${body.chapter_seq}章生成内容`]);
+        }
+        if (u.includes("/chapters/") && method === "POST") {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      await store.writeAllChapters(BASE_URL, {
+        api_key: "sk-test",
+        base_url: "http://api",
+        model: "m",
+      });
+
+      expect(store.chapters[1]).toBe("第1章生成内容");
+      expect(store.chapters[2]).toBe("第2章生成内容");
+      expect(store.chapterStatuses[1]).toBe("completed");
+      expect(store.chapterStatuses[2]).toBe("completed");
+      expect(store.batchWriting).toBe(false);
+    });
+
+    it("stopWriting: 中止当前流式生成任务", () => {
+      const store = useProjectStore();
+      store.batchWriting = true;
+      store.currentWritingSeq = 1;
+      store.stopWriting();
+      expect(store.batchWriting).toBe(false);
+      expect(store.currentWritingSeq).toBeNull();
     });
   });
 });
+
 
 

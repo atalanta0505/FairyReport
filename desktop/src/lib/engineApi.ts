@@ -243,6 +243,23 @@ export interface OutlineData {
   updated_at?: string;
 }
 
+export interface ChaptersData {
+  chapters: Record<string, string>;
+  updated_at?: string;
+}
+
+export interface ChapterStreamRequest {
+  project?: string;
+  report_type: string;
+  outline_md: string;
+  chapter_seq: number;
+  stream?: boolean;
+  llm_config: LLMConfig;
+  topic?: string;
+  predecessor_chapters?: Record<string, string>;
+  writing_hint?: string;
+}
+
 /** 获取项目持久化大纲数据 */
 export async function getProjectOutline(
   baseUrl: string,
@@ -277,5 +294,172 @@ export async function saveProjectOutline(
     },
   );
 }
+
+/** 获取项目所有章节内容 */
+export async function getProjectChapters(
+  baseUrl: string,
+  projectName: string,
+): Promise<ChaptersData> {
+  return request<ChaptersData>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/chapters`,
+    {
+      method: "GET",
+    },
+  );
+}
+
+/** 保存项目单章内容 */
+export async function saveProjectChapter(
+  baseUrl: string,
+  projectName: string,
+  seq: number,
+  text: string,
+): Promise<ChaptersData> {
+  return request<ChaptersData>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/chapters/${seq}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    },
+  );
+}
+
+/** 删除项目单章内容 */
+export async function deleteProjectChapter(
+  baseUrl: string,
+  projectName: string,
+  seq: number,
+): Promise<{ ok: boolean; seq: number }> {
+  return request<{ ok: boolean; seq: number }>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/chapters/${seq}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+/** 流式写作单章（SSE 透传，支持中止取消） */
+export function streamChapterWriting(
+  baseUrl: string,
+  req: ChapterStreamRequest,
+  onChunk: (chunk: string) => void,
+  onDone: () => void,
+  onError: (err: Error) => void,
+): () => void {
+  const controller = new AbortController();
+  const { signal } = controller;
+
+  (async () => {
+    try {
+      const resp = await pluginFetch(joinUrl(baseUrl, "/writing/chapter"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...req, stream: true }),
+        signal,
+      });
+
+      if (!resp.ok) {
+        let msg = `引擎错误 ${resp.status}`;
+        try {
+          const j = await resp.json();
+          msg = j.detail || j.message || msg;
+        } catch {
+          /* ignore */
+        }
+        throw new EngineApiError(resp.status, msg);
+      }
+
+      if (resp.body && typeof resp.body.getReader === "function") {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          let eventEndIndex: number;
+          while ((eventEndIndex = buffer.indexOf("\n\n")) !== -1) {
+            const rawEvent = buffer.slice(0, eventEndIndex);
+            buffer = buffer.slice(eventEndIndex + 2);
+
+            if (!rawEvent.trim()) continue;
+
+            const lines = rawEvent.split("\n");
+            for (const line of lines) {
+              if (line.startsWith("data:")) {
+                const content = line.slice(5).replace(/^\s/, "");
+                if (content === "[DONE]") {
+                  onDone();
+                  return;
+                }
+                if (content.startsWith("{") && content.includes('"error"')) {
+                  try {
+                    const parsed = JSON.parse(content);
+                    if (parsed.error) {
+                      throw new Error(parsed.error);
+                    }
+                  } catch (err) {
+                    if (err instanceof Error && err.message !== "Unexpected token") {
+                      throw err;
+                    }
+                  }
+                }
+                onChunk(content);
+              } else if (!line.startsWith(":") && line.length > 0) {
+                onChunk("\n" + line);
+              }
+            }
+          }
+        }
+
+        if (buffer.trim()) {
+          const lines = buffer.trim().split("\n");
+          for (const line of lines) {
+            if (line.startsWith("data:")) {
+              const content = line.slice(5).replace(/^\s/, "");
+              if (content === "[DONE]") {
+                onDone();
+                return;
+              }
+              onChunk(content);
+            }
+          }
+        }
+      } else if (typeof resp.text === "function") {
+        const fullText = await resp.text();
+        const lines = fullText.split("\n\n");
+        for (const block of lines) {
+          const trimmed = block.trim();
+          if (trimmed.startsWith("data:")) {
+            const content = trimmed.slice(5).replace(/^\s/, "");
+            if (content === "[DONE]") {
+              onDone();
+              return;
+            }
+            onChunk(content);
+          }
+        }
+      }
+
+      onDone();
+    } catch (err) {
+      if (signal.aborted) {
+        return;
+      }
+      onError(err as Error);
+    }
+  })();
+
+  return () => {
+    controller.abort();
+  };
+}
+
 
 
