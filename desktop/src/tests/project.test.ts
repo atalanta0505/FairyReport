@@ -143,6 +143,61 @@ describe("engineApi 基础接口", () => {
     expect(r.version).toBe("v1.1");
   });
 
+  it("scanMaterials: 扫描本地资料目录并摄取", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse([
+        {
+          source_id: "scan1.docx",
+          filename: "scan1.docx",
+          ext: ".docx",
+          chunk_count: 7,
+          size_bytes: 4096,
+          status: "ok",
+          error: null,
+        },
+      ]),
+    );
+    const res = await engineApi.scanMaterials(BASE_URL, "项目A");
+    expect(res).toHaveLength(1);
+    expect(res[0].filename).toBe("scan1.docx");
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${BASE_URL}/projects/%E9%A1%B9%E7%9B%AEA/materials/scan`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("getTemplates: 获取 14 类模板列表", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse([
+        { report_type: "可行性研究报告", total_words_max: 50000, notes: "标准模板" },
+        { report_type: "产业发展规划报告", total_words_max: 30000, notes: "" },
+      ]),
+    );
+    const templates = await engineApi.getTemplates(BASE_URL);
+    expect(templates).toHaveLength(2);
+    expect(templates[0].report_type).toBe("可行性研究报告");
+    expect(templates[0].total_words_max).toBe(50000);
+  });
+
+  it("generateOutline: 生成结构化大纲", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        outline_md: "# 第一章 概述\n# 第二章 建设背景",
+        chapters: [
+          { seq: 1, title: "第一章 概述" },
+          { seq: 2, title: "第二章 建设背景" },
+        ],
+      }),
+    );
+    const res = await engineApi.generateOutline(BASE_URL, {
+      project: "测试项目",
+      report_type: "可行性研究报告",
+      llm_config: { api_key: "sk-key", base_url: "http://api", model: "m" },
+    });
+    expect(res.outline_md).toContain("第一章");
+    expect(res.chapters).toHaveLength(2);
+  });
+
   it("错误响应 → 抛出 EngineApiError 包含 detail", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({ detail: "项目已存在：重复项目" }, 409),
@@ -342,4 +397,109 @@ describe("Pinia useProjectStore", () => {
     expect(updateRes.version).toBe("v2.0");
     expect(store.genericStatus?.installed).toBe(true);
   });
+
+  it("scanMaterials: 扫描本地资料并自动刷新资料列表", async () => {
+    const store = useProjectStore();
+    store.currentProject = { id: 1, name: "本地项目", created_at: "2026-08-25T00:00:00Z" };
+
+    mockFetch.mockImplementation(async (url, opts) => {
+      const u = String(url);
+      const method = opts?.method || "GET";
+      if (u.includes("/materials/scan") && method === "POST") {
+        return jsonResponse([
+          {
+            source_id: "scanned.md",
+            filename: "scanned.md",
+            ext: ".md",
+            chunk_count: 6,
+            size_bytes: 1024,
+            status: "ok",
+            error: null,
+          },
+        ]);
+      }
+      if (u.includes("/materials") && method === "GET") {
+        return jsonResponse([
+          {
+            id: 2,
+            source_id: "scanned.md",
+            filename: "scanned.md",
+            ext: ".md",
+            chunk_count: 6,
+            size_bytes: 1024,
+            created_at: "2026-08-25T00:00:00Z",
+          },
+        ]);
+      }
+      return jsonResponse({});
+    });
+
+    const res = await store.scanMaterials(BASE_URL);
+    expect(res).toHaveLength(1);
+    expect(res[0].filename).toBe("scanned.md");
+    expect(store.materials).toHaveLength(1);
+    expect(store.materials[0].filename).toBe("scanned.md");
+  });
+
+  it("loadTemplates: 加载 14 类模板并保留/更新 reportType", async () => {
+    const store = useProjectStore();
+
+    mockFetch.mockResolvedValue(
+      jsonResponse([
+        { report_type: "可行性研究报告", total_words_max: 50000, notes: "模板1" },
+        { report_type: "园区发展规划报告", total_words_max: 35000, notes: "模板2" },
+      ]),
+    );
+
+    const tmpls = await store.loadTemplates(BASE_URL);
+    expect(tmpls).toHaveLength(2);
+    expect(store.templates).toHaveLength(2);
+    expect(store.reportType).toBe("可行性研究报告");
+
+    store.setReportType("园区发展规划报告");
+    expect(store.reportType).toBe("园区发展规划报告");
+  });
+
+  it("generateOutline: 调用 AI 生成大纲并填充 outlineMd 与章节树", async () => {
+    const store = useProjectStore();
+    store.currentProject = { id: 1, name: "水库工程", created_at: "2026-08-25T00:00:00Z" };
+    store.reportType = "可行性研究报告";
+
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        outline_md: "# 第一章 概述\n## 1.1 项目背景\n# 第二章 建设必要性\n## 2.1 背景分析\n# 第三章 结论",
+        chapters: [
+          { seq: 1, title: "第一章 概述" },
+          { seq: 2, title: "第二章 建设必要性" },
+          { seq: 3, title: "第三章 结论" },
+        ],
+      }),
+    );
+
+    const res = await store.generateOutline(BASE_URL, {
+      api_key: "sk-test",
+      base_url: "https://api.deepseek.com",
+      model: "deepseek-chat",
+    });
+
+    expect(res.chapters).toHaveLength(3);
+    expect(store.outlineMd).toContain("第一章 概述");
+    expect(store.outlineChapters).toHaveLength(3);
+    expect(store.outlineChapters[0].title).toBe("第一章 概述");
+    expect(store.outlineChapters[1].title).toBe("第二章 建设必要性");
+  });
+
+  it("setOutlineMd: 用户手动编辑 Markdown 实时同步更新章节树", () => {
+    const store = useProjectStore();
+    expect(store.outlineChapters).toHaveLength(0);
+
+    store.setOutlineMd("# 第一章 项目总论\n正文...\n# 第二章 市场预测\n正文...");
+    expect(store.outlineChapters).toHaveLength(2);
+    expect(store.outlineChapters[0].title).toBe("第一章 项目总论");
+    expect(store.outlineChapters[1].title).toBe("第二章 市场预测");
+
+    store.setOutlineMd("");
+    expect(store.outlineChapters).toHaveLength(0);
+  });
 });
+

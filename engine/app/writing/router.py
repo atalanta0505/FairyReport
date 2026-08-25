@@ -19,6 +19,7 @@ from .outline import OutlineGenerator, _extract_chapter_titles, parse_chapter_se
 from .prompts import (
     FREQUENCY_PENALTY,
     PRESENCE_PENALTY,
+    REPORT_TYPES,
     TECH_REVIEW_SYSTEM_PROMPT,
     TEMPERATURE_WRITING,
     TOP_P,
@@ -31,7 +32,13 @@ from .writer import ChapterWriter, parse_tech_review_result, _build_writing_syst
 router = APIRouter(prefix="/writing", tags=["writing"])
 
 
-# ── 请求模型 ──
+# ── 请求与响应模型 ──
+class TemplateItemOut(BaseModel):
+    report_type: str
+    total_words_max: int
+    notes: str = ""
+
+
 class LLMConfig(BaseModel):
     api_key: str = Field(..., min_length=1)
     base_url: str = Field(..., min_length=1)
@@ -100,6 +107,21 @@ def _sse_event(data: str) -> str:
 
 
 # ── 端点 ──
+@router.get("/templates", response_model=list[TemplateItemOut])
+def list_templates():
+    """返回 14 种标准投前咨询报告类型及其建议字数预算列表。"""
+    items = []
+    for rt in REPORT_TYPES:
+        limit = tmpl.get_word_limit(rt)
+        notes = tmpl.get_template_notes(rt)
+        items.append(TemplateItemOut(
+            report_type=rt,
+            total_words_max=limit,
+            notes=notes,
+        ))
+    return items
+
+
 @router.post("/outline")
 def outline(req: OutlineRequest):
     """生成大纲 → outline_md + 章节列表。通用包未装→409。"""

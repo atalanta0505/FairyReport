@@ -133,3 +133,45 @@ def test_delete_nonexistent_material_returns_404(client):
     name = _make_project(client)
     resp = client.delete(f"/projects/{name}/materials/nope.md")
     assert resp.status_code == 404
+
+
+def test_scan_empty_files_dir_returns_empty_list(client):
+    """files 目录为空时，scan 返回空列表。"""
+    name = _make_project(client)
+    resp = client.post(f"/projects/{name}/materials/scan")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_scan_ingests_files_in_files_dir(client):
+    """直接放入 files 目录的文件被 scan 正确摄取分块并入库。"""
+    name = _make_project(client)
+    fdir = settings.files_dir(name)
+
+    # 模拟用户手工拷入 2 份文件
+    import shutil
+    shutil.copy2(fixture_path("sample.md"), os.path.join(fdir, "local_sample.md"))
+    shutil.copy2(fixture_path("sample.txt"), os.path.join(fdir, "local_notes.txt"))
+    # 拷入不支持的文件（应被忽略）
+    with open(os.path.join(fdir, "ignored.exe"), "w") as f:
+        f.write("binary")
+
+    resp = client.post(f"/projects/{name}/materials/scan")
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 2
+    sources = sorted(r["source_id"] for r in results)
+    assert sources == ["local_notes.txt", "local_sample.md"]
+    assert all(r["status"] == "ok" and r["chunk_count"] > 0 for r in results)
+
+    # 验证 DB 与向量库
+    mats = client.get(f"/projects/{name}/materials").json()
+    assert len(mats) == 2
+    store = ProjectVectorStore.get(name, settings.vector_dir(name))
+    assert store.count() > 0
+
+
+def test_scan_unknown_project_returns_404(client):
+    resp = client.post("/projects/missing_proj/materials/scan")
+    assert resp.status_code == 404
+

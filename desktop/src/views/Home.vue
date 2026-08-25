@@ -5,6 +5,7 @@ import { useEngineStore } from "../stores/engine";
 import { useProjectStore } from "../stores/project";
 import Settings from "./Settings.vue";
 import Step1Project from "../components/Step1Project.vue";
+import Step2Outline from "../components/Step2Outline.vue";
 
 const auth = useAuthStore();
 const engine = useEngineStore();
@@ -130,18 +131,8 @@ async function onLogout() {
         <!-- 步骤 1：项目与资料管理 -->
         <Step1Project v-if="projectStore.currentStep === 1" />
 
-        <!-- 步骤 2：模板与大纲（占位） -->
-        <div v-else-if="projectStore.currentStep === 2" class="step-placeholder">
-          <div class="placeholder-card">
-            <span class="placeholder-icon">📑</span>
-            <h3>Step 2：模板与大纲生成</h3>
-            <p>基于项目资料与规程规范智能推荐报告模板与三级大纲结构。</p>
-            <div class="btn-group">
-              <button class="btn btn-secondary" @click="projectStore.setStep(1)">&larr; 返回上一步</button>
-              <button class="btn btn-primary" @click="projectStore.setStep(3)">下一步：章节写作 &rarr;</button>
-            </div>
-          </div>
-        </div>
+        <!-- 步骤 2：模板与大纲 -->
+        <Step2Outline v-else-if="projectStore.currentStep === 2" />
 
         <!-- 步骤 3：章节写作（占位） -->
         <div v-else-if="projectStore.currentStep === 3" class="step-placeholder">

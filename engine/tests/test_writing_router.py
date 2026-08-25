@@ -265,3 +265,29 @@ def test_key_not_leaked_in_request_headers(client):
     assert len(stub.requests) == 1
     auth = stub.requests[0].headers["authorization"]
     assert auth == f"Bearer {LLM_CONFIG['api_key']}"  # 标准头，不在异常/日志中明文
+
+
+# ── templates ──
+def test_list_templates_returns_14_types(client):
+    """未装通用包时也可获取 14 种报告类型及默认字数预算。"""
+    resp = client.get("/writing/templates")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 14
+    report_types = [it["report_type"] for it in items]
+    assert "可行性研究报告" in report_types
+    assert "产业发展规划报告" in report_types
+    fe = next(it for it in items if it["report_type"] == "可行性研究报告")
+    assert fe["total_words_max"] == 50000
+
+
+def test_list_templates_with_installed_pack(client, installed_pack):
+    """已安装通用包时获取模板详情与 notes。"""
+    resp = client.get("/writing/templates")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 14
+    fe = next(it for it in items if it["report_type"] == "可行性研究报告")
+    assert fe["total_words_max"] == 50000
+    assert "测试模板规范" in fe["notes"]
+

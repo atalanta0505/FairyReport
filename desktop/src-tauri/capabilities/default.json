@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "dialog:default",
+    "shell:allow-open",
     {
       "identifier": "shell:allow-spawn",
       "allow": [{ "name": "python-uvicorn", "cmd": "python", "args": true }]

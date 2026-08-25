@@ -7,7 +7,10 @@ FairyReport 本地引擎 — 嵌入封装（可注入/可打桩）。
 from __future__ import annotations
 
 import hashlib
+import os
 from typing import Protocol
+
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 
 class Embedder(Protocol):

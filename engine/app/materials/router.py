@@ -67,6 +67,94 @@ class MaterialOut(BaseModel):
         )
 
 
+def _process_file(
+    session: Session,
+    proj: models.Project,
+    store: ProjectVectorStore,
+    embedder,
+    fpath: str,
+    copy_dest_dir: str | None = None,
+) -> IngestResult:
+    """解析、分块、向量化并入库单个文件。"""
+    filename = os.path.basename(fpath)
+    ext = os.path.splitext(filename)[1].lower()
+    size_bytes = os.path.getsize(fpath)
+
+    # 解析 → Markdown
+    md_text = to_markdown(fpath)
+    if not md_text or not md_text.strip():
+        return IngestResult(
+            source_id=filename,
+            filename=filename,
+            ext=ext,
+            chunk_count=0,
+            size_bytes=size_bytes,
+            status="error",
+            error="转换后内容为空",
+        )
+
+    # 分块
+    chunks = chunk_text(md_text, source_name=filename, source_id=filename)
+    if not chunks:
+        return IngestResult(
+            source_id=filename,
+            filename=filename,
+            ext=ext,
+            chunk_count=0,
+            size_bytes=size_bytes,
+            status="error",
+            error="切片后无内容",
+        )
+
+    # 向量化
+    embeddings = embedder.encode([c["text"] for c in chunks])
+
+    # 幂等：先删旧同源向量再 upsert，保证不累积
+    store.delete_by_source(filename)
+    store.upsert(chunks, embeddings)
+
+    # 拷贝文件到 files 目录（若需要且路径不同）
+    if copy_dest_dir:
+        dest_path = os.path.join(copy_dest_dir, filename)
+        if os.path.abspath(fpath) != os.path.abspath(dest_path):
+            shutil.copy2(fpath, dest_path)
+
+    # upsert 资料记录
+    existing = session.execute(
+        select(models.Material).where(
+            models.Material.project_id == proj.id,
+            models.Material.source_id == filename,
+        )
+    ).scalars().first()
+    if existing:
+        existing.filename = filename
+        existing.ext = ext
+        existing.chunk_count = len(chunks)
+        existing.size_bytes = size_bytes
+    else:
+        session.add(
+            models.Material(
+                project_id=proj.id,
+                source_id=filename,
+                filename=filename,
+                ext=ext,
+                chunk_count=len(chunks),
+                size_bytes=size_bytes,
+            )
+        )
+    session.commit()
+
+    return IngestResult(
+        source_id=filename,
+        filename=filename,
+        ext=ext,
+        chunk_count=len(chunks),
+        size_bytes=size_bytes,
+        status="ok",
+        error=None,
+    )
+
+
 @router.post("/ingest", response_model=list[IngestResult])
 def ingest_materials(
     name: str,
@@ -100,86 +188,38 @@ def ingest_materials(
                 status_code=415, detail=f"不支持的扩展名：{ext}（仅支持 docx/xlsx/csv/md/txt）"
             )
 
-        # 解析 → Markdown
-        md_text = to_markdown(fpath)
-        if not md_text or not md_text.strip():
-            results.append(
-                IngestResult(
-                    source_id=filename,
-                    filename=filename,
-                    ext=ext,
-                    chunk_count=0,
-                    size_bytes=os.path.getsize(fpath),
-                    status="error",
-                    error="转换后内容为空",
-                )
-            )
+        res = _process_file(session, proj, store, embedder, fpath, copy_dest_dir=str(files_dir))
+        results.append(res)
+
+    return results
+
+
+@router.post("/scan", response_model=list[IngestResult])
+def scan_materials(
+    name: str,
+    session: Session = Depends(db_module.get_db),
+):
+    """扫描项目 files 目录下的所有资料文件并自动分块向量化入库。"""
+    proj = _get_project(session, name)
+    files_dir = settings.files_dir(name)
+    files_dir.mkdir(parents=True, exist_ok=True)
+    vector_dir = settings.vector_dir(name)
+    vector_dir.mkdir(parents=True, exist_ok=True)
+
+    store = ProjectVectorStore.get(name, vector_dir)
+    embedder = get_embedder()
+
+    results: list[IngestResult] = []
+    for entry in sorted(os.listdir(files_dir)):
+        fpath = os.path.join(files_dir, entry)
+        if not os.path.isfile(fpath):
+            continue
+        ext = os.path.splitext(entry)[1].lower()
+        if ext not in ALLOWED_EXTS:
             continue
 
-        # 分块
-        chunks = chunk_text(md_text, source_name=filename, source_id=filename)
-        if not chunks:
-            results.append(
-                IngestResult(
-                    source_id=filename,
-                    filename=filename,
-                    ext=ext,
-                    chunk_count=0,
-                    size_bytes=os.path.getsize(fpath),
-                    status="error",
-                    error="切片后无内容",
-                )
-            )
-            continue
-
-        # 向量化
-        embeddings = embedder.encode([c["text"] for c in chunks])
-
-        # 幂等：先删旧同源向量再 upsert，保证不累积
-        store.delete_by_source(filename)
-        store.upsert(chunks, embeddings)
-
-        # 拷贝文件到 files 目录（覆盖）
-        shutil.copy2(fpath, os.path.join(files_dir, filename))
-
-        size_bytes = os.path.getsize(fpath)
-
-        # upsert 资料记录
-        existing = session.execute(
-            select(models.Material).where(
-                models.Material.project_id == proj.id,
-                models.Material.source_id == filename,
-            )
-        ).scalars().first()
-        if existing:
-            existing.filename = filename
-            existing.ext = ext
-            existing.chunk_count = len(chunks)
-            existing.size_bytes = size_bytes
-        else:
-            session.add(
-                models.Material(
-                    project_id=proj.id,
-                    source_id=filename,
-                    filename=filename,
-                    ext=ext,
-                    chunk_count=len(chunks),
-                    size_bytes=size_bytes,
-                )
-            )
-        session.commit()
-
-        results.append(
-            IngestResult(
-                source_id=filename,
-                filename=filename,
-                ext=ext,
-                chunk_count=len(chunks),
-                size_bytes=size_bytes,
-                status="ok",
-                error=None,
-            )
-        )
+        res = _process_file(session, proj, store, embedder, fpath, copy_dest_dir=None)
+        results.append(res)
 
     return results
 

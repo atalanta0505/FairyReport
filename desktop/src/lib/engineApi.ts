@@ -52,6 +52,34 @@ export interface GenericUpdateResult {
   version: string;
 }
 
+export interface TemplateItem {
+  report_type: string;
+  total_words_max: number;
+  notes?: string;
+}
+
+export interface LLMConfig {
+  api_key: string;
+  base_url: string;
+  model: string;
+}
+
+export interface OutlineRequest {
+  project?: string;
+  report_type: string;
+  llm_config: LLMConfig;
+}
+
+export interface ChapterInfo {
+  seq: number;
+  title: string;
+}
+
+export interface OutlineResult {
+  outline_md: string;
+  chapters: ChapterInfo[];
+}
+
 function joinUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/$/, "")}${path}`;
 }
@@ -130,6 +158,20 @@ export async function ingestMaterials(
   });
 }
 
+/** 扫描项目本地 files 目录并摄取资料 */
+export async function scanMaterials(
+  baseUrl: string,
+  projectName: string,
+): Promise<IngestResult[]> {
+  return request<IngestResult[]>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/materials/scan`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 /** 删除资料 */
 export async function deleteMaterial(
   baseUrl: string,
@@ -160,4 +202,40 @@ export async function updateGenericKnowledge(
     method: "POST",
     body: JSON.stringify({ server_url: serverUrl, token }),
   });
+}
+
+/** 获取 14 类标准报告模板列表与字数预算 */
+export async function getTemplates(baseUrl: string): Promise<TemplateItem[]> {
+  return request<TemplateItem[]>(baseUrl, "/writing/templates", {
+    method: "GET",
+  });
+}
+
+/** 生成结构化大纲 */
+export async function generateOutline(
+  baseUrl: string,
+  req: OutlineRequest,
+): Promise<OutlineResult> {
+  return request<OutlineResult>(baseUrl, "/writing/outline", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** 获取项目本地 files 目录绝对路径（用于打开文件夹等） */
+export async function getProjectFilesDir(projectName: string): Promise<string> {
+  try {
+    const { localDataDir, join } = await import("@tauri-apps/api/path");
+    const local = await localDataDir();
+    return await join(local, "FairyReport", "projects", projectName, "files");
+  } catch {
+    return `C:\\Users\\Default\\AppData\\Local\\FairyReport\\projects\\${projectName}\\files`;
+  }
+}
+
+/** 在系统资源管理器中打开项目 files 目录 */
+export async function openProjectDir(projectName: string): Promise<void> {
+  const dir = await getProjectFilesDir(projectName);
+  const { open } = await import("@tauri-apps/plugin-shell");
+  await open(dir);
 }

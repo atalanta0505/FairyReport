@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
+import * as engineApi from "../lib/engineApi";
 import { useAuthStore } from "../stores/auth";
 import { useEngineStore } from "../stores/engine";
 import { useSettingsStore } from "../stores/settings";
@@ -81,6 +82,38 @@ async function handleDeleteProject() {
     showMsg(`项目「${name}」已删除`);
   } catch (err) {
     showMsg(`删除项目失败: ${(err as Error).message}`, "error");
+  }
+}
+
+async function handleOpenProjectDir() {
+  if (!projectStore.currentProject) {
+    showMsg("请先创建或选择项目", "error");
+    return;
+  }
+  try {
+    await engineApi.openProjectDir(projectStore.currentProject.name);
+  } catch (err) {
+    showMsg(`打开资料目录失败: ${(err as Error).message}`, "error");
+  }
+}
+
+async function handleScanMaterials() {
+  if (!projectStore.currentProject) {
+    showMsg("请先创建或选择项目", "error");
+    return;
+  }
+  try {
+    const results = await projectStore.scanMaterials(engine.baseUrl);
+    const failed = results.filter((r) => r.status === "error");
+    if (results.length === 0) {
+      showMsg("资料目录中暂无可摄取的新文件");
+    } else if (failed.length > 0) {
+      showMsg(`扫描完成，部分文件失败: ${failed.map((f) => f.filename).join(", ")}`, "error");
+    } else {
+      showMsg(`扫描完成，成功摄取 ${results.length} 份本地资料并建立索引！`);
+    }
+  } catch (err) {
+    showMsg(`扫描本地资料失败: ${(err as Error).message}`, "error");
   }
 }
 
@@ -335,6 +368,23 @@ function nextStep() {
             {{ projectStore.materials.length }} 份资料
           </span>
         </div>
+        <div class="header-actions" v-if="projectStore.currentProject">
+          <button
+            class="btn btn-outline btn-sm"
+            title="打开当前项目在本地磁盘中的资料目录"
+            @click="handleOpenProjectDir"
+          >
+            📁 打开资料目录
+          </button>
+          <button
+            class="btn btn-outline btn-sm"
+            :disabled="projectStore.ingesting"
+            title="扫描资料目录下新增或直接拷入的文件并自动入库"
+            @click="handleScanMaterials"
+          >
+            🔄 扫描本地资料
+          </button>
+        </div>
       </div>
 
       <div class="card-body">
@@ -363,7 +413,7 @@ function nextStep() {
                   点击按钮选取文件，或将本地文件拖拽至此处
                 </p>
                 <p class="secondary-text">
-                  支持格式：.docx, .xlsx, .csv, .md, .txt（系统将自动解析、切片分块并建立向量索引）
+                  支持格式：.docx, .xlsx, .csv, .md, .txt。可点击「选择文件」选取，或点击上方「📁 打开资料目录」将文件直接拷入后点击「🔄 扫描本地资料」一键向量化入库。
                 </p>
               </div>
               <button
@@ -770,6 +820,15 @@ function nextStep() {
 .btn-lg {
   padding: 10px 24px;
   font-size: 15px;
+}
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .btn-icon-danger {
   padding: 4px 8px;

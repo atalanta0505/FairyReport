@@ -2,12 +2,35 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import * as engineApi from "../lib/engineApi";
 import type {
+  ChapterInfo,
   GenericStatus,
   GenericUpdateResult,
   IngestResult,
+  LLMConfig,
   MaterialOut,
+  OutlineResult,
   ProjectOut,
+  TemplateItem,
 } from "../lib/engineApi";
+
+export function parseChaptersFromOutline(outlineMd: string): ChapterInfo[] {
+  if (!outlineMd) return [];
+  const lines = outlineMd.split("\n");
+  const chapters: ChapterInfo[] = [];
+  let seq = 1;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const match =
+      trimmed.match(/^#{1,2}\s+(第[一二三四五六七八九十百零\d]+章[\s：:].+)/) ||
+      trimmed.match(/^#{1,2}\s+(第[一二三四五六七八九十百零\d]+章.+)/) ||
+      trimmed.match(/^(第[一二三四五六七八九十百零\d]+章[\s：:].+)/) ||
+      trimmed.match(/^#\s+(.+)/);
+    if (match) {
+      chapters.push({ seq: seq++, title: match[1].trim() });
+    }
+  }
+  return chapters;
+}
 
 export const useProjectStore = defineStore("project", () => {
   const currentStep = ref<number>(1);
@@ -15,6 +38,14 @@ export const useProjectStore = defineStore("project", () => {
   const currentProject = ref<ProjectOut | null>(null);
   const materials = ref<MaterialOut[]>([]);
   const genericStatus = ref<GenericStatus | null>(null);
+
+  // Step 2 大纲与模板状态
+  const reportType = ref<string>("可行性研究报告");
+  const templates = ref<TemplateItem[]>([]);
+  const loadingTemplates = ref<boolean>(false);
+  const outlineMd = ref<string>("");
+  const outlineChapters = ref<ChapterInfo[]>([]);
+  const generatingOutline = ref<boolean>(false);
 
   const loadingProjects = ref<boolean>(false);
   const loadingMaterials = ref<boolean>(false);
@@ -164,6 +195,28 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
+  async function scanMaterials(
+    baseUrl: string,
+    projectName?: string,
+  ): Promise<IngestResult[]> {
+    const targetName = projectName || currentProject.value?.name;
+    if (!baseUrl || !targetName) {
+      throw new Error("请先选择项目");
+    }
+    ingesting.value = true;
+    error.value = null;
+    try {
+      const results = await engineApi.scanMaterials(baseUrl, targetName);
+      await loadMaterials(baseUrl, targetName);
+      return results;
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      ingesting.value = false;
+    }
+  }
+
   async function checkGenericStatus(baseUrl: string): Promise<GenericStatus> {
     if (!baseUrl) {
       genericStatus.value = null;
@@ -199,12 +252,76 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
+  async function loadTemplates(baseUrl: string): Promise<TemplateItem[]> {
+    if (!baseUrl) return [];
+    loadingTemplates.value = true;
+    error.value = null;
+    try {
+      const list = await engineApi.getTemplates(baseUrl);
+      templates.value = list;
+      if (list.length > 0 && !list.find((t) => t.report_type === reportType.value)) {
+        reportType.value = list[0].report_type;
+      }
+      return list;
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      loadingTemplates.value = false;
+    }
+  }
+
+  async function generateOutline(
+    baseUrl: string,
+    llmConfig: LLMConfig,
+    reportTypeOverride?: string,
+    projectNameOverride?: string,
+  ): Promise<OutlineResult> {
+    const targetProject = projectNameOverride !== undefined ? projectNameOverride : (currentProject.value?.name || "");
+    const targetType = reportTypeOverride || reportType.value;
+    if (!baseUrl) throw new Error("引擎未就绪");
+    if (!targetType) throw new Error("请先选择报告类型");
+
+    generatingOutline.value = true;
+    error.value = null;
+    try {
+      const res = await engineApi.generateOutline(baseUrl, {
+        project: targetProject,
+        report_type: targetType,
+        llm_config: llmConfig,
+      });
+      outlineMd.value = res.outline_md;
+      outlineChapters.value = res.chapters;
+      return res;
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      generatingOutline.value = false;
+    }
+  }
+
+  function setOutlineMd(md: string) {
+    outlineMd.value = md;
+    outlineChapters.value = parseChaptersFromOutline(md);
+  }
+
+  function setReportType(type: string) {
+    reportType.value = type;
+  }
+
   return {
     currentStep,
     projects,
     currentProject,
     materials,
     genericStatus,
+    reportType,
+    templates,
+    loadingTemplates,
+    outlineMd,
+    outlineChapters,
+    generatingOutline,
     loadingProjects,
     loadingMaterials,
     ingesting,
@@ -217,8 +334,13 @@ export const useProjectStore = defineStore("project", () => {
     deleteProject,
     loadMaterials,
     ingestFiles,
+    scanMaterials,
     deleteMaterial,
     checkGenericStatus,
     updateGeneric,
+    loadTemplates,
+    generateOutline,
+    setOutlineMd,
+    setReportType,
   };
 });
