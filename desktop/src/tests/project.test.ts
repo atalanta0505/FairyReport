@@ -17,7 +17,27 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
+class MockSessionStorage {
+  private store: Record<string, string> = {};
+  getItem(key: string): string | null {
+    return this.store[key] ?? null;
+  }
+  setItem(key: string, value: string): void {
+    this.store[key] = String(value);
+  }
+  removeItem(key: string): void {
+    delete this.store[key];
+  }
+  clear(): void {
+    this.store = {};
+  }
+}
+
+const mockStorage = new MockSessionStorage();
+(globalThis as any).sessionStorage = mockStorage;
+
 beforeEach(() => {
+  mockStorage.clear();
   setActivePinia(createPinia());
   mockFetch.mockReset();
 });
@@ -528,6 +548,106 @@ describe("Pinia useProjectStore", () => {
       `${BASE_URL}/projects/%E9%A1%B9%E7%9B%AE1/open-folder`,
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  describe("sessionStorage 状态保持与恢复", () => {
+    it("setStep: 写入 sessionStorage 并成功持久化", () => {
+      const store = useProjectStore();
+      expect(mockStorage.getItem("frl_current_step")).toBeNull();
+
+      store.setStep(2);
+      expect(store.currentStep).toBe(2);
+      expect(mockStorage.getItem("frl_current_step")).toBe("2");
+
+      store.setStep(5);
+      expect(store.currentStep).toBe(5);
+      expect(mockStorage.getItem("frl_current_step")).toBe("5");
+
+      // 越界值不修改 sessionStorage
+      store.setStep(9);
+      expect(store.currentStep).toBe(5);
+      expect(mockStorage.getItem("frl_current_step")).toBe("5");
+    });
+
+    it("Pinia 初始化: 从 sessionStorage 恢复有效步骤 (1~5)", () => {
+      mockStorage.setItem("frl_current_step", "3");
+      setActivePinia(createPinia());
+      const store = useProjectStore();
+      expect(store.currentStep).toBe(3);
+    });
+
+    it("Pinia 初始化: 遇非法或越界步骤值安全回退到 1", () => {
+      mockStorage.setItem("frl_current_step", "99");
+      setActivePinia(createPinia());
+      const store1 = useProjectStore();
+      expect(store1.currentStep).toBe(1);
+
+      mockStorage.setItem("frl_current_step", "not-a-number");
+      setActivePinia(createPinia());
+      const store2 = useProjectStore();
+      expect(store2.currentStep).toBe(1);
+    });
+
+    it("selectProject: 同步项目名称到 sessionStorage", async () => {
+      const store = useProjectStore();
+      store.projects = [
+        { id: 1, name: "水库A", created_at: "2026-08-25T00:00:00Z" },
+        { id: 2, name: "水库B", created_at: "2026-08-25T01:00:00Z" },
+      ];
+
+      mockFetch.mockResolvedValue(jsonResponse([]));
+      await store.selectProject(BASE_URL, "水库B");
+
+      expect(store.currentProject?.name).toBe("水库B");
+      expect(mockStorage.getItem("frl_current_project")).toBe("水库B");
+    });
+
+    it("loadProjects: 优先从 sessionStorage 恢复之前选定的项目", async () => {
+      mockStorage.setItem("frl_current_project", "水库B");
+      setActivePinia(createPinia());
+      const store = useProjectStore();
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.endsWith("/projects")) {
+          return jsonResponse([
+            { id: 1, name: "水库A", created_at: "2026-08-25T00:00:00Z" },
+            { id: 2, name: "水库B", created_at: "2026-08-25T01:00:00Z" },
+          ]);
+        }
+        if (u.includes("/materials")) {
+          return jsonResponse([]);
+        }
+        return jsonResponse({});
+      });
+
+      await store.loadProjects(BASE_URL);
+      expect(store.currentProject?.name).toBe("水库B");
+      expect(mockStorage.getItem("frl_current_project")).toBe("水库B");
+    });
+
+    it("deleteProject: 删除当前选中项目后清除 sessionStorage 记录", async () => {
+      const store = useProjectStore();
+      store.projects = [{ id: 1, name: "待删项目", created_at: "2026-08-25T00:00:00Z" }];
+      store.currentProject = store.projects[0];
+      mockStorage.setItem("frl_current_project", "待删项目");
+
+      mockFetch.mockImplementation(async (url, opts) => {
+        const u = String(url);
+        const method = opts?.method || "GET";
+        if (method === "DELETE") {
+          return { ok: true, status: 204, json: () => Promise.resolve({}) } as unknown as Response;
+        }
+        if (u.endsWith("/projects") && method === "GET") {
+          return jsonResponse([]);
+        }
+        return jsonResponse({});
+      });
+
+      await store.deleteProject(BASE_URL, "待删项目");
+      expect(store.currentProject).toBeNull();
+      expect(mockStorage.getItem("frl_current_project")).toBeNull();
+    });
   });
 });
 

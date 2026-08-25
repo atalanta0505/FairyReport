@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onActivated, onMounted, ref } from "vue";
 import { useEngineStore } from "../stores/engine";
 import { useProjectStore } from "../stores/project";
 import { useSettingsStore } from "../stores/settings";
@@ -19,7 +19,7 @@ function showMsg(text: string, type: "success" | "error" = "success") {
   }, 4000);
 }
 
-onMounted(async () => {
+async function ensureTemplates() {
   if (engine.baseUrl && projectStore.templates.length === 0) {
     try {
       await projectStore.loadTemplates(engine.baseUrl);
@@ -27,7 +27,10 @@ onMounted(async () => {
       showMsg(`加载模板失败: ${(e as Error).message}`, "error");
     }
   }
-});
+}
+
+onMounted(ensureTemplates);
+onActivated(ensureTemplates);
 
 const currentTemplate = computed(() => {
   return projectStore.templates.find((t) => t.report_type === projectStore.reportType);

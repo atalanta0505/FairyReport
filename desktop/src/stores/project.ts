@@ -32,8 +32,60 @@ export function parseChaptersFromOutline(outlineMd: string): ChapterInfo[] {
   return chapters;
 }
 
+function getStoredStep(): number {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      const raw = sessionStorage.getItem("frl_current_step");
+      if (raw) {
+        const val = Number(raw);
+        if (Number.isInteger(val) && val >= 1 && val <= 5) {
+          return val;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return 1;
+}
+
+function getStoredProjectName(): string | null {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      return sessionStorage.getItem("frl_current_project");
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function setStoredStep(step: number): void {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem("frl_current_step", String(step));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function setStoredProjectName(name: string | null): void {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      if (name) {
+        sessionStorage.setItem("frl_current_project", name);
+      } else {
+        sessionStorage.removeItem("frl_current_project");
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export const useProjectStore = defineStore("project", () => {
-  const currentStep = ref<number>(1);
+  const currentStep = ref<number>(getStoredStep());
   const projects = ref<ProjectOut[]>([]);
   const currentProject = ref<ProjectOut | null>(null);
   const materials = ref<MaterialOut[]>([]);
@@ -56,6 +108,7 @@ export const useProjectStore = defineStore("project", () => {
   function setStep(step: number) {
     if (step >= 1 && step <= 5) {
       currentStep.value = step;
+      setStoredStep(step);
     }
   }
 
@@ -66,22 +119,32 @@ export const useProjectStore = defineStore("project", () => {
     try {
       const list = await engineApi.listProjects(baseUrl);
       projects.value = list;
-      if (currentProject.value) {
-        const found = list.find((p) => p.name === currentProject.value?.name);
+
+      const savedName = getStoredProjectName();
+      const targetName = currentProject.value?.name || savedName;
+
+      if (targetName) {
+        const found = list.find((p) => p.name === targetName);
         if (found) {
           currentProject.value = found;
+          setStoredProjectName(found.name);
+          await loadMaterials(baseUrl, found.name);
         } else if (list.length > 0) {
           currentProject.value = list[0];
+          setStoredProjectName(list[0].name);
           await loadMaterials(baseUrl, list[0].name);
         } else {
           currentProject.value = null;
+          setStoredProjectName(null);
           materials.value = [];
         }
       } else if (list.length > 0) {
         currentProject.value = list[0];
+        setStoredProjectName(list[0].name);
         await loadMaterials(baseUrl, list[0].name);
       } else {
         currentProject.value = null;
+        setStoredProjectName(null);
         materials.value = [];
       }
     } catch (e) {
@@ -96,6 +159,7 @@ export const useProjectStore = defineStore("project", () => {
     const p = projects.value.find((item) => item.name === projectName);
     if (p) {
       currentProject.value = p;
+      setStoredProjectName(projectName);
       await loadMaterials(baseUrl, projectName);
     }
   }
@@ -121,6 +185,7 @@ export const useProjectStore = defineStore("project", () => {
       await engineApi.deleteProject(baseUrl, name);
       if (currentProject.value?.name === name) {
         currentProject.value = null;
+        setStoredProjectName(null);
         materials.value = [];
       }
       await loadProjects(baseUrl);
