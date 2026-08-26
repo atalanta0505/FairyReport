@@ -8,7 +8,7 @@ import sys
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .. import db as db_module
@@ -66,6 +66,9 @@ def create_project(body: ProjectCreate, session: Session = Depends(db_module.get
     if exists:
         raise HTTPException(status_code=409, detail=f"项目已存在：{body.name}")
 
+    # 新建前确保可能残留的同名旧目录与向量库完全重置清空
+    remove_project_data(body.name)
+
     proj = models.Project(name=body.name)
     session.add(proj)
     session.commit()
@@ -110,6 +113,8 @@ def delete_project(name: str, session: Session = Depends(db_module.get_db)):
     """删除项目（连同 files 与 vector 目录）。"""
     proj = _get_project(session, name)
 
+    # 显式清理 materials 表中的资料记录（双保险）
+    session.execute(delete(models.Material).where(models.Material.project_id == proj.id))
     session.delete(proj)
     session.commit()
 

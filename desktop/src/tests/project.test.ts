@@ -369,6 +369,55 @@ describe("Pinia useProjectStore", () => {
     expect(store.currentProject?.name).toBe("新工程");
   });
 
+  it("createProject: 重建同名项目前彻底清理本地资料与大纲缓存", async () => {
+    const store = useProjectStore();
+    mockLocalStorage.setItem("frl_outline_重建工程", JSON.stringify({ outline_md: "历史大纲" }));
+    mockLocalStorage.setItem("frl_chapters_重建工程", JSON.stringify({ 1: "历史章节" }));
+    store.materials = [
+      {
+        id: 1,
+        source_id: "old.md",
+        filename: "old.md",
+        ext: ".md",
+        chunk_count: 5,
+        size_bytes: 1024,
+        created_at: "2026-08-25T00:00:00Z",
+      },
+    ];
+
+    mockFetch.mockImplementation(async (url, opts) => {
+      const u = String(url);
+      const method = opts?.method || "GET";
+      if (u.endsWith("/projects") && method === "POST") {
+        return jsonResponse({ id: 11, name: "重建工程", created_at: "2026-08-25T00:00:00Z" }, 201);
+      }
+      if (u.endsWith("/projects") && method === "GET") {
+        return jsonResponse([{ id: 11, name: "重建工程", created_at: "2026-08-25T00:00:00Z" }]);
+      }
+      if (u.includes("/materials")) {
+        return jsonResponse([]);
+      }
+      if (u.includes("/outline")) {
+        return jsonResponse({ report_type: "可行性研究报告", outline_md: "", chapters: [] });
+      }
+      if (u.includes("/chapters")) {
+        return jsonResponse({ chapters: {} });
+      }
+      return jsonResponse({});
+    });
+
+    const p = await store.createProject(BASE_URL, "重建工程");
+    expect(p.name).toBe("重建工程");
+    expect(store.materials).toHaveLength(0);
+    expect(store.outlineMd).toBe("");
+    expect(store.outlineChapters).toHaveLength(0);
+    expect(store.chapters).toEqual({});
+    const rawOutline = mockLocalStorage.getItem("frl_outline_重建工程");
+    expect(rawOutline).not.toContain("历史大纲");
+    const rawChapters = mockLocalStorage.getItem("frl_chapters_重建工程");
+    expect(rawChapters).not.toContain("历史章节");
+  });
+
   it("deleteProject: 删除项目后清空当前选中并刷新", async () => {
     const store = useProjectStore();
     store.projects = [{ id: 1, name: "待删除", created_at: "2026-08-25T00:00:00Z" }];

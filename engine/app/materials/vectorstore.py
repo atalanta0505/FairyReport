@@ -6,7 +6,10 @@ upsert 以 source_id 为键构建稳定 ID，保证幂等；delete_by_source 按
 import gc
 import hashlib
 import logging
+import os
 import shutil
+import time
+from pathlib import Path
 
 import chromadb
 
@@ -101,35 +104,55 @@ class ProjectVectorStore:
         except Exception:
             return 0
 
+    def close(self) -> None:
+        """关闭客户端释放文件句柄。"""
+        if hasattr(self, "client") and self.client is not None:
+            try:
+                if hasattr(self.client, "close"):
+                    self.client.close()
+            except Exception:
+                pass
+        if hasattr(self, "collection") and self.collection is not None:
+            try:
+                del self.collection
+            except Exception:
+                pass
+            self.collection = None
+        if hasattr(self, "client") and self.client is not None:
+            try:
+                del self.client
+            except Exception:
+                pass
+            self.client = None
+
     @classmethod
     def close_project(cls, project_name: str) -> None:
         """关闭并清理某项目的缓存实例（释放 sqlite 文件锁）。"""
         if project_name in cls._cache:
             inst = cls._cache.pop(project_name)
-            try:
-                del inst.collection
-            except Exception:
-                pass
-            try:
-                del inst.client
-            except Exception:
-                pass
+            inst.close()
             gc.collect()
 
 
 def safe_rmtree(path, ignore_errors: bool = True) -> None:
-    """Windows 下 chroma 可能短暂持锁，重试删除。"""
-    for attempt in range(3):
+    """Windows 下 chroma 可能短暂持锁，检查路径存在性并重试 5 次退避删除。"""
+    if path is None:
+        return
+    p = Path(path) if not isinstance(path, Path) else path
+    if not p.exists():
+        return
+    for attempt in range(5):
         try:
-            shutil.rmtree(path)
+            shutil.rmtree(p)
             return
         except Exception:
-            if attempt == 2 and not ignore_errors:
+            if attempt == 4 and not ignore_errors:
                 raise
             gc.collect()
+            time.sleep(0.1)
     if ignore_errors:
         try:
-            shutil.rmtree(path, ignore_errors=True)
+            shutil.rmtree(p, ignore_errors=True)
         except Exception:
             pass
 

@@ -4,7 +4,7 @@ FairyReport 本地引擎 — ORM 模型（Project / Material）。
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base, utcnow
 
@@ -17,6 +17,13 @@ class Project(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    materials = relationship(
+        "Material",
+        backref="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class Material(Base):

@@ -1,9 +1,11 @@
 """
 FairyReport 本地引擎 — 数据库引擎与会话管理（SQLAlchemy 同步）。
 """
+import sqlite3
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -13,6 +15,15 @@ from .config import settings
 def utcnow() -> datetime:
     """返回 naive UTC 当前时间。"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """为 SQLite 连接开启外键级联与约束检查。"""
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON;")
+        cursor.close()
 
 
 def make_engine(url: str):

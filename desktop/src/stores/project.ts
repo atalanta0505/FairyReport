@@ -304,6 +304,20 @@ export const useProjectStore = defineStore("project", () => {
     lastBaseUrl.value = baseUrl;
     error.value = null;
     try {
+      if (typeof localStorage !== "undefined") {
+        try {
+          localStorage.removeItem(getOutlineStorageKey(name));
+          localStorage.removeItem(getChaptersStorageKey(name));
+        } catch {
+          // ignore
+        }
+      }
+      materials.value = [];
+      outlineMd.value = "";
+      outlineChapters.value = [];
+      chapters.value = {};
+      chapterStatuses.value = {};
+
       const created = await engineApi.createProject(baseUrl, name);
       await loadProjects(baseUrl);
       await selectProject(baseUrl, created.name);
