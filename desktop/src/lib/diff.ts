@@ -8,6 +8,8 @@
  * 4. 差异统计指标（新增/删除/未变行数）
  */
 
+import { normalizeMarkdown } from "./markdown";
+
 export type DiffType = "unchanged" | "added" | "removed";
 
 export interface DiffLine {
@@ -88,11 +90,17 @@ function computeLCS<T>(a: T[], b: T[], equals: (x: T, y: T) => boolean = (x, y) 
 }
 
 /**
- * 计算行级差异。
+ * 计算行级差异（自动对 Markdown 进行预处理断行解耦）。
  */
-export function computeLineDiff(original: string, modified: string): DiffLine[] {
-  const a = splitLines(original);
-  const b = splitLines(modified);
+export function computeLineDiff(
+  original: string,
+  modified: string,
+  knownHeadings?: string[]
+): DiffLine[] {
+  const normOriginal = normalizeMarkdown(original, knownHeadings);
+  const normModified = normalizeMarkdown(modified, knownHeadings);
+  const a = splitLines(normOriginal);
+  const b = splitLines(normModified);
 
   if (a.length === 0 && b.length === 0) {
     return [];
@@ -199,8 +207,12 @@ export function computeWordDiff(original: string, modified: string): DiffWord[] 
 /**
  * 计算左右双栏对齐对比块结构（DiffBlock）。
  */
-export function computeDiffBlocks(original: string, modified: string): DiffBlock[] {
-  const lines = computeLineDiff(original, modified);
+export function computeDiffBlocks(
+  original: string,
+  modified: string,
+  knownHeadings?: string[]
+): DiffBlock[] {
+  const lines = computeLineDiff(original, modified, knownHeadings);
   const blocks: DiffBlock[] = [];
 
   let currentBlock: DiffBlock | null = null;
@@ -286,8 +298,12 @@ export function computeDiffBlocks(original: string, modified: string): DiffBlock
 /**
  * 统计 Diff 差异指标。
  */
-export function computeDiffStats(original: string, modified: string): DiffStats {
-  const lines = computeLineDiff(original, modified);
+export function computeDiffStats(
+  original: string,
+  modified: string,
+  knownHeadings?: string[]
+): DiffStats {
+  const lines = computeLineDiff(original, modified, knownHeadings);
   let added = 0;
   let removed = 0;
   let unchanged = 0;
@@ -302,7 +318,7 @@ export function computeDiffStats(original: string, modified: string): DiffStats 
     addedLines: added,
     removedLines: removed,
     unchangedLines: unchanged,
-    totalOriginalLines: splitLines(original).length,
-    totalModifiedLines: splitLines(modified).length,
+    totalOriginalLines: splitLines(normalizeMarkdown(original, knownHeadings)).length,
+    totalModifiedLines: splitLines(normalizeMarkdown(modified, knownHeadings)).length,
   };
 }

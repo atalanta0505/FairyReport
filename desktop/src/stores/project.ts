@@ -1255,6 +1255,56 @@ export const useProjectStore = defineStore("project", () => {
     activeRevision.value = null;
   }
 
+  const batchReviewing = ref<boolean>(false);
+
+  async function runAllChaptersReview(
+    baseUrl: string,
+    llmConfig: engineApi.LLMConfig,
+    forceAll = false,
+  ): Promise<void> {
+    if (baseUrl) lastBaseUrl.value = baseUrl;
+    if (!baseUrl) throw new Error("引擎未就绪");
+
+    const targetChapters = outlineChapters.value.filter((ch) => {
+      const text = chapters.value[ch.seq];
+      const hasContent = text && text.trim().length > 0;
+      if (!hasContent) return false;
+      if (forceAll) return true;
+      return !chapterReviews.value[ch.seq];
+    });
+
+    if (targetChapters.length === 0) {
+      const completed = outlineChapters.value.filter((ch) => chapters.value[ch.seq]?.trim());
+      if (completed.length === 0) {
+        throw new Error("暂无可审阅的章节（需先在步骤 3 写作并生成正文）");
+      }
+      return;
+    }
+
+    batchReviewing.value = true;
+    error.value = null;
+
+    try {
+      for (const ch of targetChapters) {
+        if (!batchReviewing.value) break;
+        try {
+          await runChapterReview(baseUrl, ch.seq, "all", llmConfig);
+        } catch {
+          // 章节审阅异常不中断批量任务
+        }
+      }
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      batchReviewing.value = false;
+    }
+  }
+
+  function stopBatchReview(): void {
+    batchReviewing.value = false;
+  }
+
   function discardRevision(): void {
     activeRevision.value = null;
   }
@@ -1280,6 +1330,7 @@ export const useProjectStore = defineStore("project", () => {
     chapterReviews,
     reviewingSeq,
     reviewingMode,
+    batchReviewing,
     revisingSeq,
     activeRevision,
     lastBaseUrl,
@@ -1317,6 +1368,8 @@ export const useProjectStore = defineStore("project", () => {
     saveReview,
     deleteReview,
     runChapterReview,
+    runAllChaptersReview,
+    stopBatchReview,
     runChapterRevision,
     applyRevision,
     discardRevision,

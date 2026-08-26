@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   computeDiffBlocks,
   computeDiffStats,
@@ -10,8 +10,10 @@ import {
 } from "../lib/diff";
 import {
   extractOutlineHeadings,
+  extractReferences,
   htmlToMarkdown,
   markdownToHtml,
+  type ReferenceItem,
 } from "../lib/markdown";
 import { useEngineStore } from "../stores/engine";
 import { useProjectStore } from "../stores/project";
@@ -38,8 +40,40 @@ const diagnosticSubTab = ref<"issues" | "numerical" | "gaps" | "suggestions">("i
 const showRevisionPromptBar = ref<boolean>(false);
 const revisionInstruction = ref<string>("");
 
+// 参考资料来源清单抽屉展开/收起
+const showRefDrawer = ref<boolean>(false);
+
 // 全局操作通知
 const actionMessage = ref<{ type: "success" | "error" | "info"; text: string } | null>(null);
+
+// 审阅动态心跳与计时器
+const reviewElapsedSeconds = ref<number>(0);
+const reviewStageIndex = ref<number>(0);
+let reviewTimer: ReturnType<typeof setInterval> | null = null;
+
+const reviewStages = [
+  { id: "params", title: "关键参数抽取", desc: "提取投资、规模与关键工程技术指标" },
+  { id: "compliance", title: "规程合规审查", desc: "对照国家发改委与水利行业标准规程" },
+  { id: "consistency", title: "数值前后自洽", desc: "排查跨章节数据勾稽与量纲自洽性" },
+  { id: "report", title: "诊断报告生成", desc: "综合生成专家评审意见与批注" },
+];
+
+// 修订动态心跳与计时器
+const revisionElapsedSeconds = ref<number>(0);
+const revisionStageIndex = ref<number>(0);
+let revisionTimer: ReturnType<typeof setInterval> | null = null;
+
+const revisionStages = [
+  { id: "context", title: "解析上下文", desc: "分析章节脉络与专家修改指令" },
+  { id: "restructure", title: "重构方案论述", desc: "依据规程深化工艺与分项估算" },
+  { id: "polish", title: "技术规范润色", desc: "压制套话，规范工程术语与数据" },
+  { id: "diff", title: "生成 Diff 对比", desc: "构建精准差异比对视图" },
+];
+
+// 双栏 Diff 联动滚动同步锁
+const originalColRef = ref<HTMLDivElement | null>(null);
+const revisedColRef = ref<HTMLDivElement | null>(null);
+let isSyncingScroll = false;
 
 const editorCanvasRef = ref<HTMLDivElement | null>(null);
 let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,6 +140,11 @@ onMounted(async () => {
   nextTick(() => {
     syncEditorContent();
   });
+});
+
+onUnmounted(() => {
+  if (reviewTimer) clearInterval(reviewTimer);
+  if (revisionTimer) clearInterval(revisionTimer);
 });
 
 watch(
@@ -231,6 +270,15 @@ const isRevisingCurrent = computed(() => {
   return projectStore.revisingSeq === projectStore.selectedChapterSeq;
 });
 
+// 本章参考资料列表与总引用频次
+const currentChapterReferences = computed<ReferenceItem[]>(() => {
+  return extractReferences(currentChapterText.value);
+});
+
+const totalRefCitations = computed(() => {
+  return currentChapterReferences.value.reduce((sum, item) => sum + item.count, 0);
+});
+
 // Diff 对比计算
 const hasActiveRevisionForCurrent = computed(() => {
   return (
@@ -246,6 +294,7 @@ const currentDiffLines = computed<DiffLine[]>(() => {
   return computeLineDiff(
     projectStore.activeRevision.originalText,
     projectStore.activeRevision.revisedText,
+    outlineHeadings.value,
   );
 });
 
@@ -256,6 +305,7 @@ const currentDiffBlocks = computed<DiffBlock[]>(() => {
   return computeDiffBlocks(
     projectStore.activeRevision.originalText,
     projectStore.activeRevision.revisedText,
+    outlineHeadings.value,
   );
 });
 
@@ -272,10 +322,63 @@ const currentDiffStats = computed<DiffStats>(() => {
   return computeDiffStats(
     projectStore.activeRevision.originalText,
     projectStore.activeRevision.revisedText,
+    outlineHeadings.value,
   );
 });
 
-// 全书连续拼接 Markdown
+// 全书跨章指标比对汇总表
+const allNumericalChecks = computed(() => {
+  const list: {
+    chapterSeq: number;
+    chapterTitle: string;
+    parameter: string;
+    extracted_value: string;
+    status: string;
+    note: string;
+  }[] = [];
+
+  for (const ch of projectStore.outlineChapters) {
+    const rev = projectStore.chapterReviews[ch.seq];
+    if (rev?.numerical_checks && rev.numerical_checks.length > 0) {
+      for (const nc of rev.numerical_checks) {
+        list.push({
+          chapterSeq: ch.seq,
+          chapterTitle: ch.title,
+          parameter: nc.parameter,
+          extracted_value: nc.extracted_value,
+          status: nc.status,
+          note: nc.note || "",
+        });
+      }
+    }
+  }
+  return list;
+});
+
+// 全书缺失资料总台账
+const allDataGaps = computed(() => {
+  const list: {
+    chapterSeq: number;
+    chapterTitle: string;
+    gap: string;
+  }[] = [];
+
+  for (const ch of projectStore.outlineChapters) {
+    const rev = projectStore.chapterReviews[ch.seq];
+    if (rev?.data_gap_checklist && rev.data_gap_checklist.length > 0) {
+      for (const gap of rev.data_gap_checklist) {
+        list.push({
+          chapterSeq: ch.seq,
+          chapterTitle: ch.title,
+          gap,
+        });
+      }
+    }
+  }
+  return list;
+});
+
+// 全书连续拼接 Markdown 与 HTML
 const fullBookMarkdown = computed(() => {
   const parts: string[] = [];
   for (const ch of projectStore.outlineChapters) {
@@ -319,6 +422,38 @@ function onSourceInput(e: Event) {
   currentChapterText.value = target.value;
 }
 
+// 左右双栏 Diff 同步滚动比例联动
+function onOriginalScroll(e: Event) {
+  if (isSyncingScroll) return;
+  isSyncingScroll = true;
+  const source = e.target as HTMLElement;
+  if (revisedColRef.value && source) {
+    const maxScroll = source.scrollHeight - source.clientHeight;
+    const pct = maxScroll > 0 ? source.scrollTop / maxScroll : 0;
+    const targetMax = revisedColRef.value.scrollHeight - revisedColRef.value.clientHeight;
+    revisedColRef.value.scrollTop = pct * targetMax;
+  }
+  requestAnimationFrame(() => {
+    isSyncingScroll = false;
+  });
+}
+
+function onRevisedScroll(e: Event) {
+  if (isSyncingScroll) return;
+  isSyncingScroll = true;
+  const source = e.target as HTMLElement;
+  if (originalColRef.value && source) {
+    const maxScroll = source.scrollHeight - source.clientHeight;
+    const pct = maxScroll > 0 ? source.scrollTop / maxScroll : 0;
+    const targetMax = originalColRef.value.scrollHeight - originalColRef.value.clientHeight;
+    originalColRef.value.scrollTop = pct * targetMax;
+  }
+  requestAnimationFrame(() => {
+    isSyncingScroll = false;
+  });
+}
+
+// 专家审阅
 async function handleRunReview(mode: "all" | "compliance" | "numeric" | "technical" = "all") {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
@@ -333,24 +468,41 @@ async function handleRunReview(mode: "all" | "compliance" | "numeric" | "technic
   }
 
   const seq = projectStore.selectedChapterSeq;
+  const label =
+    mode === "all"
+      ? "全维专家审阅"
+      : mode === "compliance"
+      ? "合规审查"
+      : mode === "numeric"
+      ? "数值核验"
+      : "技术审校";
+
+  // 启动审阅前摇计时器与阶段轮播
+  reviewElapsedSeconds.value = 0;
+  reviewStageIndex.value = 0;
+  if (reviewTimer) clearInterval(reviewTimer);
+  reviewTimer = setInterval(() => {
+    reviewElapsedSeconds.value += 1;
+    // 每 3 秒步进一个阶段（循环轮播）
+    reviewStageIndex.value = Math.min(3, Math.floor(reviewElapsedSeconds.value / 3));
+  }, 1000);
+
   try {
-    const label =
-      mode === "all"
-        ? "全维专家审阅"
-        : mode === "compliance"
-        ? "合规审查"
-        : mode === "numeric"
-        ? "数值核验"
-        : "技术审校";
     showMsg(`正在对第 ${seq} 章启动「${label}」，请稍候...`, "info");
     const result = await projectStore.runChapterReview(engine.baseUrl, seq, mode, llmConfig);
     isDiagnosticExpanded.value = true;
     showMsg(`第 ${seq} 章「${label}」完成！得分：${result.score ?? 85} 分，状态：${result.status}`);
   } catch (err) {
     showMsg(`审阅失败：${(err as Error).message}`, "error");
+  } finally {
+    if (reviewTimer) {
+      clearInterval(reviewTimer);
+      reviewTimer = null;
+    }
   }
 }
 
+// AI 定向修订
 async function handleRunRevision(customInstruction?: string) {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
@@ -371,12 +523,26 @@ async function handleRunRevision(customInstruction?: string) {
     return;
   }
 
+  // 启动修订前摇计时器与阶段轮播
+  revisionElapsedSeconds.value = 0;
+  revisionStageIndex.value = 0;
+  if (revisionTimer) clearInterval(revisionTimer);
+  revisionTimer = setInterval(() => {
+    revisionElapsedSeconds.value += 1;
+    revisionStageIndex.value = Math.min(3, Math.floor(revisionElapsedSeconds.value / 3));
+  }, 1000);
+
   try {
     showMsg(`正在对第 ${seq} 章执行 AI 定向修订并生成 Diff 对比...`, "info");
     await projectStore.runChapterRevision(engine.baseUrl, seq, instruction, llmConfig);
     showMsg(`第 ${seq} 章修订完成！已进入 Diff 差异比对工作台。`);
   } catch (err) {
     showMsg(`修订失败：${(err as Error).message}`, "error");
+  } finally {
+    if (revisionTimer) {
+      clearInterval(revisionTimer);
+      revisionTimer = null;
+    }
   }
 }
 
@@ -399,7 +565,8 @@ function fillRevisionInstruction(text: string) {
   revisionInstruction.value = text;
 }
 
-async function handleBatchReviewAll() {
+// 批量全书体检
+async function handleBatchReviewAll(forceAll = false) {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -414,23 +581,26 @@ async function handleBatchReviewAll() {
 
   const unreviewed = projectStore.outlineChapters.filter((ch) => {
     const text = projectStore.chapters[ch.seq];
-    return text && text.trim().length > 0 && !projectStore.chapterReviews[ch.seq];
+    return text && text.trim().length > 0 && (forceAll || !projectStore.chapterReviews[ch.seq]);
   });
 
   if (unreviewed.length === 0) {
-    showMsg("暂无可批量审阅的未审阅章节（需已完成正文且尚未审阅）", "info");
+    showMsg("全书所有已写章节均已完成专家审阅。如需重新体检请使用强制模式。", "info");
     return;
   }
 
-  showMsg(`已启动 ${unreviewed.length} 个章节的批量全维审阅任务...`, "info");
-  for (const ch of unreviewed) {
-    try {
-      await projectStore.runChapterReview(engine.baseUrl, ch.seq, "all", llmConfig);
-    } catch (e) {
-      // ignore
-    }
+  try {
+    showMsg(`已启动 ${unreviewed.length} 个章节的批量全书体检任务...`, "info");
+    await projectStore.runAllChaptersReview(engine.baseUrl, llmConfig, forceAll);
+    showMsg("全书一键综合体检完成！可在质量看板中查阅全书健康矩阵。");
+  } catch (err) {
+    showMsg(`批量体检中断：${(err as Error).message}`, "error");
   }
-  showMsg("批量审阅任务全部完成！");
+}
+
+function handleStopBatchReview() {
+  projectStore.stopBatchReview();
+  showMsg("已中止批量全书体检", "info");
 }
 
 function copyFullBookText() {
@@ -465,6 +635,26 @@ function jumpToPreviewAnchor(seq: number) {
           <div class="header-titles">
             <h3>专家审阅与修改</h3>
             <span class="proj-badge">{{ projectStore.currentProject?.name || "未选项目" }}</span>
+          </div>
+
+          <!-- 全书一键综合体检快捷入口 -->
+          <div class="batch-review-bar">
+            <button
+              v-if="projectStore.batchReviewing"
+              class="btn btn-danger btn-block btn-sm"
+              @click="handleStopBatchReview"
+            >
+              ⏹ 停止全书体检
+            </button>
+            <button
+              v-else
+              class="btn btn-primary btn-block btn-sm batch-btn"
+              :disabled="completedChaptersCount === 0"
+              @click="handleBatchReviewAll(false)"
+              title="在后台自动对所有未审阅章节执行全维深度体检"
+            >
+              🚀 全书一键综合体检
+            </button>
           </div>
 
           <!-- 全局质量指标小看板 -->
@@ -584,6 +774,18 @@ function jumpToPreviewAnchor(seq: number) {
                 </span>
                 <span class="meta-item text-muted" v-else>尚未进行专家审阅</span>
               </div>
+              <!-- 功能定位与使用场景提示 -->
+              <div class="review-mode-hints">
+                <span class="hint-tag hint-all" title="全科综合评分 0~100 分，全维审查政策合规、数值计算、技术方案与文字表述">
+                  🔍 全维：全科综合 (0~100分)
+                </span>
+                <span class="hint-tag hint-numeric" title="关键指标自洽性排查，专项核验投资估算、产能指标与跨段落数据勾稽">
+                  📏 数值：关键指标自洽排查
+                </span>
+                <span class="hint-tag hint-compliance" title="国家发改委与水利行业规程符合性审查，核实法规标准与审批要件">
+                  ⚖️ 合规：发改委/水利规程审查
+                </span>
+              </div>
             </div>
 
             <!-- 操作按钮组 -->
@@ -592,25 +794,27 @@ function jumpToPreviewAnchor(seq: number) {
                 class="btn btn-outline"
                 :disabled="!currentChapterText.trim() || isReviewingCurrent"
                 @click="handleRunReview('all')"
-                title="对本章执行政策合规、数值计算、技术方案与文字全维专家审查"
+                title="全科综合（0~100 分），全维审查政策合规、数值计算、技术方案与文字表述"
               >
-                <span v-if="isReviewingCurrent" class="spinner-inline"></span>
+                <span v-if="isReviewingCurrent && projectStore.reviewingMode === 'all'" class="spinner-inline"></span>
                 🔍 全维专家审阅
               </button>
               <button
                 class="btn btn-outline"
                 :disabled="!currentChapterText.trim() || isReviewingCurrent"
                 @click="handleRunReview('numeric')"
-                title="提取并专项核验工程参数、投资估算与指标自洽性"
+                title="关键指标自洽性排查，提取并专项核验工程参数、投资估算与指标前后自洽"
               >
+                <span v-if="isReviewingCurrent && projectStore.reviewingMode === 'numeric'" class="spinner-inline"></span>
                 📏 数值校验
               </button>
               <button
                 class="btn btn-outline"
                 :disabled="!currentChapterText.trim() || isReviewingCurrent"
                 @click="handleRunReview('compliance')"
-                title="审查法律法规、规范标准与前置审批要件合规性"
+                title="国家发改委与水利规程符合性审查，核实法规、规范标准与前置审批要件"
               >
+                <span v-if="isReviewingCurrent && projectStore.reviewingMode === 'compliance'" class="spinner-inline"></span>
                 ⚖️ 合规审查
               </button>
               <button
@@ -621,16 +825,281 @@ function jumpToPreviewAnchor(seq: number) {
               >
                 🔧 AI 定向修订
               </button>
+              <!-- 参考资料抽屉入口 -->
+              <button
+                class="btn btn-outline ref-drawer-btn"
+                :class="{ active: showRefDrawer }"
+                @click="showRefDrawer = !showRefDrawer"
+                title="查看本章正文中命中的底稿文件与规程标准引用清单"
+              >
+                📚 参考资料 ({{ currentChapterReferences.length }})
+              </button>
             </div>
           </div>
 
           <div class="card-body chapter-workbench-body">
-            <!-- 可折叠专家诊断与批注卡片 -->
-            <div v-if="currentChapterReview" class="diagnostic-panel" :class="{ collapsed: !isDiagnosticExpanded }">
-              <div class="diagnostic-header" @click="isDiagnosticExpanded = !isDiagnosticExpanded">
-                <div class="diag-header-left">
-                  <span class="diag-icon">🩺</span>
-                  <span class="diag-title">专家诊断与批注报告</span>
+            <!-- ═════════════════════════════════════════════════════════ -->
+            <!-- 审阅动态心跳与阶段轮播进度卡片（消除卡死感） -->
+            <!-- ═════════════════════════════════════════════════════════ -->
+            <transition name="fade">
+              <div v-if="isReviewingCurrent" class="heartbeat-card review-heartbeat">
+                <div class="heartbeat-header">
+                  <div class="hb-badge">
+                    <span class="radar-pulse"></span>
+                    <span class="hb-title">专家深度审阅诊断进行中</span>
+                  </div>
+                  <div class="hb-timer">
+                    ⏱️ 已审阅 <strong>{{ reviewElapsedSeconds }}</strong> 秒...
+                  </div>
+                </div>
+
+                <!-- 4 阶段进度条指示器 -->
+                <div class="pipeline-stepper">
+                  <div
+                    v-for="(stage, idx) in reviewStages"
+                    :key="stage.id"
+                    class="stepper-node"
+                    :class="{
+                      completed: reviewStageIndex > idx,
+                      active: reviewStageIndex === idx,
+                      pending: reviewStageIndex < idx,
+                    }"
+                  >
+                    <div class="stepper-badge">
+                      <span v-if="reviewStageIndex > idx" class="stepper-check">✓</span>
+                      <span v-else-if="reviewStageIndex === idx" class="stepper-spinner"></span>
+                      <span v-else class="stepper-dot">{{ idx + 1 }}</span>
+                    </div>
+                    <div class="stepper-text">
+                      <span class="stepper-title">{{ stage.title }}</span>
+                      <span class="stepper-desc">{{ stage.desc }}</span>
+                    </div>
+                    <div v-if="idx < reviewStages.length - 1" class="stepper-line" :class="{ completed: reviewStageIndex > idx }"></div>
+                  </div>
+                </div>
+
+                <div class="hb-status-msg">
+                  💡 当前正在执行：{{ reviewStages[reviewStageIndex]?.title }} · {{ reviewStages[reviewStageIndex]?.desc }}
+                </div>
+              </div>
+            </transition>
+
+            <!-- ═════════════════════════════════════════════════════════ -->
+            <!-- 修订动态心跳与阶段轮播进度卡片 -->
+            <!-- ═════════════════════════════════════════════════════════ -->
+            <transition name="fade">
+              <div v-if="isRevisingCurrent" class="heartbeat-card revision-heartbeat">
+                <div class="heartbeat-header">
+                  <div class="hb-badge">
+                    <span class="radar-pulse revision-pulse"></span>
+                    <span class="hb-title">AI 定向修订重构中</span>
+                  </div>
+                  <div class="hb-timer">
+                    ⚡ 已修订 <strong>{{ revisionElapsedSeconds }}</strong> 秒...
+                  </div>
+                </div>
+
+                <!-- 4 阶段修订进度条 -->
+                <div class="pipeline-stepper">
+                  <div
+                    v-for="(stage, idx) in revisionStages"
+                    :key="stage.id"
+                    class="stepper-node"
+                    :class="{
+                      completed: revisionStageIndex > idx,
+                      active: revisionStageIndex === idx,
+                      pending: revisionStageIndex < idx,
+                    }"
+                  >
+                    <div class="stepper-badge">
+                      <span v-if="revisionStageIndex > idx" class="stepper-check">✓</span>
+                      <span v-else-if="revisionStageIndex === idx" class="stepper-spinner"></span>
+                      <span v-else class="stepper-dot">{{ idx + 1 }}</span>
+                    </div>
+                    <div class="stepper-text">
+                      <span class="stepper-title">{{ stage.title }}</span>
+                      <span class="stepper-desc">{{ stage.desc }}</span>
+                    </div>
+                    <div v-if="idx < revisionStages.length - 1" class="stepper-line" :class="{ completed: revisionStageIndex > idx }"></div>
+                  </div>
+                </div>
+
+                <div class="hb-status-msg">
+                  ✍️ 当前进展：{{ revisionStages[revisionStageIndex]?.title }} · {{ revisionStages[revisionStageIndex]?.desc }}
+                </div>
+              </div>
+            </transition>
+
+            <!-- ═════════════════════════════════════════════════════════ -->
+            <!-- 专家诊断与批注卡片（自适应排版 + 44px 收起胶囊） -->
+            <!-- ═════════════════════════════════════════════════════════ -->
+            <div v-if="currentChapterReview" class="diagnostic-panel" :class="{ isCollapsed: !isDiagnosticExpanded }">
+              <!-- 展开态完整卡片 -->
+              <div v-if="isDiagnosticExpanded" class="diagnostic-expanded-box">
+                <div class="diagnostic-header" @click="isDiagnosticExpanded = false">
+                  <div class="diag-header-left">
+                    <span class="diag-icon">🩺</span>
+                    <span class="diag-title">专家诊断与批注报告</span>
+                    <span
+                      class="status-pill"
+                      :class="
+                        currentChapterReview.status === '通过'
+                          ? 'pill-success'
+                          : currentChapterReview.status === '需补充'
+                          ? 'pill-warning'
+                          : 'pill-danger'
+                      "
+                    >
+                      {{ currentChapterReview.status === '通过' ? '✅ 达标通过' : currentChapterReview.status }}
+                    </span>
+                    <span class="score-pill">综合评分：{{ currentChapterReview.score ?? 85 }} / 100</span>
+                  </div>
+                  <div class="diag-header-right">
+                    <button class="btn-xs-text collapse-btn" @click.stop="isDiagnosticExpanded = false">
+                      ▲ 收起诊断详情
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 展开时的诊断详情（自适应滚动排版，彻底解决底部截断） -->
+                <div class="diagnostic-content-scrollable">
+                  <div class="diag-summary-box" v-if="currentChapterReview.summary">
+                    <strong>诊断摘要：</strong>{{ currentChapterReview.summary }}
+                  </div>
+
+                  <!-- 诊断子 Tab -->
+                  <div class="diag-subtabs">
+                    <button
+                      class="diag-tab-btn"
+                      :class="{ active: diagnosticSubTab === 'issues' }"
+                      @click="diagnosticSubTab = 'issues'"
+                    >
+                      ⚠️ 问题清单 ({{ currentChapterReview.issues?.length || 0 }})
+                    </button>
+                    <button
+                      class="diag-tab-btn"
+                      :class="{ active: diagnosticSubTab === 'numerical' }"
+                      @click="diagnosticSubTab = 'numerical'"
+                    >
+                      📐 数值核验表 ({{ currentChapterReview.numerical_checks?.length || 0 }})
+                    </button>
+                    <button
+                      class="diag-tab-btn"
+                      :class="{ active: diagnosticSubTab === 'gaps' }"
+                      @click="diagnosticSubTab = 'gaps'"
+                    >
+                      📦 缺失资料清单 ({{ currentChapterReview.data_gap_checklist?.length || 0 }})
+                    </button>
+                    <button
+                      class="diag-tab-btn"
+                      :class="{ active: diagnosticSubTab === 'suggestions' }"
+                      @click="diagnosticSubTab = 'suggestions'"
+                    >
+                      💡 综合修改建议
+                    </button>
+                  </div>
+
+                  <!-- 1. 问题清单 -->
+                  <div v-if="diagnosticSubTab === 'issues'" class="diag-tab-content">
+                    <div v-if="currentChapterReview.issues && currentChapterReview.issues.length > 0" class="issues-list">
+                      <div
+                        v-for="(issue, idx) in currentChapterReview.issues"
+                        :key="issue.id || idx"
+                        class="issue-card"
+                        :class="`sev-${issue.severity}`"
+                      >
+                        <div class="issue-top">
+                          <span class="issue-badge" :class="`badge-${issue.severity}`">
+                            {{ issue.severity === 'error' ? '🚨 严重错误' : issue.severity === 'warning' ? '⚠️ 警告' : '💡 优化建议' }}
+                          </span>
+                          <span class="issue-category">{{ issue.category }}</span>
+                          <span class="issue-location" v-if="issue.location">📍 {{ issue.location }}</span>
+                          <button
+                            class="btn-xs-text fill-intent-btn"
+                            @click="fillRevisionInstruction(`针对 ${issue.location || '本段'}：${issue.suggestion || issue.message}`)"
+                            title="将本条建议代入 AI 修订意图输入框"
+                          >
+                            代入修订 ✍️
+                          </button>
+                        </div>
+                        <div class="issue-msg">{{ issue.message }}</div>
+                        <div class="issue-sugg" v-if="issue.suggestion">
+                          <strong>修改建议：</strong>{{ issue.suggestion }}
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else class="empty-sub-tip">✓ 未发现明显合规或技术硬伤问题，质量达标。</div>
+                  </div>
+
+                  <!-- 2. 数值核验表 -->
+                  <div v-if="diagnosticSubTab === 'numerical'" class="diag-tab-content">
+                    <table v-if="currentChapterReview.numerical_checks && currentChapterReview.numerical_checks.length > 0" class="diag-table">
+                      <thead>
+                        <tr>
+                          <th>参数/指标名称</th>
+                          <th>正文提取数值</th>
+                          <th>核验状态</th>
+                          <th>核验说明与依据</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(nc, idx) in currentChapterReview.numerical_checks" :key="idx">
+                          <td><strong>{{ nc.parameter }}</strong></td>
+                          <td><code>{{ nc.extracted_value }}</code></td>
+                          <td>
+                            <span class="status-dot-pill" :class="`st-${nc.status}`">
+                              {{ nc.status === 'normal' ? '✅ 正常自洽' : nc.status === 'abnormal' ? '⚠️ 存在矛盾' : '⏳ 待复核' }}
+                            </span>
+                          </td>
+                          <td>{{ nc.note }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <div v-else class="empty-sub-tip">未提取到关键数值或本章暂无独立技术参数表。</div>
+                  </div>
+
+                  <!-- 3. 缺失资料清单 -->
+                  <div v-if="diagnosticSubTab === 'gaps'" class="diag-tab-content">
+                    <div v-if="currentChapterReview.data_gap_checklist && currentChapterReview.data_gap_checklist.length > 0" class="gaps-list">
+                      <div v-for="(gap, idx) in currentChapterReview.data_gap_checklist" :key="idx" class="gap-item">
+                        <span class="gap-bullet">📄</span>
+                        <span class="gap-text">{{ gap }}</span>
+                        <button
+                          class="btn-xs-text"
+                          @click="fillRevisionInstruction(`补充关于「${gap}」的分析与说明`)"
+                        >
+                          代入修订
+                        </button>
+                      </div>
+                    </div>
+                    <div v-else class="empty-sub-tip">✓ 底稿资料齐全，无需补充前置文件。</div>
+                  </div>
+
+                  <!-- 4. 综合建议 -->
+                  <div v-if="diagnosticSubTab === 'suggestions'" class="diag-tab-content">
+                    <div class="suggestions-box" v-if="currentChapterReview.suggestions">
+                      <pre class="suggestions-pre">{{ currentChapterReview.suggestions }}</pre>
+                      <button
+                        class="btn btn-secondary btn-sm"
+                        @click="fillRevisionInstruction(currentChapterReview.suggestions)"
+                      >
+                        一键代入全部综合建议至修订意图 ✍️
+                      </button>
+                    </div>
+                    <div v-else class="empty-sub-tip">无额外综合修改建议。</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 收起态：44px 易点击通栏胶囊条 -->
+              <div
+                v-else
+                class="diagnostic-capsule-collapsed"
+                @click="isDiagnosticExpanded = true"
+                title="点击展开专家诊断详情"
+              >
+                <div class="capsule-left">
+                  <span class="capsule-icon">🩺</span>
                   <span
                     class="status-pill"
                     :class="
@@ -641,146 +1110,22 @@ function jumpToPreviewAnchor(seq: number) {
                         : 'pill-danger'
                     "
                   >
-                    {{ currentChapterReview.status }}
+                    {{ currentChapterReview.status === '通过' ? '✅ 达标' : currentChapterReview.status }}
                   </span>
-                  <span class="score-pill">得分：{{ currentChapterReview.score ?? 85 }} / 100</span>
+                  <span class="score-pill-sm">{{ currentChapterReview.score ?? 85 }}分</span>
+                  <span class="capsule-summary-snippet" :title="currentChapterReview.summary">
+                    {{ currentChapterReview.summary || "诊断报告已就绪" }}
+                  </span>
                 </div>
-                <div class="diag-header-right">
-                  <span class="toggle-arrow">{{ isDiagnosticExpanded ? '▲ 收起' : '▼ 展开' }}</span>
-                </div>
-              </div>
-
-              <!-- 展开时的诊断详情 -->
-              <div v-show="isDiagnosticExpanded" class="diagnostic-content">
-                <div class="diag-summary-box" v-if="currentChapterReview.summary">
-                  <strong>诊断摘要：</strong>{{ currentChapterReview.summary }}
-                </div>
-
-                <!-- 诊断子 Tab -->
-                <div class="diag-subtabs">
-                  <button
-                    class="diag-tab-btn"
-                    :class="{ active: diagnosticSubTab === 'issues' }"
-                    @click="diagnosticSubTab = 'issues'"
-                  >
-                    ⚠️ 问题清单 ({{ currentChapterReview.issues?.length || 0 }})
-                  </button>
-                  <button
-                    class="diag-tab-btn"
-                    :class="{ active: diagnosticSubTab === 'numerical' }"
-                    @click="diagnosticSubTab = 'numerical'"
-                  >
-                    📐 数值核验表 ({{ currentChapterReview.numerical_checks?.length || 0 }})
-                  </button>
-                  <button
-                    class="diag-tab-btn"
-                    :class="{ active: diagnosticSubTab === 'gaps' }"
-                    @click="diagnosticSubTab = 'gaps'"
-                  >
-                    📦 缺失资料清单 ({{ currentChapterReview.data_gap_checklist?.length || 0 }})
-                  </button>
-                  <button
-                    class="diag-tab-btn"
-                    :class="{ active: diagnosticSubTab === 'suggestions' }"
-                    @click="diagnosticSubTab = 'suggestions'"
-                  >
-                    💡 综合修改建议
-                  </button>
-                </div>
-
-                <!-- 1. 问题清单 -->
-                <div v-if="diagnosticSubTab === 'issues'" class="diag-tab-content">
-                  <div v-if="currentChapterReview.issues && currentChapterReview.issues.length > 0" class="issues-list">
-                    <div
-                      v-for="(issue, idx) in currentChapterReview.issues"
-                      :key="issue.id || idx"
-                      class="issue-card"
-                      :class="`sev-${issue.severity}`"
-                    >
-                      <div class="issue-top">
-                        <span class="issue-badge" :class="`badge-${issue.severity}`">
-                          {{ issue.severity === 'error' ? '🚨 严重错误' : issue.severity === 'warning' ? '⚠️ 警告' : '💡 优化建议' }}
-                        </span>
-                        <span class="issue-category">{{ issue.category }}</span>
-                        <span class="issue-location" v-if="issue.location">📍 {{ issue.location }}</span>
-                        <button
-                          class="btn-xs-text fill-intent-btn"
-                          @click="fillRevisionInstruction(`针对 ${issue.location || '本段'}：${issue.suggestion || issue.message}`)"
-                          title="将本条建议代入 AI 修订意图输入框"
-                        >
-                          代入修订 ✍️
-                        </button>
-                      </div>
-                      <div class="issue-msg">{{ issue.message }}</div>
-                      <div class="issue-sugg" v-if="issue.suggestion">
-                        <strong>修改建议：</strong>{{ issue.suggestion }}
-                      </div>
-                    </div>
-                  </div>
-                  <div v-else class="empty-sub-tip">✓ 未发现明显合规或技术硬伤问题，质量优良。</div>
-                </div>
-
-                <!-- 2. 数值核验表 -->
-                <div v-if="diagnosticSubTab === 'numerical'" class="diag-tab-content">
-                  <table v-if="currentChapterReview.numerical_checks && currentChapterReview.numerical_checks.length > 0" class="diag-table">
-                    <thead>
-                      <tr>
-                        <th>参数/指标</th>
-                        <th>提取数值</th>
-                        <th>核验状态</th>
-                        <th>核验说明与依据</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="(nc, idx) in currentChapterReview.numerical_checks" :key="idx">
-                        <td><strong>{{ nc.parameter }}</strong></td>
-                        <td><code>{{ nc.extracted_value }}</code></td>
-                        <td>
-                          <span class="status-dot-pill" :class="`st-${nc.status}`">
-                            {{ nc.status === 'normal' ? '✅ 正常自洽' : nc.status === 'abnormal' ? '⚠️ 存在矛盾' : '⏳ 待复核' }}
-                          </span>
-                        </td>
-                        <td>{{ nc.note }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <div v-else class="empty-sub-tip">未提取到关键数值或本章暂无独立技术参数表。</div>
-                </div>
-
-                <!-- 3. 缺失资料清单 -->
-                <div v-if="diagnosticSubTab === 'gaps'" class="diag-tab-content">
-                  <div v-if="currentChapterReview.data_gap_checklist && currentChapterReview.data_gap_checklist.length > 0" class="gaps-list">
-                    <div v-for="(gap, idx) in currentChapterReview.data_gap_checklist" :key="idx" class="gap-item">
-                      <span class="gap-bullet">📄</span>
-                      <span class="gap-text">{{ gap }}</span>
-                      <button
-                        class="btn-xs-text"
-                        @click="fillRevisionInstruction(`补充关于「${gap}」的分析与说明`)"
-                      >
-                        代入修订
-                      </button>
-                    </div>
-                  </div>
-                  <div v-else class="empty-sub-tip">✓ 底稿资料齐全，无需补充前置文件。</div>
-                </div>
-
-                <!-- 4. 综合建议 -->
-                <div v-if="diagnosticSubTab === 'suggestions'" class="diag-tab-content">
-                  <div class="suggestions-box" v-if="currentChapterReview.suggestions">
-                    <pre class="suggestions-pre">{{ currentChapterReview.suggestions }}</pre>
-                    <button
-                      class="btn btn-secondary btn-sm"
-                      @click="fillRevisionInstruction(currentChapterReview.suggestions)"
-                    >
-                      一键代入全部综合建议至修订意图 ✍️
-                    </button>
-                  </div>
-                  <div v-else class="empty-sub-tip">无额外综合修改建议。</div>
+                <div class="capsule-right">
+                  <span class="expand-action-text">[ ▼ 展开诊断详情 ]</span>
                 </div>
               </div>
             </div>
 
+            <!-- ═════════════════════════════════════════════════════════ -->
             <!-- AI 定向修订意图输入条 -->
+            <!-- ═════════════════════════════════════════════════════════ -->
             <transition name="slide">
               <div v-if="showRevisionPromptBar" class="revision-prompt-box">
                 <div class="prompt-header">
@@ -818,15 +1163,15 @@ function jumpToPreviewAnchor(seq: number) {
               </div>
             </transition>
 
-            <!-- ═════════════════════════════════════════════════════════════ -->
+            <!-- ═════════════════════════════════════════════════════════ -->
             <!-- 核心展示区域：Diff 差异对比模式 VS 常规排版就地编辑模式 -->
-            <!-- ═════════════════════════════════════════════════════════════ -->
+            <!-- ═════════════════════════════════════════════════════════ -->
 
-            <!-- 状态 A：Diff 差异对比工作台（当 activeRevision 处于激活状态时） -->
+            <!-- 状态 A：Diff 差异对比工作台（当 activeRevision 激活时） -->
             <div v-if="hasActiveRevisionForCurrent" class="diff-workbench-container">
               <div class="diff-toolbar">
                 <div class="diff-toolbar-left">
-                  <span class="diff-title-badge">⚡ AI 修订 Diff 差异对比</span>
+                  <span class="diff-title-badge">⚡ AI 修订 Diff 差异对比工作台</span>
                   <div class="diff-stats-pills">
                     <span class="diff-pill pill-added">+{{ currentDiffStats.addedLines }} 行新增</span>
                     <span class="diff-pill pill-removed">-{{ currentDiffStats.removedLines }} 行删除</span>
@@ -853,11 +1198,18 @@ function jumpToPreviewAnchor(seq: number) {
                 </div>
               </div>
 
-              <!-- 左右双栏 Diff 视图 -->
+              <!-- 左右双栏 Diff 视图（带实时比例同步滚动 Sync Scroll） -->
               <div v-if="diffViewMode === 'sideBySide'" class="diff-view-side-by-side">
                 <div class="diff-side-column side-original">
-                  <div class="diff-column-header">原文正文（修改前）</div>
-                  <div class="diff-column-content">
+                  <div class="diff-column-header">
+                    <span>原文正文（修改前）</span>
+                    <span class="sync-indicator">↕ 比例联动中</span>
+                  </div>
+                  <div
+                    ref="originalColRef"
+                    class="diff-column-content water-spec-typography"
+                    @scroll="onOriginalScroll"
+                  >
                     <div
                       v-for="(block, bIdx) in currentDiffBlocks"
                       :key="bIdx"
@@ -881,8 +1233,15 @@ function jumpToPreviewAnchor(seq: number) {
                 </div>
 
                 <div class="diff-side-column side-revised">
-                  <div class="diff-column-header">修订后正文（建议采纳）</div>
-                  <div class="diff-column-content">
+                  <div class="diff-column-header">
+                    <span>修订后正文（建议采纳）</span>
+                    <span class="sync-indicator">↕ 比例联动中</span>
+                  </div>
+                  <div
+                    ref="revisedColRef"
+                    class="diff-column-content water-spec-typography"
+                    @scroll="onRevisedScroll"
+                  >
                     <div
                       v-for="(block, bIdx) in currentDiffBlocks"
                       :key="bIdx"
@@ -906,8 +1265,8 @@ function jumpToPreviewAnchor(seq: number) {
                 </div>
               </div>
 
-              <!-- 单栏内联 Diff 视图 -->
-              <div v-else class="diff-view-inline">
+              <!-- 单栏内联 Diff 视图（段落级删除线与浅绿高亮） -->
+              <div v-else class="diff-view-inline water-spec-typography">
                 <div class="diff-inline-content">
                   <div
                     v-for="(line, idx) in currentDiffLines"
@@ -920,7 +1279,9 @@ function jumpToPreviewAnchor(seq: number) {
                     <span class="inline-sign">
                       {{ line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ' }}
                     </span>
-                    <span class="inline-code">{{ line.text }}</span>
+                    <span class="inline-code" :class="{ 'strike-del': line.type === 'removed' }">
+                      {{ line.text }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1028,17 +1389,28 @@ function jumpToPreviewAnchor(seq: number) {
         </section>
 
         <!-- ═════════════════════════════════════════════════════════════════ -->
-        <!-- 视图 3：全局质量与偏离度看板 -->
+        <!-- 视图 3：全局质量与偏离度看板（全书跨章一致性体检总览） -->
         <!-- ═════════════════════════════════════════════════════════════════ -->
         <section v-else-if="viewTab === 'dashboard'" class="workbench-section dashboard-section">
           <div class="card-header dashboard-header">
             <div class="dash-title-area">
               <h3>📊 全局报告质量与审阅健康度看板</h3>
-              <p class="dash-subtitle">全方位统计各章节完成度、字数偏离度、合规审查与专家打分分布。</p>
+              <p class="dash-subtitle">集中展示全书章节质量达标矩阵、跨章指标自洽比对表与全书缺失资料总台账。</p>
             </div>
             <div class="dash-actions">
-              <button class="btn btn-primary" @click="handleBatchReviewAll">
-                🚀 批量全维审阅所有未审阅章节
+              <button
+                v-if="projectStore.batchReviewing"
+                class="btn btn-danger"
+                @click="handleStopBatchReview"
+              >
+                ⏹ 停止全书体检
+              </button>
+              <button
+                v-else
+                class="btn btn-primary"
+                @click="handleBatchReviewAll(true)"
+              >
+                🚀 重新执行全书全维体检
               </button>
             </div>
           </div>
@@ -1073,15 +1445,15 @@ function jumpToPreviewAnchor(seq: number) {
               <div class="kpi-card">
                 <span class="kpi-icon">⚠️</span>
                 <div class="kpi-info">
-                  <span class="kpi-label">待修正问题数</span>
+                  <span class="kpi-label">待修正问题总数</span>
                   <span class="kpi-val" :class="{ 'text-warning': totalIssuesCount > 0 }">{{ totalIssuesCount }} 项</span>
                 </div>
               </div>
             </div>
 
-            <!-- 各章节矩阵看板表格 -->
+            <!-- 1. 各章节矩阵看板表格 -->
             <div class="dashboard-table-card">
-              <h4 class="table-title">章节全维质量矩阵明细</h4>
+              <h4 class="table-title">📑 章节全维质量矩阵明细</h4>
               <table class="dashboard-matrix-table">
                 <thead>
                   <tr>
@@ -1090,7 +1462,7 @@ function jumpToPreviewAnchor(seq: number) {
                     <th>实际字数</th>
                     <th>审阅状态</th>
                     <th>专家评分</th>
-                    <th>问题数</th>
+                    <th>问题项数</th>
                     <th>缺失资料</th>
                     <th>操作</th>
                   </tr>
@@ -1143,8 +1515,113 @@ function jumpToPreviewAnchor(seq: number) {
                 </tbody>
               </table>
             </div>
+
+            <!-- 2. 跨章关键指标自洽比对表 -->
+            <div class="dashboard-table-card">
+              <h4 class="table-title">📐 跨章关键指标前后自洽性比对表</h4>
+              <table v-if="allNumericalChecks.length > 0" class="dashboard-matrix-table">
+                <thead>
+                  <tr>
+                    <th style="width: 100px;">所属章节</th>
+                    <th>参数/指标名称</th>
+                    <th>提取数值</th>
+                    <th>自洽状态</th>
+                    <th>核验说明与依据</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(item, idx) in allNumericalChecks" :key="idx">
+                    <td>第 {{ item.chapterSeq }} 章</td>
+                    <td><strong>{{ item.parameter }}</strong></td>
+                    <td><code>{{ item.extracted_value }}</code></td>
+                    <td>
+                      <span class="status-dot-pill" :class="`st-${item.status}`">
+                        {{ item.status === 'normal' ? '✅ 正常自洽' : item.status === 'abnormal' ? '⚠️ 存在矛盾' : '⏳ 待复核' }}
+                      </span>
+                    </td>
+                    <td>{{ item.note }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="empty-table-tip">暂无提取到的跨章数值核验数据，请先对章节执行审阅。</div>
+            </div>
+
+            <!-- 3. 全书缺失资料总台账 -->
+            <div class="dashboard-table-card">
+              <h4 class="table-title">📦 全书缺失资料与前置要件总台账</h4>
+              <table v-if="allDataGaps.length > 0" class="dashboard-matrix-table">
+                <thead>
+                  <tr>
+                    <th style="width: 100px;">关联章节</th>
+                    <th>缺失资料 / 前置审批文件名称</th>
+                    <th>建议处置方案</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(gapItem, idx) in allDataGaps" :key="idx">
+                    <td>第 {{ gapItem.chapterSeq }} 章</td>
+                    <td><strong class="text-warning">📄 {{ gapItem.gap }}</strong></td>
+                    <td>建议在底稿库中补充该要件或使用定向修订补充说明</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="empty-table-tip">✓ 全书底稿资料完整，无待补前置要件。</div>
+            </div>
           </div>
         </section>
+
+        <!-- ═════════════════════════════════════════════════════════ -->
+        <!-- 参考资料来源抽屉 (Drawer) -->
+        <!-- ═════════════════════════════════════════════════════════ -->
+        <transition name="drawer-fade">
+          <div v-if="showRefDrawer" class="ref-drawer-overlay" @click="showRefDrawer = false">
+            <div class="ref-drawer-panel" @click.stop>
+              <div class="drawer-header">
+                <div class="drawer-title-box">
+                  <h4>📚 本章参考资料来源台账</h4>
+                  <span class="drawer-sub">第 {{ currentChapter?.seq }} 章：{{ currentChapter?.title }}</span>
+                </div>
+                <button class="drawer-close-btn" @click="showRefDrawer = false">✕</button>
+              </div>
+
+              <div class="drawer-summary-bar">
+                <span>共命中 <strong>{{ currentChapterReferences.length }}</strong> 份底稿与标准规程</span>
+                <span>·</span>
+                <span>累计引用 <strong>{{ totalRefCitations }}</strong> 处</span>
+              </div>
+
+              <div class="drawer-body">
+                <div v-if="currentChapterReferences.length > 0" class="ref-items-list">
+                  <div
+                    v-for="(refItem, rIdx) in currentChapterReferences"
+                    :key="rIdx"
+                    class="ref-card-item"
+                  >
+                    <div class="ref-card-top">
+                      <span
+                        class="ref-type-tag"
+                        :class="`type-${refItem.type}`"
+                      >
+                        {{ refItem.typeLabel }}
+                      </span>
+                      <span class="ref-count-tag">引用 {{ refItem.count }} 次</span>
+                    </div>
+                    <div class="ref-card-title">{{ refItem.title }}</div>
+                    <div class="ref-card-raw"><code>{{ refItem.raw }}</code></div>
+                  </div>
+                </div>
+
+                <div v-else class="ref-empty-state">
+                  <span class="empty-icon">📂</span>
+                  <p class="empty-title">本章正文中暂未引用底稿标签</p>
+                  <p class="empty-desc">
+                    您可在正文中嵌入 <code>【源:文件名.docx】</code> 或 <code>【标:规范名】</code> 标记数据与论述来源，系统将在此自动汇总。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
 
         <!-- 底部向导导航栏 -->
         <footer class="wizard-footer">
@@ -1248,6 +1725,14 @@ function jumpToPreviewAnchor(seq: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.batch-review-bar {
+  display: flex;
+}
+.batch-btn {
+  font-size: 12px;
+  padding: 6px 10px;
 }
 
 .quality-mini-board {
@@ -1416,6 +1901,7 @@ function jumpToPreviewAnchor(seq: number) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 .workbench-section {
@@ -1431,7 +1917,7 @@ function jumpToPreviewAnchor(seq: number) {
   padding: 14px 20px;
   border-bottom: 1px solid #e2e8f0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
@@ -1470,11 +1956,49 @@ function jumpToPreviewAnchor(seq: number) {
   color: #cbd5e1;
 }
 
+/* 审阅模式功能说明提示标签条 */
+.review-mode-hints {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.hint-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.hint-all {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+.hint-numeric {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+.hint-compliance {
+  background: #faf5ff;
+  border-color: #e9d5ff;
+  color: #7e22ce;
+}
+
 .header-action-group,
 .preview-actions,
 .dash-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ref-drawer-btn.active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
 }
 
 .chapter-workbench-body {
@@ -1486,14 +2010,178 @@ function jumpToPreviewAnchor(seq: number) {
   gap: 16px;
 }
 
-/* 专家诊断卡片 */
+/* ═════════════════════════════════════════════════════════ */
+/* 审阅与修订前摇动态进度心跳 */
+/* ═════════════════════════════════════════════════════════ */
+.heartbeat-card {
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: pulse-border 2s infinite ease-in-out;
+}
+.review-heartbeat {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+}
+.revision-heartbeat {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+}
+@keyframes pulse-border {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
+  }
+}
+
+.heartbeat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.hb-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hb-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e3a8a;
+}
+.hb-timer {
+  font-size: 12px;
+  color: #1e40af;
+}
+
+.radar-pulse {
+  width: 10px;
+  height: 10px;
+  background: #2563eb;
+  border-radius: 50%;
+  display: inline-block;
+  position: relative;
+}
+.radar-pulse::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #2563eb;
+  animation: radar-wave 1.2s infinite ease-out;
+}
+.revision-pulse {
+  background: #16a34a;
+}
+.revision-pulse::after {
+  border-color: #16a34a;
+}
+@keyframes radar-wave {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+.pipeline-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.stepper-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+.stepper-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.stepper-node.active .stepper-badge {
+  background: #2563eb;
+  color: #fff;
+}
+.stepper-node.completed .stepper-badge {
+  background: #10b981;
+  color: #fff;
+}
+.stepper-text {
+  display: flex;
+  flex-direction: column;
+}
+.stepper-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.stepper-desc {
+  font-size: 10px;
+  color: #64748b;
+}
+.stepper-line {
+  flex: 1;
+  height: 2px;
+  background: #e2e8f0;
+  margin: 0 4px;
+}
+.stepper-line.completed {
+  background: #10b981;
+}
+.stepper-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.hb-status-msg {
+  font-size: 11px;
+  color: #475569;
+}
+
+/* ═════════════════════════════════════════════════════════ */
+/* 专家诊断卡片自适应重构 */
+/* ═════════════════════════════════════════════════════════ */
 .diagnostic-panel {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
+
+.diagnostic-expanded-box {
+  display: flex;
+  flex-direction: column;
+}
+
 .diagnostic-header {
   padding: 10px 14px;
   background: #f8fafc;
@@ -1501,11 +2189,7 @@ function jumpToPreviewAnchor(seq: number) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  cursor: pointer;
   user-select: none;
-}
-.diagnostic-panel.collapsed .diagnostic-header {
-  border-bottom: none;
 }
 .diag-header-left {
   display: flex;
@@ -1546,17 +2230,17 @@ function jumpToPreviewAnchor(seq: number) {
   font-size: 11px;
   font-weight: 600;
 }
-.toggle-arrow {
-  font-size: 12px;
-  color: #64748b;
-}
 
-.diagnostic-content {
+/* 彻底解决底部截断：自适应最大高度与垂直滚动 */
+.diagnostic-content-scrollable {
+  max-height: 480px;
+  overflow-y: auto;
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
 .diag-summary-box {
   background: #f1f5f9;
   padding: 8px 12px;
@@ -1571,16 +2255,21 @@ function jumpToPreviewAnchor(seq: number) {
   gap: 6px;
   border-bottom: 1px solid #e2e8f0;
   padding-bottom: 6px;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 2;
 }
 .diag-tab-btn {
   border: none;
   background: none;
-  padding: 4px 10px;
+  padding: 5px 10px;
   font-size: 12px;
   border-radius: 4px;
   cursor: pointer;
   color: #64748b;
   font-weight: 500;
+  transition: all 0.15s;
 }
 .diag-tab-btn.active {
   background: #eff6ff;
@@ -1704,7 +2393,7 @@ function jumpToPreviewAnchor(seq: number) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
+  padding: 5px 8px;
   background: #f8fafc;
   border-radius: 4px;
   font-size: 12px;
@@ -1728,7 +2417,65 @@ function jumpToPreviewAnchor(seq: number) {
   padding: 10px 0;
 }
 
+/* 44px 收起态通栏胶囊卡片 */
+.diagnostic-capsule-collapsed {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  cursor: pointer;
+  background: #fff;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.diagnostic-capsule-collapsed:hover {
+  background: #f8fafc;
+}
+.capsule-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+}
+.capsule-icon {
+  font-size: 16px;
+}
+.score-pill-sm {
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.capsule-summary-snippet {
+  font-size: 12px;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 450px;
+}
+.capsule-right {
+  display: flex;
+  align-items: center;
+}
+.expand-action-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563eb;
+  padding: 4px 10px;
+  background: #eff6ff;
+  border-radius: 4px;
+}
+.expand-action-text:hover {
+  background: #dbeafe;
+}
+
+/* ═════════════════════════════════════════════════════════ */
 /* AI 修订指令条 */
+/* ═════════════════════════════════════════════════════════ */
 .revision-prompt-box {
   background: #eff6ff;
   border: 1px solid #bfdbfe;
@@ -1789,7 +2536,9 @@ function jumpToPreviewAnchor(seq: number) {
   flex-shrink: 0;
 }
 
-/* Diff 工作台 */
+/* ═════════════════════════════════════════════════════════ */
+/* Diff 工作台与水利排版样式 */
+/* ═════════════════════════════════════════════════════════ */
 .diff-workbench-container {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -1862,9 +2611,17 @@ function jumpToPreviewAnchor(seq: number) {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
+/* 水利规范 10.5pt 排版规范 */
+.water-spec-typography {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+  font-size: 14px; /* 10.5pt 约为 14px */
+  line-height: 1.8;
+  color: #1e293b;
+}
+
 .diff-view-side-by-side {
   display: flex;
-  height: 480px;
+  height: 500px;
   overflow: hidden;
 }
 .diff-side-column {
@@ -1884,18 +2641,24 @@ function jumpToPreviewAnchor(seq: number) {
   font-weight: 700;
   color: #475569;
   border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sync-indicator {
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: normal;
 }
 .diff-column-content {
   flex: 1;
   overflow-y: auto;
-  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 8px 0;
 }
 
 .diff-line-row {
   display: flex;
-  padding: 1px 0;
+  padding: 2px 0;
 }
 .diff-line-row.line-removed {
   background: #fee2e2;
@@ -1906,35 +2669,34 @@ function jumpToPreviewAnchor(seq: number) {
   color: #166534;
 }
 .diff-line-placeholder {
-  background: #f8fafc;
+  background: #fafafa;
   color: transparent;
   user-select: none;
 }
 .line-num {
-  width: 40px;
+  width: 44px;
   text-align: right;
-  padding-right: 8px;
+  padding-right: 10px;
   color: #94a3b8;
   user-select: none;
   font-size: 11px;
+  font-family: "JetBrains Mono", Consolas, monospace;
 }
 .line-code {
   flex: 1;
   white-space: pre-wrap;
   word-break: break-all;
-  padding-right: 8px;
+  padding-right: 12px;
 }
 
 .diff-view-inline {
-  height: 480px;
+  height: 500px;
   overflow-y: auto;
-  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 8px 0;
 }
 .diff-inline-row {
   display: flex;
-  padding: 1px 0;
+  padding: 2px 0;
 }
 .diff-inline-row.inline-added {
   background: #dcfce7;
@@ -1945,24 +2707,22 @@ function jumpToPreviewAnchor(seq: number) {
   color: #991b1b;
 }
 .inline-line-num {
-  width: 36px;
+  width: 40px;
   text-align: right;
   padding-right: 6px;
   color: #94a3b8;
   font-size: 11px;
+  font-family: "JetBrains Mono", Consolas, monospace;
   user-select: none;
 }
 .inline-sign {
-  width: 16px;
+  width: 18px;
   text-align: center;
   font-weight: 700;
   user-select: none;
 }
-.inline-code {
-  flex: 1;
-  white-space: pre-wrap;
-  word-break: break-all;
-  padding-right: 8px;
+.strike-del {
+  text-decoration: line-through;
 }
 
 .diff-bottom-actions {
@@ -2035,6 +2795,166 @@ function jumpToPreviewAnchor(seq: number) {
   line-height: 1.6;
   resize: vertical;
   box-sizing: border-box;
+}
+
+/* ═════════════════════════════════════════════════════════ */
+/* 参考资料来源抽屉 (Drawer) */
+/* ═════════════════════════════════════════════════════════ */
+.ref-drawer-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+}
+.ref-drawer-panel {
+  width: 380px;
+  max-width: 90%;
+  height: 100%;
+  background: #fff;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  animation: slide-in 0.2s ease-out;
+}
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.drawer-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.drawer-title-box h4 {
+  margin: 0 0 2px 0;
+  font-size: 14px;
+  color: #0f172a;
+  font-weight: 700;
+}
+.drawer-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+.drawer-close-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.drawer-close-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.drawer-summary-bar {
+  background: #eff6ff;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #1e40af;
+  border-bottom: 1px solid #dbeafe;
+  display: flex;
+  gap: 6px;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.ref-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ref-card-item {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ref-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ref-type-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.type-material {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.type-standard {
+  background: #fef3c7;
+  color: #b45309;
+}
+.type-web {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+.type-other {
+  background: #f1f5f9;
+  color: #475569;
+}
+.ref-count-tag {
+  font-size: 11px;
+  color: #64748b;
+}
+.ref-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  word-break: break-all;
+}
+.ref-card-raw {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ref-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  text-align: center;
+}
+.empty-icon {
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+.empty-title {
+  margin: 0 0 6px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+}
+.empty-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.6;
 }
 
 /* 全书预览 */
@@ -2162,6 +3082,12 @@ function jumpToPreviewAnchor(seq: number) {
   font-size: 11px;
   font-weight: 600;
 }
+.empty-table-tip {
+  padding: 20px;
+  color: #64748b;
+  font-size: 13px;
+  text-align: center;
+}
 
 /* 底栏 */
 .wizard-footer {
@@ -2219,6 +3145,17 @@ function jumpToPreviewAnchor(seq: number) {
   border-color: #2563eb;
   color: #2563eb;
 }
+.btn-danger {
+  background: #ef4444;
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+.btn-block {
+  width: 100%;
+  justify-content: center;
+}
 .btn-sm {
   padding: 4px 10px;
   font-size: 12px;
@@ -2270,5 +3207,13 @@ function jumpToPreviewAnchor(seq: number) {
 .slide-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+  opacity: 0;
 }
 </style>

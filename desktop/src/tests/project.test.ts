@@ -1436,5 +1436,57 @@ describe("Pinia useProjectStore", () => {
       store.discardRevision();
       expect(store.activeRevision).toBeNull();
     });
+
+    it("store: runAllChaptersReview 批量审查所有章节并维护 batchReviewing 状态", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "批量审阅项目", created_at: "2026-08-25T00:00:00Z" };
+      store.outlineChapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 建设背景" },
+      ];
+      store.chapters = {
+        1: "# 第一章 概述\n正文1",
+        2: "# 第二章 建设背景\n正文2",
+      };
+
+      const mockReviewResult: engineApi.ExpertReviewResult = {
+        status: "通过",
+        score: 90,
+        summary: "达标",
+        issues: [],
+      };
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/writing/review")) {
+          return jsonResponse({ raw: "raw", review: mockReviewResult });
+        }
+        if (u.includes("/reviews/")) {
+          return jsonResponse({ reviews: { "1": mockReviewResult, "2": mockReviewResult } });
+        }
+        return jsonResponse({});
+      });
+
+      const reviewPromise = store.runAllChaptersReview(BASE_URL, {
+        api_key: "sk-test",
+        base_url: "http://api",
+        model: "m",
+      });
+
+      expect(store.batchReviewing).toBe(true);
+
+      await reviewPromise;
+
+      expect(store.batchReviewing).toBe(false);
+      expect(store.chapterReviews[1].score).toBe(90);
+      expect(store.chapterReviews[2].score).toBe(90);
+    });
+
+    it("store: stopBatchReview 中止批量全书体检", () => {
+      const store = useProjectStore();
+      store.batchReviewing = true;
+      store.stopBatchReview();
+      expect(store.batchReviewing).toBe(false);
+    });
   });
 });

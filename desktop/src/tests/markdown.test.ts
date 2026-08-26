@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   escapeHtml,
   extractOutlineHeadings,
+  extractReferences,
   extractSubHeadings,
   formatInline,
   htmlToMarkdown,
@@ -468,6 +469,45 @@ describe("Markdown 解析与排版工具", () => {
       expect(html).toContain('<p>重点建议：抓紧前期审批。</p>');
       expect(html).toContain('<h3 id="h-ch1-idx2">2.2.1 与经济社会发展规划衔接性</h3>');
       expect(html).toContain('<p>符合省市一体化战略。</p>');
+    });
+  });
+
+  describe("参考资料来源提取 (extractReferences)", () => {
+    it("空文本或无标签返回空数组", () => {
+      expect(extractReferences("")).toEqual([]);
+      expect(extractReferences("普通正文无任何来源标签")).toEqual([]);
+    });
+
+    it("精准提取工程底稿文件来源与频次", () => {
+      const text = `
+        根据立项批复【源:立项批复文件.docx#L1-10】，本工程总投资 3.5 亿元。
+        地质勘察表明【源:地质勘察报告.pdf】，地基承载力良好。
+        再次核实【源:立项批复文件.docx#L1-10】，资金筹措方案符合规定。
+      `;
+      const refs = extractReferences(text);
+      expect(refs).toHaveLength(2);
+      expect(refs[0].title).toBe("立项批复文件.docx#L1-10");
+      expect(refs[0].count).toBe(2);
+      expect(refs[0].type).toBe("material");
+      expect(refs[0].typeLabel).toBe("底稿文件");
+
+      expect(refs[1].title).toBe("地质勘察报告.pdf");
+      expect(refs[1].count).toBe(1);
+    });
+
+    it("精准分类规程标准、网络来源与参考文献 [Z]", () => {
+      const text = `
+        依据规程【标:水利水电工程可行性研究报告编制规程】要求；
+        结合防洪标准【源:防洪标准GB50201-2014.pdf】测算；
+        参考网络数据【网:水利部水雨情信息网】；
+        标准规范依据 [Z] 与专题规范 [Z-02]。
+      `;
+      const refs = extractReferences(text);
+      expect(refs.some((r) => r.type === "standard" && r.title.includes("编制规程"))).toBe(true);
+      expect(refs.some((r) => r.type === "standard" && r.title.includes("GB50201"))).toBe(true);
+      expect(refs.some((r) => r.type === "web" && r.title.includes("水雨情信息网"))).toBe(true);
+      expect(refs.some((r) => r.type === "standard" && r.title.includes("[Z]"))).toBe(true);
+      expect(refs.some((r) => r.type === "standard" && r.title.includes("[Z-02]"))).toBe(true);
     });
   });
 });

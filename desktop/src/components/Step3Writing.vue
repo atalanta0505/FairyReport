@@ -2,9 +2,11 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
   extractOutlineHeadings,
+  extractReferences,
   extractSubHeadings,
   htmlToMarkdown,
   markdownToHtml,
+  type ReferenceItem,
   type SubHeading,
 } from "../lib/markdown";
 import { useEngineStore } from "../stores/engine";
@@ -17,6 +19,7 @@ const projectStore = useProjectStore();
 
 const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const showHintSection = ref<boolean>(false);
+const showRefDrawer = ref<boolean>(false);
 const chapterHints = ref<Record<number, string>>({});
 const viewMode = ref<"rich" | "source">("rich");
 
@@ -170,6 +173,14 @@ const currentChapterText = computed({
 
 const currentChapterWords = computed(() => {
   return currentChapterText.value.length;
+});
+
+const currentChapterReferences = computed<ReferenceItem[]>(() => {
+  return extractReferences(currentChapterText.value);
+});
+
+const totalRefCitations = computed(() => {
+  return currentChapterReferences.value.reduce((sum, item) => sum + item.count, 0);
 });
 
 const currentChapterStatus = computed(() => {
@@ -632,6 +643,15 @@ function nextStep() {
             </button>
 
             <button
+              class="btn btn-outline ref-drawer-btn"
+              :class="{ active: showRefDrawer }"
+              @click="showRefDrawer = !showRefDrawer"
+              title="查看本章正文中命中的底稿文件与规程标准引用清单"
+            >
+              📚 参考资料 ({{ currentChapterReferences.length }})
+            </button>
+
+            <button
               v-if="isCurrentChapterWriting"
               class="btn btn-danger"
               @click="handleStopWriting"
@@ -859,6 +879,59 @@ function nextStep() {
             ></textarea>
           </div>
         </div>
+
+        <!-- ═════════════════════════════════════════════════════════ -->
+        <!-- 参考资料来源抽屉 (Drawer) -->
+        <!-- ═════════════════════════════════════════════════════════ -->
+        <transition name="drawer-fade">
+          <div v-if="showRefDrawer" class="ref-drawer-overlay" @click="showRefDrawer = false">
+            <div class="ref-drawer-panel" @click.stop>
+              <div class="drawer-header">
+                <div class="drawer-title-box">
+                  <h4>📚 本章参考资料来源台账</h4>
+                  <span class="drawer-sub">第 {{ currentChapter?.seq }} 章：{{ currentChapter?.title }}</span>
+                </div>
+                <button class="drawer-close-btn" @click="showRefDrawer = false">✕</button>
+              </div>
+
+              <div class="drawer-summary-bar">
+                <span>共命中 <strong>{{ currentChapterReferences.length }}</strong> 份底稿与标准规程</span>
+                <span>·</span>
+                <span>累计引用 <strong>{{ totalRefCitations }}</strong> 处</span>
+              </div>
+
+              <div class="drawer-body">
+                <div v-if="currentChapterReferences.length > 0" class="ref-items-list">
+                  <div
+                    v-for="(refItem, rIdx) in currentChapterReferences"
+                    :key="rIdx"
+                    class="ref-card-item"
+                  >
+                    <div class="ref-card-top">
+                      <span
+                        class="ref-type-tag"
+                        :class="`type-${refItem.type}`"
+                      >
+                        {{ refItem.typeLabel }}
+                      </span>
+                      <span class="ref-count-tag">引用 {{ refItem.count }} 次</span>
+                    </div>
+                    <div class="ref-card-title">{{ refItem.title }}</div>
+                    <div class="ref-card-raw"><code>{{ refItem.raw }}</code></div>
+                  </div>
+                </div>
+
+                <div v-else class="ref-empty-state">
+                  <span class="empty-icon">📂</span>
+                  <p class="empty-title">本章正文中暂未引用底稿标签</p>
+                  <p class="empty-desc">
+                    您可在正文中嵌入 <code>【源:文件名.docx】</code> 或 <code>【标:规范名】</code> 标记数据与论述来源，系统将在此自动汇总。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
       </main>
     </div>
 
@@ -1302,6 +1375,8 @@ function nextStep() {
   display: flex;
   flex-direction: column;
   min-height: 640px;
+  position: relative;
+  overflow: hidden;
 }
 
 .editor-header {
@@ -2162,5 +2237,174 @@ function nextStep() {
 .slide-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+/* ═════════════════════════════════════════════════════════ */
+/* 参考资料来源抽屉 (Drawer) */
+/* ═════════════════════════════════════════════════════════ */
+.ref-drawer-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+}
+.ref-drawer-panel {
+  width: 380px;
+  max-width: 90%;
+  height: 100%;
+  background: #fff;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  animation: slide-in 0.2s ease-out;
+}
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.drawer-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.drawer-title-box h4 {
+  margin: 0 0 2px 0;
+  font-size: 14px;
+  color: #0f172a;
+  font-weight: 700;
+}
+.drawer-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+.drawer-close-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.drawer-close-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.drawer-summary-bar {
+  background: #eff6ff;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #1e40af;
+  border-bottom: 1px solid #dbeafe;
+  display: flex;
+  gap: 6px;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.ref-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ref-card-item {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ref-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ref-type-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.type-material {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.type-standard {
+  background: #fef3c7;
+  color: #b45309;
+}
+.type-web {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+.type-other {
+  background: #f1f5f9;
+  color: #475569;
+}
+.ref-count-tag {
+  font-size: 11px;
+  color: #64748b;
+}
+.ref-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  word-break: break-all;
+}
+.ref-card-raw {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ref-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  text-align: center;
+}
+.empty-icon {
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+.empty-title {
+  margin: 0 0 6px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+}
+.empty-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+  opacity: 0;
 }
 </style>

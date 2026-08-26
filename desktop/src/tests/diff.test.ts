@@ -126,4 +126,33 @@ describe("diff.ts 单元测试", () => {
       expect(stats.totalModifiedLines).toBe(4);
     });
   });
+
+  describe("Markdown 自动断行规范化与防粘连 Diff 测试", () => {
+    it("粘连标题与单行表格在 Diff 前自动规范化断行，避免整段错位", () => {
+      const gluedOrig = "# 第一章 概述## 1.1 项目概况本工程总投资 10 亿元。";
+      const gluedMod = "# 第一章 概述## 1.1 项目概况本工程总投资 12 亿元整。";
+
+      const diff = computeLineDiff(gluedOrig, gluedMod);
+      // 应该被规整为多行，而不是 1 行整体替换
+      expect(diff.length).toBeGreaterThan(2);
+      expect(diff[0].text).toBe("# 第一章 概述");
+      expect(diff[0].type).toBe("unchanged");
+      expect(diff[2].text).toBe("## 1.1 项目概况");
+      expect(diff[2].type).toBe("unchanged");
+
+      const stats = computeDiffStats(gluedOrig, gluedMod);
+      expect(stats.unchangedLines).toBeGreaterThanOrEqual(2);
+    });
+
+    it("支持已知大纲标题库精确断行比对", () => {
+      const orig = "### 1.4.1 主要研究结论经综合评估，各项指标合格。";
+      const mod = "### 1.4.1 主要研究结论经重新核算，新增抗震指标。";
+      const knownHeadings = ["1.4.1 主要研究结论"];
+
+      const blocks = computeDiffBlocks(orig, mod, knownHeadings);
+      expect(blocks[0].oldLines[0].text).toBe("### 1.4.1 主要研究结论");
+      expect(blocks[0].type).toBe("unchanged");
+      expect(blocks[1].type).toBe("modified");
+    });
+  });
 });

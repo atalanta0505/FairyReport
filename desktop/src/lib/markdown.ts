@@ -13,6 +13,14 @@ export interface SubHeading {
   index: number;
 }
 
+export interface ReferenceItem {
+  type: "material" | "standard" | "web" | "other";
+  typeLabel: string;
+  title: string;
+  raw: string;
+  count: number;
+}
+
 export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -49,10 +57,14 @@ export function formatInline(text: string): string {
     return `\uFFF0CODE${idx}\uFFF0`;
   });
 
-  // 3. 来源引用徽章：【源:...】 或 【源：...】（保留原始冒号格式）
+  // 3. 来源引用徽章：【源:...】、【网:...】、【标:...】、【规:...】与 [Z]
   escaped = escaped.replace(
-    /【源([:：][^】]+)】/g,
-    '<span class="ref-badge">🏷️ 【源$1】</span>'
+    /【(源|材料|网|网络|标|标准|规|规程)([:：][^】]+)】/g,
+    '<span class="ref-badge">🏷️ 【$1$2】</span>'
+  );
+  escaped = escaped.replace(
+    /\[Z(?::|：|-)?([a-zA-Z0-9_\-\u4e00-\u9fa5]*)\]/g,
+    '<span class="ref-badge">🏷️ [Z$1]</span>'
   );
 
   // 4. 粗斜体 ***text***
@@ -205,7 +217,8 @@ export function extractSubHeadings(
         .replace(/\*\*([^*]+)\*\*/g, "$1")
         .replace(/\*([^*]+)\*/g, "$1")
         .replace(/`([^`]+)`/g, "$1")
-        .replace(/【源[:：][^】]+】/g, "")
+        .replace(/【(?:源|材料|网|网络|标|标准|规|规程)[:：][^】]+】/g, "")
+        .replace(/\[Z(?::|：|-)?([a-zA-Z0-9_\-\u4e00-\u9fa5]*)\]/g, "")
         .trim();
 
       headings.push({
@@ -220,6 +233,85 @@ export function extractSubHeadings(
   }
 
   return headings;
+}
+
+/**
+ * 从正文中提取所有参考资料与底稿规程引用来源标签清单
+ */
+export function extractReferences(text: string): ReferenceItem[] {
+  if (!text || typeof text !== "string") return [];
+
+  const map = new Map<string, { type: "material" | "standard" | "web" | "other"; typeLabel: string; title: string; raw: string; count: number }>();
+
+  // 1. 匹配 【源:...】 / 【材料:...】 / 【标:...】 / 【网:...】 / 【规:...】
+  const bracketRegex = /【(源|材料|网|网络|标|标准|规|规程|法|法规)[:：]\s*([^】]+)】/g;
+  let m: RegExpExecArray | null;
+  while ((m = bracketRegex.exec(text)) !== null) {
+    const rawTag = m[0];
+    const prefix = m[1];
+    const content = m[2].trim();
+    if (!content) continue;
+
+    let type: "material" | "standard" | "web" | "other" = "material";
+    let typeLabel = "底稿文件";
+
+    if (prefix.startsWith("网")) {
+      type = "web";
+      typeLabel = "网络检索";
+    } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
+      type = "standard";
+      typeLabel = "规程标准";
+    } else {
+      if (/规程|规范|标准|GB|SL|NB|DL|定额|导则|通则|法/i.test(content)) {
+        type = "standard";
+        typeLabel = "规程标准";
+      } else {
+        type = "material";
+        typeLabel = "底稿文件";
+      }
+    }
+
+    const key = `${type}::${content}`;
+    if (map.has(key)) {
+      map.get(key)!.count += 1;
+    } else {
+      map.set(key, {
+        type,
+        typeLabel,
+        title: content,
+        raw: rawTag,
+        count: 1,
+      });
+    }
+  }
+
+  // 2. 匹配标准引用标签 [Z] 或 [Z-1] 或 [文献...]
+  const citationRegex = /\[Z(?::|：|-)?([a-zA-Z0-9_\-\u4e00-\u9fa5]*)\]/g;
+  while ((m = citationRegex.exec(text)) !== null) {
+    const rawTag = m[0];
+    const suffix = m[1] ? m[1].trim() : "";
+    const identifier = suffix ? `标准规范依据 [Z-${suffix}]` : "标准规范规程库 [Z]";
+    const key = `standard::${identifier}`;
+    if (map.has(key)) {
+      map.get(key)!.count += 1;
+    } else {
+      map.set(key, {
+        type: "standard",
+        typeLabel: "规程标准",
+        title: identifier,
+        raw: rawTag,
+        count: 1,
+      });
+    }
+  }
+
+  // 排序：频次降序，然后标题排序
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.count !== a.count) {
+      return b.count - a.count;
+    }
+    return a.title.localeCompare(b.title, "zh-CN");
+  });
 }
 
 /**
@@ -405,7 +497,8 @@ export function htmlToMarkdown(html: string): string {
   let text = html.replace(/\r\n/g, "\n");
 
   // 1. 来源引用徽章还原：<span class="ref-badge">🏷️ 【源:...】</span> -> 【源:...】
-  text = text.replace(/<span[^>]*class="[^"]*ref-badge[^"]*"[^>]*>🏷️\s*(【源[:：][^】]+】)<\/span>/gi, "$1");
+  text = text.replace(/<span[^>]*class="[^"]*ref-badge[^"]*"[^>]*>🏷️\s*(【[^】]+】)<\/span>/gi, "$1");
+  text = text.replace(/<span[^>]*class="[^"]*ref-badge[^"]*"[^>]*>🏷️\s*(\[Z[^\]]*\])<\/span>/gi, "$1");
   text = text.replace(/<span[^>]*class="[^"]*ref-badge[^"]*"[^>]*>(?:🏷️\s*)?([^<]+)<\/span>/gi, "$1");
 
   // 2. 表格转换 <table>...</table> -> Markdown 表格
