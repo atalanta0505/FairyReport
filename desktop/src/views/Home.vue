@@ -7,6 +7,7 @@ import Settings from "./Settings.vue";
 import Step1Project from "../components/Step1Project.vue";
 import Step2Outline from "../components/Step2Outline.vue";
 import Step3Writing from "../components/Step3Writing.vue";
+import Step4Review from "../components/Step4Review.vue";
 
 const auth = useAuthStore();
 const engine = useEngineStore();
@@ -165,18 +166,8 @@ async function onLogout() {
         <!-- 步骤 3：章节流式写作 -->
         <Step3Writing v-show="projectStore.currentStep === 3" />
 
-        <!-- 步骤 4：审阅修改（占位） -->
-        <div v-show="projectStore.currentStep === 4" class="step-placeholder">
-          <div class="placeholder-card">
-            <span class="placeholder-icon">🔍</span>
-            <h3>Step 4：专家审阅与修改</h3>
-            <p>对生成章节进行合规检查、数值校验及人工润色修改。</p>
-            <div class="btn-group">
-              <button class="btn btn-secondary" @click="projectStore.setStep(3)">&larr; 返回上一步</button>
-              <button class="btn btn-primary" @click="projectStore.setStep(5)">下一步：成果导出 &rarr;</button>
-            </div>
-          </div>
-        </div>
+        <!-- 步骤 4：专家审阅与修改 -->
+        <Step4Review v-show="projectStore.currentStep === 4" />
 
         <!-- 步骤 5：成果导出（占位） -->
         <div v-show="projectStore.currentStep === 5" class="step-placeholder">

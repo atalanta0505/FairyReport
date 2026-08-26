@@ -500,5 +500,129 @@ export function streamChapterWriting(
   };
 }
 
+export interface ReviewIssue {
+  id?: string;
+  severity: "error" | "warning" | "suggestion";
+  category: string;
+  message: string;
+  location?: string;
+  suggestion?: string;
+}
 
+export interface NumericalCheckItem {
+  parameter: string;
+  extracted_value: string;
+  status: "normal" | "abnormal" | "pending";
+  note?: string;
+}
 
+export interface ExpertReviewResult {
+  status: "通过" | "需补充" | "风险警告" | string;
+  score?: number;
+  summary?: string;
+  issues?: ReviewIssue[];
+  numerical_checks?: NumericalCheckItem[];
+  data_gap_checklist?: string[];
+  suggestions?: string;
+  raw?: string;
+  parse_error?: string | null;
+  updated_at?: string;
+}
+
+export interface ReviewsData {
+  reviews: Record<string, ExpertReviewResult>;
+  updated_at?: string;
+}
+
+export interface ReviewChapterRequest {
+  chapter_text: string;
+  report_type?: string;
+  chapter_title?: string;
+  mode?: "all" | "compliance" | "numeric" | "technical";
+  llm_config: LLMConfig;
+}
+
+export interface ReviseChapterRequest {
+  chapter_text: string;
+  instruction: string;
+  llm_config: LLMConfig;
+  chapter_title?: string;
+  report_type?: string;
+  chapter_budget?: number;
+}
+
+/** 针对章节执行专家全维审阅或专项审查 */
+export async function reviewChapter(
+  baseUrl: string,
+  req: ReviewChapterRequest,
+): Promise<{ raw: string; review: ExpertReviewResult }> {
+  return request<{ raw: string; review: ExpertReviewResult }>(
+    baseUrl,
+    "/writing/review",
+    {
+      method: "POST",
+      body: JSON.stringify(req),
+    },
+  );
+}
+
+/** 针对章节执行 AI 定向修改与润色 */
+export async function reviseChapter(
+  baseUrl: string,
+  req: ReviseChapterRequest,
+): Promise<{ revised_text: string }> {
+  return request<{ revised_text: string }>(
+    baseUrl,
+    "/writing/revise",
+    {
+      method: "POST",
+      body: JSON.stringify(req),
+    },
+  );
+}
+
+/** 获取项目持久化专家审阅诊断数据 */
+export async function getProjectReviews(
+  baseUrl: string,
+  projectName: string,
+): Promise<ReviewsData> {
+  return request<ReviewsData>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/reviews`,
+    {
+      method: "GET",
+    },
+  );
+}
+
+/** 保存项目单章专家审阅诊断结果 */
+export async function saveProjectReview(
+  baseUrl: string,
+  projectName: string,
+  seq: number,
+  review: ExpertReviewResult,
+): Promise<ReviewsData> {
+  return request<ReviewsData>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/reviews/${seq}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ review }),
+    },
+  );
+}
+
+/** 删除项目单章专家审阅诊断结果 */
+export async function deleteProjectReview(
+  baseUrl: string,
+  projectName: string,
+  seq: number,
+): Promise<{ ok: boolean; seq: number }> {
+  return request<{ ok: boolean; seq: number }>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/reviews/${seq}`,
+    {
+      method: "DELETE",
+    },
+  );
+}

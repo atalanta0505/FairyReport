@@ -29,7 +29,12 @@ from .prompts import (
 from .rag import query_rag
 from .refs import strip_fabricated_labels
 from .templates_loader import TemplatesNotInstalled
-from .writer import ChapterWriter, parse_tech_review_result, _build_writing_system_prompt
+from .writer import (
+    ChapterWriter,
+    parse_expert_review_result,
+    parse_tech_review_result,
+    _build_writing_system_prompt,
+)
 
 router = APIRouter(tags=["writing"])
 
@@ -49,6 +54,15 @@ class ChaptersData(BaseModel):
 
 class ChapterSaveRequest(BaseModel):
     text: str = ""
+
+
+class ReviewsData(BaseModel):
+    reviews: dict[str, dict] = Field(default_factory=dict)
+    updated_at: str = ""
+
+
+class ReviewSaveRequest(BaseModel):
+    review: dict = Field(default_factory=dict)
 
 
 class TemplateItemOut(BaseModel):
@@ -85,6 +99,7 @@ class ReviewRequest(BaseModel):
     chapter_text: str
     report_type: str = ""
     chapter_title: str = ""
+    mode: str = "all"
     llm_config: LLMConfig
 
 
@@ -92,6 +107,9 @@ class ReviseRequest(BaseModel):
     chapter_text: str
     instruction: str
     llm_config: LLMConfig
+    chapter_title: str = ""
+    report_type: str = ""
+    chapter_budget: int = 0
 
 
 class HintSaveRequest(BaseModel):
@@ -234,6 +252,60 @@ def delete_project_chapter(name: str, seq: int):
     return {"ok": True, "seq": seq}
 
 
+# ── 专家审阅持久化辅助与端点 ──
+def _read_reviews_file(name: str) -> ReviewsData:
+    p = settings.project_dir(name) / "reviews.json"
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return ReviewsData(**data)
+        except Exception:
+            pass
+    return ReviewsData()
+
+
+def _write_reviews_file(name: str, data: ReviewsData) -> ReviewsData:
+    pdir = settings.project_dir(name)
+    pdir.mkdir(parents=True, exist_ok=True)
+    p = pdir / "reviews.json"
+    if not data.updated_at:
+        data.updated_at = datetime.now(timezone.utc).isoformat()
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
+    return data
+
+
+@router.get("/projects/{name}/reviews", response_model=ReviewsData)
+@router.get("/writing/projects/{name}/reviews", response_model=ReviewsData)
+def get_project_reviews(name: str):
+    """读取项目专家审阅持久化数据。"""
+    return _read_reviews_file(name)
+
+
+@router.post("/projects/{name}/reviews/{seq}", response_model=ReviewsData)
+@router.post("/writing/projects/{name}/reviews/{seq}", response_model=ReviewsData)
+def save_project_review(name: str, seq: int, req: ReviewSaveRequest):
+    """保存项目单章专家审阅诊断结果到 reviews.json。"""
+    data = _read_reviews_file(name)
+    data.reviews[str(seq)] = req.review
+    data.updated_at = datetime.now(timezone.utc).isoformat()
+    _write_reviews_file(name, data)
+    return data
+
+
+@router.delete("/projects/{name}/reviews/{seq}")
+@router.delete("/writing/projects/{name}/reviews/{seq}")
+def delete_project_review(name: str, seq: int):
+    """删除单章审阅记录。"""
+    data = _read_reviews_file(name)
+    if str(seq) in data.reviews:
+        del data.reviews[str(seq)]
+        data.updated_at = datetime.now(timezone.utc).isoformat()
+        _write_reviews_file(name, data)
+    return {"ok": True, "seq": seq}
+
+
 
 # ── 写作端点 ──
 @router.get("/writing/templates", response_model=list[TemplateItemOut])
@@ -371,17 +443,17 @@ def _stream_chapter(writer, llm, req, chapter_title,
 
 @router.post("/writing/review")
 def review(req: ReviewRequest):
-    """技术审阅 → 结构化结果。"""
+    """全维专家审阅或专项审查 → 结构化结果。"""
     llm = _make_llm(req.llm_config)
-    prompt = (
-        f"## 待审阅章节\n{req.chapter_text}\n\n"
-        f"请按校核维度逐项检查并输出结构化结果。"
-    )
+    writer = ChapterWriter(llm, report_type=req.report_type)
     try:
-        raw = llm.chat(prompt, system_prompt=TECH_REVIEW_SYSTEM_PROMPT, temperature=0.2)
+        raw, parsed = writer.expert_review(
+            chapter_title=req.chapter_title,
+            chapter_text=req.chapter_text,
+            mode=req.mode or "all",
+        )
     except LLMError as e:
         raise _map_llm_error(e)
-    parsed = parse_tech_review_result(raw)
     return {"raw": raw, "review": parsed}
 
 
@@ -389,9 +461,14 @@ def review(req: ReviewRequest):
 def revise(req: ReviseRequest):
     """按指令修订章节 → 修订文本。"""
     llm = _make_llm(req.llm_config)
-    writer = ChapterWriter(llm)
+    writer = ChapterWriter(llm, report_type=req.report_type)
     try:
-        revised = writer.modify_chapter(req.chapter_text, req.instruction)
+        revised = writer.modify_chapter(
+            req.chapter_text,
+            req.instruction,
+            chapter_budget=req.chapter_budget,
+            chapter_title=req.chapter_title,
+        )
     except LLMError as e:
         raise _map_llm_error(e)
     return {"revised_text": revised}

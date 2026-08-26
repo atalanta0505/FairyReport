@@ -5,16 +5,21 @@
 - 模板函数改调 templates_loader；提示词/配置常量改自 prompts
 - ChapterWriter 用 engine LLMClient（httpx 直连，用户 Key 随请求传入）
 """
+import json
 import re
 
 from . import templates_loader as tmpl
 from .prompts import (
+    COMPLIANCE_REVIEW_SYSTEM_PROMPT,
     FREQUENCY_PENALTY,
+    FULL_EXPERT_REVIEW_SYSTEM_PROMPT,
+    NUMERICAL_REVIEW_SYSTEM_PROMPT,
     PRESENCE_PENALTY,
     TECH_ANALYSIS_ALWAYS_REPORT_TYPES,
     TECH_ANALYSIS_CONDITIONAL_REPORT_TYPES,
     TECH_CHAPTER_KEYWORDS,
     TECH_INSUFFICIENT_DATA_RULES,
+    TECH_REVIEW_SYSTEM_PROMPT,
     TECH_WRITING_FRAMEWORK,
     TEMPERATURE_HINT,
     TEMPERATURE_MODIFY,
@@ -534,6 +539,31 @@ class ChapterWriter:
         )
         return prompt, system
 
+    # ── 专家审阅 ──
+    def expert_review(self, chapter_title: str, chapter_text: str,
+                      mode: str = "all") -> tuple[str, dict]:
+        """对章节进行全维专家诊断或专项审阅。返回 (raw_output, parsed_dict)。"""
+        prompt = (
+            f"## 待审阅章节标题\n{chapter_title or '当前章节'}\n\n"
+            f"## 待审阅正文内容\n{chapter_text}\n\n"
+            f"请按要求进行专业诊断并严格输出规定的 JSON 结果。"
+        )
+        if mode == "compliance":
+            system = COMPLIANCE_REVIEW_SYSTEM_PROMPT
+        elif mode == "numeric":
+            system = NUMERICAL_REVIEW_SYSTEM_PROMPT
+        elif mode == "technical":
+            system = TECH_REVIEW_SYSTEM_PROMPT
+        else:
+            system = FULL_EXPERT_REVIEW_SYSTEM_PROMPT
+
+        raw = self.llm.chat(prompt, system_prompt=system, temperature=0.2)
+        if mode == "technical":
+            parsed = parse_tech_review_result(raw)
+        else:
+            parsed = parse_expert_review_result(raw)
+        return raw, parsed
+
     # ── 辅助方法 ──
     @staticmethod
     def _parse_chapter_seq(chapter_title: str) -> int:
@@ -732,3 +762,198 @@ def parse_tech_review_result(raw_output: str) -> dict:
             result["parse_error"] = "Status is '需补充' but no data gap checklist found"
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# 全维专家审阅结果解析与统一诊断
+# ═══════════════════════════════════════════════════════════════
+
+_VALID_EXPERT_STATUSES = ("通过", "需补充", "风险警告")
+
+
+def parse_expert_review_result(raw_output: str) -> dict:
+    """解析并校验全维专家诊断或专项审查 LLM 输出。返回统一结构化 dict。"""
+    default_res = {
+        "status": "通过",
+        "score": 85,
+        "summary": "",
+        "issues": [],
+        "numerical_checks": [],
+        "data_gap_checklist": [],
+        "suggestions": "",
+        "raw": raw_output or "",
+        "parse_error": None,
+    }
+    if not raw_output or not raw_output.strip():
+        default_res["status"] = "需补充"
+        default_res["score"] = 0
+        default_res["parse_error"] = "Empty review response from LLM"
+        return default_res
+
+    text = raw_output.strip()
+
+    # 1. 尝试从 ```json ... ``` 或裸 JSON 中提取
+    json_str = None
+    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    if json_match:
+        json_str = json_match.group(1).strip()
+    elif text.startswith("{") and text.endswith("}"):
+        json_str = text
+    else:
+        brace_match = re.search(r'(\{[\s\S]*\})', text)
+        if brace_match:
+            json_str = brace_match.group(1).strip()
+
+    if json_str:
+        try:
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict):
+                # 状态
+                status_raw = str(parsed.get("status", "通过")).strip()
+                if status_raw in _VALID_EXPERT_STATUSES:
+                    status = status_raw
+                elif "补充" in status_raw:
+                    status = "需补充"
+                elif "风险" in status_raw or "警告" in status_raw or "不通过" in status_raw or "差" in status_raw:
+                    status = "风险警告"
+                else:
+                    status = "通过"
+
+                # 评分
+                raw_score = parsed.get("score")
+                try:
+                    score = int(raw_score)
+                    score = max(0, min(100, score))
+                except (ValueError, TypeError):
+                    if status == "通过":
+                        score = 88
+                    elif status == "需补充":
+                        score = 72
+                    else:
+                        score = 55
+
+                summary = str(parsed.get("summary", "")).strip()
+
+                # 问题清单
+                raw_issues = parsed.get("issues", [])
+                issues = []
+                if isinstance(raw_issues, list):
+                    for idx, it in enumerate(raw_issues):
+                        if isinstance(it, dict):
+                            sev = str(it.get("severity", "suggestion")).lower()
+                            if sev not in ("error", "warning", "suggestion"):
+                                if "错" in sev or "高" in sev or "严重" in sev or "err" in sev:
+                                    sev = "error"
+                                elif "警" in sev or "中" in sev or "warn" in sev:
+                                    sev = "warning"
+                                else:
+                                    sev = "suggestion"
+                            issues.append({
+                                "id": str(it.get("id", f"ISSUE-{idx+1}")),
+                                "severity": sev,
+                                "category": str(it.get("category", "综合诊断")),
+                                "message": str(it.get("message", "")),
+                                "location": str(it.get("location", "")),
+                                "suggestion": str(it.get("suggestion", "")),
+                            })
+
+                # 数值核验项
+                raw_num = parsed.get("numerical_checks", [])
+                num_checks = []
+                if isinstance(raw_num, list):
+                    for it in raw_num:
+                        if isinstance(it, dict):
+                            st = str(it.get("status", "normal")).lower()
+                            if st not in ("normal", "abnormal", "pending"):
+                                if "异" in st or "矛盾" in st or "错" in st or "abnormal" in st:
+                                    st = "abnormal"
+                                elif "待" in st or "缺" in st or "pend" in st:
+                                    st = "pending"
+                                else:
+                                    st = "normal"
+                            num_checks.append({
+                                "parameter": str(it.get("parameter", "")),
+                                "extracted_value": str(it.get("extracted_value", "")),
+                                "status": st,
+                                "note": str(it.get("note", "")),
+                            })
+
+                # 缺失资料清单
+                raw_gaps = parsed.get("data_gap_checklist", [])
+                gaps = []
+                if isinstance(raw_gaps, list):
+                    gaps = [str(g).strip() for g in raw_gaps if str(g).strip()]
+
+                # 修改建议
+                suggestions = parsed.get("suggestions", "")
+                if isinstance(suggestions, list):
+                    suggestions = "\n".join(str(s) for s in suggestions)
+                else:
+                    suggestions = str(suggestions).strip()
+
+                return {
+                    "status": status,
+                    "score": score,
+                    "summary": summary,
+                    "issues": issues,
+                    "numerical_checks": num_checks,
+                    "data_gap_checklist": gaps,
+                    "suggestions": suggestions,
+                    "raw": raw_output,
+                    "parse_error": None,
+                }
+        except Exception:
+            pass
+
+    # 2. 纯文本降级兜底解析
+    status = "通过"
+    for st in ("风险警告", "需补充", "通过"):
+        if st in text[:200]:
+            status = st
+            break
+
+    score = 85 if status == "通过" else (70 if status == "需补充" else 50)
+    score_m = re.search(r'(?:【?(?:得分|评分|分数)】?)[：:\s]*(\d+)', text)
+    if score_m:
+        try:
+            score = max(0, min(100, int(score_m.group(1))))
+        except Exception:
+            pass
+
+    summary = ""
+    sum_m = re.search(r'(?:【?(?:评价|结论|摘要|原因说明)】?)[：:\s]*(.+?)(?:\n\n|\n[#【]|$)', text, re.DOTALL)
+    if sum_m:
+        summary = sum_m.group(1).strip()
+
+    suggestions = ""
+    sug_m = re.search(r'(?:【?(?:修改建议|建议|指引)】?)[：:\s]*(.+?)(?:\n\n|\n[#【]|$)', text, re.DOTALL)
+    if sug_m:
+        suggestions = sug_m.group(1).strip()
+
+    gaps = []
+    gap_m = re.search(r'(?:【?(?:缺失资料|需补充资料|资料清单|缺失资料清单)】?)[：:\s]*(.+?)(?:\n\n|\n[#【]|$)', text, re.DOTALL)
+    if gap_m:
+        gap_items = re.findall(r'[-*\d.]\s*(.+?)(?:\n|$)', gap_m.group(1))
+        gaps = [item.strip() for item in gap_items if item.strip()]
+
+    return {
+        "status": status,
+        "score": score,
+        "summary": summary or text[:120],
+        "issues": [],
+        "numerical_checks": [],
+        "data_gap_checklist": gaps,
+        "suggestions": suggestions,
+        "raw": raw_output,
+        "parse_error": None,
+    }
+
+
+def expert_review_chapter(chapter_title: str, chapter_text: str,
+                          report_type: str = "", review_mode: str = "all",
+                          llm=None) -> tuple[str, dict]:
+    """对章节文本进行专家审查并解析返回结构化结果。"""
+    if llm is None:
+        raise ValueError("llm instance is required")
+    writer = ChapterWriter(llm, report_type=report_type)
+    return writer.expert_review(chapter_title, chapter_text, mode=review_mode)

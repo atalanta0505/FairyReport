@@ -115,6 +115,10 @@ export function getChaptersStorageKey(projectName: string): string {
   return `frl_chapters_${projectName}`;
 }
 
+export function getReviewsStorageKey(projectName: string): string {
+  return `frl_reviews_${projectName}`;
+}
+
 export function loadOutlineFromLocal(
   projectName: string,
 ): { report_type?: string; outline_md?: string; chapters?: ChapterInfo[]; updated_at?: string } | null {
@@ -189,6 +193,46 @@ export function saveChaptersToLocal(
   }
 }
 
+export function loadReviewsFromLocal(
+  projectName: string,
+): Record<number, engineApi.ExpertReviewResult> | null {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(getReviewsStorageKey(projectName));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const result: Record<number, engineApi.ExpertReviewResult> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          const num = Number(k);
+          if (!isNaN(num) && v && typeof v === "object") {
+            result[num] = v as engineApi.ExpertReviewResult;
+          }
+        }
+        return result;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function saveReviewsToLocal(
+  projectName: string,
+  reviews: Record<number, engineApi.ExpertReviewResult>,
+): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(
+        getReviewsStorageKey(projectName),
+        JSON.stringify(reviews),
+      );
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export interface ChapterWritingProgress {
   seq: number;
   stage: "rag" | "skeleton" | "reasoning" | "writing" | string;
@@ -222,6 +266,19 @@ export const useProjectStore = defineStore("project", () => {
   let progressTimer: ReturnType<typeof setInterval> | null = null;
   let activeStopWriting: (() => void) | null = null;
   const chapterDebounceTimers: Record<number, ReturnType<typeof setTimeout>> = {};
+
+  // Step 4 专家审阅与修改状态
+  const chapterReviews = ref<Record<number, engineApi.ExpertReviewResult>>({});
+  const reviewingSeq = ref<number | null>(null);
+  const reviewingMode = ref<"all" | "compliance" | "numeric" | "technical">("all");
+  const revisingSeq = ref<number | null>(null);
+  const activeRevision = ref<{
+    seq: number;
+    originalText: string;
+    revisedText: string;
+    instruction: string;
+    createdAt: string;
+  } | null>(null);
 
   const lastBaseUrl = ref<string>("");
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -259,12 +316,14 @@ export const useProjectStore = defineStore("project", () => {
           await loadMaterials(baseUrl, found.name);
           await loadOutline(baseUrl, found.name);
           await loadChapters(baseUrl, found.name);
+          await loadReviews(baseUrl, found.name);
         } else if (list.length > 0) {
           currentProject.value = list[0];
           setStoredProjectName(list[0].name);
           await loadMaterials(baseUrl, list[0].name);
           await loadOutline(baseUrl, list[0].name);
           await loadChapters(baseUrl, list[0].name);
+          await loadReviews(baseUrl, list[0].name);
         } else {
           currentProject.value = null;
           setStoredProjectName(null);
@@ -273,6 +332,8 @@ export const useProjectStore = defineStore("project", () => {
           outlineChapters.value = [];
           chapters.value = {};
           chapterStatuses.value = {};
+          chapterReviews.value = {};
+          activeRevision.value = null;
         }
       } else if (list.length > 0) {
         currentProject.value = list[0];
@@ -280,6 +341,7 @@ export const useProjectStore = defineStore("project", () => {
         await loadMaterials(baseUrl, list[0].name);
         await loadOutline(baseUrl, list[0].name);
         await loadChapters(baseUrl, list[0].name);
+        await loadReviews(baseUrl, list[0].name);
       } else {
         currentProject.value = null;
         setStoredProjectName(null);
@@ -288,6 +350,8 @@ export const useProjectStore = defineStore("project", () => {
         outlineChapters.value = [];
         chapters.value = {};
         chapterStatuses.value = {};
+        chapterReviews.value = {};
+        activeRevision.value = null;
       }
     } catch (e) {
       error.value = (e as Error).message;
@@ -306,6 +370,7 @@ export const useProjectStore = defineStore("project", () => {
       await loadMaterials(baseUrl, projectName);
       await loadOutline(baseUrl, projectName);
       await loadChapters(baseUrl, projectName);
+      await loadReviews(baseUrl, projectName);
     }
   }
 
@@ -318,6 +383,7 @@ export const useProjectStore = defineStore("project", () => {
         try {
           localStorage.removeItem(getOutlineStorageKey(name));
           localStorage.removeItem(getChaptersStorageKey(name));
+          localStorage.removeItem(getReviewsStorageKey(name));
         } catch {
           // ignore
         }
@@ -327,6 +393,8 @@ export const useProjectStore = defineStore("project", () => {
       outlineChapters.value = [];
       chapters.value = {};
       chapterStatuses.value = {};
+      chapterReviews.value = {};
+      activeRevision.value = null;
 
       const created = await engineApi.createProject(baseUrl, name);
       await loadProjects(baseUrl);
@@ -348,6 +416,7 @@ export const useProjectStore = defineStore("project", () => {
         try {
           localStorage.removeItem(getOutlineStorageKey(name));
           localStorage.removeItem(getChaptersStorageKey(name));
+          localStorage.removeItem(getReviewsStorageKey(name));
         } catch {
           // ignore
         }
@@ -360,6 +429,8 @@ export const useProjectStore = defineStore("project", () => {
         outlineChapters.value = [];
         chapters.value = {};
         chapterStatuses.value = {};
+        chapterReviews.value = {};
+        activeRevision.value = null;
       }
       await loadProjects(baseUrl);
     } catch (e) {
@@ -982,6 +1053,212 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
+  // ── Step 4 专家审阅与修改方法 ──
+
+  async function loadReviews(
+    baseUrl?: string,
+    projectName?: string,
+  ): Promise<Record<number, engineApi.ExpertReviewResult>> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = projectName || currentProject.value?.name;
+    if (!targetName) {
+      chapterReviews.value = {};
+      return {};
+    }
+
+    let loaded = false;
+    if (targetUrl) {
+      try {
+        const res = await engineApi.getProjectReviews(targetUrl, targetName);
+        if (res && res.reviews) {
+          const newReviews: Record<number, engineApi.ExpertReviewResult> = {};
+          for (const [k, v] of Object.entries(res.reviews)) {
+            const seq = Number(k);
+            if (!isNaN(seq) && v) {
+              newReviews[seq] = v;
+            }
+          }
+          chapterReviews.value = newReviews;
+          saveReviewsToLocal(targetName, newReviews);
+          loaded = true;
+          return newReviews;
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    if (!loaded) {
+      const local = loadReviewsFromLocal(targetName);
+      if (local) {
+        chapterReviews.value = local;
+        return local;
+      } else {
+        chapterReviews.value = {};
+      }
+    }
+    return {};
+  }
+
+  async function saveReview(
+    baseUrl?: string,
+    seq?: number,
+    reviewResult?: engineApi.ExpertReviewResult,
+  ): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = currentProject.value?.name;
+    const targetSeq = seq !== undefined ? seq : selectedChapterSeq.value;
+    if (!targetSeq) return;
+
+    if (reviewResult) {
+      chapterReviews.value[targetSeq] = reviewResult;
+    }
+
+    const currentResult = chapterReviews.value[targetSeq];
+    if (!currentResult) return;
+
+    if (targetName) {
+      saveReviewsToLocal(targetName, chapterReviews.value);
+    }
+
+    if (targetUrl && targetName) {
+      try {
+        await engineApi.saveProjectReview(targetUrl, targetName, targetSeq, currentResult);
+      } catch {
+        // non-fatal
+      }
+    }
+  }
+
+  async function deleteReview(baseUrl?: string, seq?: number): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = currentProject.value?.name;
+    const targetSeq = seq !== undefined ? seq : selectedChapterSeq.value;
+
+    delete chapterReviews.value[targetSeq];
+    if (targetName) {
+      saveReviewsToLocal(targetName, chapterReviews.value);
+      if (targetUrl) {
+        try {
+          await engineApi.deleteProjectReview(targetUrl, targetName, targetSeq);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  async function runChapterReview(
+    baseUrl: string,
+    seq: number,
+    mode: "all" | "compliance" | "numeric" | "technical" = "all",
+    llmConfig: engineApi.LLMConfig,
+  ): Promise<engineApi.ExpertReviewResult> {
+    if (baseUrl) lastBaseUrl.value = baseUrl;
+    const targetText = chapters.value[seq] || "";
+    if (!targetText.trim()) {
+      throw new Error(`第 ${seq} 章尚无正文内容，请先在步骤 3 写作该章节`);
+    }
+
+    reviewingSeq.value = seq;
+    reviewingMode.value = mode;
+    error.value = null;
+
+    const titles = outlineChapters.value.find((c) => c.seq === seq);
+    const chapterTitle = titles?.title || `第 ${seq} 章`;
+
+    try {
+      const res = await engineApi.reviewChapter(baseUrl, {
+        chapter_text: targetText,
+        report_type: reportType.value,
+        chapter_title: chapterTitle,
+        mode,
+        llm_config: llmConfig,
+      });
+
+      const reviewRes = {
+        ...res.review,
+        updated_at: new Date().toISOString(),
+      };
+
+      chapterReviews.value[seq] = reviewRes;
+      await saveReview(baseUrl, seq, reviewRes);
+      return reviewRes;
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      reviewingSeq.value = null;
+    }
+  }
+
+  async function runChapterRevision(
+    baseUrl: string,
+    seq: number,
+    instruction: string,
+    llmConfig: engineApi.LLMConfig,
+  ): Promise<string> {
+    if (baseUrl) lastBaseUrl.value = baseUrl;
+    const originalText = chapters.value[seq] || "";
+    if (!originalText.trim()) {
+      throw new Error(`第 ${seq} 章尚无正文内容，无法修订`);
+    }
+    if (!instruction.trim()) {
+      throw new Error("请输入修改指令或点击专家建议填入指令");
+    }
+
+    revisingSeq.value = seq;
+    error.value = null;
+
+    const titles = outlineChapters.value.find((c) => c.seq === seq);
+    const chapterTitle = titles?.title || `第 ${seq} 章`;
+
+    try {
+      const res = await engineApi.reviseChapter(baseUrl, {
+        chapter_text: originalText,
+        instruction,
+        llm_config: llmConfig,
+        chapter_title: chapterTitle,
+        report_type: reportType.value,
+      });
+
+      activeRevision.value = {
+        seq,
+        originalText,
+        revisedText: res.revised_text,
+        instruction,
+        createdAt: new Date().toISOString(),
+      };
+
+      return res.revised_text;
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      revisingSeq.value = null;
+    }
+  }
+
+  async function applyRevision(baseUrl?: string, seq?: number): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (!activeRevision.value) return;
+    const targetSeq = seq !== undefined ? seq : activeRevision.value.seq;
+    if (activeRevision.value.seq !== targetSeq) return;
+
+    const newText = activeRevision.value.revisedText;
+    chapters.value[targetSeq] = newText;
+    await saveChapter(targetUrl, targetSeq, newText, true);
+
+    activeRevision.value = null;
+  }
+
+  function discardRevision(): void {
+    activeRevision.value = null;
+  }
+
   return {
     currentStep,
     projects,
@@ -1000,6 +1277,11 @@ export const useProjectStore = defineStore("project", () => {
     batchWriting,
     currentWritingSeq,
     writingProgress,
+    chapterReviews,
+    reviewingSeq,
+    reviewingMode,
+    revisingSeq,
+    activeRevision,
     lastBaseUrl,
     loadingProjects,
     loadingMaterials,
@@ -1031,6 +1313,14 @@ export const useProjectStore = defineStore("project", () => {
     writeSingleChapterStream,
     writeAllChapters,
     stopWriting,
+    loadReviews,
+    saveReview,
+    deleteReview,
+    runChapterReview,
+    runChapterRevision,
+    applyRevision,
+    discardRevision,
   };
 });
+
 

@@ -1267,7 +1267,174 @@ describe("Pinia useProjectStore", () => {
       expect(store.writingProgress).toBeNull();
     });
   });
+
+  describe("Step 4 专家审阅与修改系统", () => {
+    it("engineApi.reviewChapter: 发送审阅请求并返回结构化诊断", async () => {
+      const mockResult: engineApi.ExpertReviewResult = {
+        status: "通过",
+        score: 92,
+        summary: "合规与技术方案齐备",
+        issues: [
+          {
+            id: "ISSUE-1",
+            severity: "warning",
+            category: "数值计算",
+            message: "负荷计算存在微小偏差",
+            location: "3.2节",
+            suggestion: "建议核实",
+          },
+        ],
+        numerical_checks: [
+          { parameter: "总投资", extracted_value: "1000万元", status: "normal", note: "自洽" },
+        ],
+        data_gap_checklist: ["电网批复"],
+        suggestions: "整体表现优良",
+      };
+
+      mockFetch.mockResolvedValue(
+        jsonResponse({ raw: "raw text", review: mockResult }),
+      );
+
+      const res = await engineApi.reviewChapter(BASE_URL, {
+        chapter_text: "# 第一章 概述\n正文...",
+        chapter_title: "第一章 概述",
+        report_type: "可行性研究报告",
+        mode: "all",
+        llm_config: { api_key: "sk-test", base_url: "http://api", model: "m" },
+      });
+
+      expect(res.review.status).toBe("通过");
+      expect(res.review.score).toBe(92);
+      expect(res.review.issues).toHaveLength(1);
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${BASE_URL}/writing/review`,
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("engineApi.reviseChapter: 发送定向修订请求并返回修订正文", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ revised_text: "# 第一章 概述\n修订后的正文内容。" }),
+      );
+
+      const res = await engineApi.reviseChapter(BASE_URL, {
+        chapter_text: "# 第一章 概述\n原正文...",
+        instruction: "补充合规论述",
+        llm_config: { api_key: "sk-test", base_url: "http://api", model: "m" },
+      });
+
+      expect(res.revised_text).toBe("# 第一章 概述\n修订后的正文内容。");
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${BASE_URL}/writing/revise`,
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("engineApi 专家审阅持久化 CRUD", async () => {
+      const reviewItem: engineApi.ExpertReviewResult = {
+        status: "需补充",
+        score: 75,
+        summary: "缺少底稿",
+      };
+
+      // GET
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ reviews: { "1": reviewItem }, updated_at: "2026-08-25T00:00:00Z" }),
+      );
+      const getRes = await engineApi.getProjectReviews(BASE_URL, "水库项目");
+      expect(getRes.reviews["1"].score).toBe(75);
+
+      // POST save
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ reviews: { "1": reviewItem }, updated_at: "2026-08-25T01:00:00Z" }),
+      );
+      const saveRes = await engineApi.saveProjectReview(BASE_URL, "水库项目", 1, reviewItem);
+      expect(saveRes.reviews["1"]).toBeDefined();
+
+      // DELETE
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true, seq: 1 }));
+      const delRes = await engineApi.deleteProjectReview(BASE_URL, "水库项目", 1);
+      expect(delRes.ok).toBe(true);
+    });
+
+    it("store: runChapterReview 与 saveReview 流程", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "审阅项目", created_at: "2026-08-25T00:00:00Z" };
+      store.chapters[1] = "# 第一章 概述\n正文详细内容。";
+      store.outlineChapters = [{ seq: 1, title: "第一章 概述" }];
+
+      const mockReview: engineApi.ExpertReviewResult = {
+        status: "通过",
+        score: 95,
+        summary: "优秀",
+        issues: [],
+      };
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/writing/review")) {
+          return jsonResponse({ raw: "raw", review: mockReview });
+        }
+        if (u.includes("/reviews/1")) {
+          return jsonResponse({ reviews: { "1": mockReview } });
+        }
+        return jsonResponse({});
+      });
+
+      const res = await store.runChapterReview(BASE_URL, 1, "all", {
+        api_key: "sk-test",
+        base_url: "http://api",
+        model: "m",
+      });
+
+      expect(res.status).toBe("通过");
+      expect(store.chapterReviews[1].score).toBe(95);
+      expect(store.reviewingSeq).toBeNull();
+    });
+
+    it("store: runChapterRevision, applyRevision 与 discardRevision", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "修订项目", created_at: "2026-08-25T00:00:00Z" };
+      store.chapters[1] = "# 第一章 概述\n原文内容。";
+      store.outlineChapters = [{ seq: 1, title: "第一章 概述" }];
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/writing/revise")) {
+          return jsonResponse({ revised_text: "# 第一章 概述\n修订后内容。" });
+        }
+        if (u.includes("/chapters/1")) {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      // 运行修订
+      const revised = await store.runChapterRevision(BASE_URL, 1, "优化表达", {
+        api_key: "sk-test",
+        base_url: "http://api",
+        model: "m",
+      });
+
+      expect(revised).toBe("# 第一章 概述\n修订后内容。");
+      expect(store.activeRevision).not.toBeNull();
+      expect(store.activeRevision?.seq).toBe(1);
+      expect(store.activeRevision?.revisedText).toBe("# 第一章 概述\n修订后内容。");
+
+      // 采纳修订
+      await store.applyRevision(BASE_URL, 1);
+      expect(store.chapters[1]).toBe("# 第一章 概述\n修订后内容。");
+      expect(store.activeRevision).toBeNull();
+
+      // 再次生成并放弃修订
+      await store.runChapterRevision(BASE_URL, 1, "再次优化", {
+        api_key: "sk-test",
+        base_url: "http://api",
+        model: "m",
+      });
+      expect(store.activeRevision).not.toBeNull();
+      store.discardRevision();
+      expect(store.activeRevision).toBeNull();
+    });
+  });
 });
-
-
-
