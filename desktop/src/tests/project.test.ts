@@ -14,6 +14,33 @@ function jsonResponse(body: unknown, status = 200): Response {
     ok: status >= 200 && status < 300,
     status,
     json: () => Promise.resolve(body),
+    text: () => Promise.resolve(typeof body === "string" ? body : JSON.stringify(body)),
+  } as unknown as Response;
+}
+
+function mockSSEResponse(chunks: string[]): Response {
+  const events = chunks.map((c) => `data: ${c}\n\n`).join("") + "data: [DONE]\n\n";
+  const encoder = new TextEncoder();
+  const uint8 = encoder.encode(events);
+
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => {
+        let sent = false;
+        return {
+          read: async () => {
+            if (!sent) {
+              sent = true;
+              return { done: false, value: uint8 };
+            }
+            return { done: true, value: undefined };
+          },
+        };
+      },
+    },
+    text: () => Promise.resolve(events),
   } as unknown as Response;
 }
 
@@ -901,32 +928,6 @@ describe("Pinia useProjectStore", () => {
   });
 
   describe("章节持久化与流式写作 (Step 3)", () => {
-    function mockSSEResponse(chunks: string[]): Response {
-      const events = chunks.map((c) => `data: ${c}\n\n`).join("") + "data: [DONE]\n\n";
-      const encoder = new TextEncoder();
-      const uint8 = encoder.encode(events);
-
-      return {
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => {
-            let sent = false;
-            return {
-              read: async () => {
-                if (!sent) {
-                  sent = true;
-                  return { done: false, value: uint8 };
-                }
-                return { done: true, value: undefined };
-              },
-            };
-          },
-        },
-        text: () => Promise.resolve(events),
-      } as unknown as Response;
-    }
-
     it("getProjectChapters & saveProjectChapter & deleteProjectChapter: 客户端 API 请求", async () => {
       mockFetch.mockImplementation(async (url, opts) => {
         const u = String(url);
@@ -1645,6 +1646,148 @@ describe("Pinia useProjectStore", () => {
       expect(fullRes.numerical_checks).toHaveLength(1);
       expect(fullRes.data_gap_checklist).toHaveLength(1);
       expect(store.fullBookReview).not.toBeNull();
+    });
+
+    it("streamChapterReview: 正确解析 SSE 阶段/思考/正文/完成事件并返回结构化结果", async () => {
+      const mockResult: engineApi.ExpertReviewResult = {
+        status: "通过",
+        score: 95,
+        summary: "审查合格",
+        issues: [],
+        numerical_checks: [],
+        data_gap_checklist: [],
+        suggestions: "建议保持",
+      };
+
+      mockFetch.mockResolvedValue(
+        mockSSEResponse([
+          '{"type": "stage", "stage": "init", "message": "正在核对规程..."}',
+          '{"type": "thought", "chunk": "思考合规要件..."}',
+          '{"type": "chunk", "chunk": "{\\"status\\": \\"通过\\"}"}',
+          JSON.stringify({ type: "done", review: mockResult, raw: '{"status": "通过"}' }),
+        ]),
+      );
+
+      const progressEvents: engineApi.ReviewProgressEvent[] = [];
+      const res = await engineApi.streamChapterReview(
+        BASE_URL,
+        {
+          chapter_text: "第一章正文...",
+          report_type: "可行性研究报告",
+          chapter_title: "第一章 概述",
+          mode: "all",
+          llm_config: { api_key: "sk-key", base_url: "http://api", model: "m" },
+        },
+        (ev) => progressEvents.push(ev),
+      );
+
+      expect(res.review.status).toBe("通过");
+      expect(res.review.score).toBe(95);
+      expect(progressEvents).toHaveLength(4);
+      expect(progressEvents[0].type).toBe("stage");
+      expect(progressEvents[1].type).toBe("thought");
+      expect(progressEvents[1].chunk).toBe("思考合规要件...");
+      expect(progressEvents[2].type).toBe("chunk");
+      expect(progressEvents[3].type).toBe("done");
+    });
+
+    it("streamChapterReview: 引擎 500 错误时抛出 EngineApiError", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ detail: "上游大模型连接失败" }, 500));
+
+      await expect(
+        engineApi.streamChapterReview(BASE_URL, {
+          chapter_text: "正文...",
+          llm_config: { api_key: "sk-key", base_url: "http://api", model: "m" },
+        }),
+      ).rejects.toThrow("上游大模型连接失败");
+    });
+
+    it("runFullBookReview: 流式审阅全书时维护 reviewProgress 并即时保存每章结果", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "流式审阅项目", created_at: "2026-08-25T00:00:00Z" };
+      store.outlineChapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 建设背景" },
+      ];
+      store.chapters = {
+        1: "第一章正文内容...",
+        2: "第二章正文内容...",
+      };
+      store.chapterReviews = {};
+
+      const mockRev1: engineApi.ExpertReviewResult = {
+        status: "通过",
+        score: 92,
+        summary: "第一章合规",
+        issues: [],
+      };
+      const mockRev2: engineApi.ExpertReviewResult = {
+        status: "需补充",
+        score: 75,
+        summary: "第二章有待完善",
+        issues: [
+          {
+            id: "ISS-1",
+            severity: "warning",
+            category: "合规性",
+            message: "缺少批复文件",
+            location: "2.1 节",
+          },
+        ],
+      };
+
+      mockFetch.mockImplementation(async (url, opts) => {
+        const u = String(url);
+        const method = opts?.method || "GET";
+        if (u.includes("/writing/review_stream") && method === "POST") {
+          const body = JSON.parse(opts?.body as string);
+          const rev = body.chapter_title?.includes("第一章") ? mockRev1 : mockRev2;
+          return mockSSEResponse([
+            '{"type": "stage", "stage": "init", "message": "核对中..."}',
+            '{"type": "thought", "chunk": "审阅推演细节..."}',
+            JSON.stringify({ type: "done", review: rev, raw: "{}" }),
+          ]);
+        }
+        if (u.includes("/reviews/") && method === "POST") {
+          return jsonResponse({ ok: true });
+        }
+        if (u.includes("/full_review") && method === "POST") {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      const fullRes = await store.runFullBookReview(
+        BASE_URL,
+        { api_key: "sk-test", base_url: "http://api", model: "m" },
+        true,
+      );
+
+      expect(fullRes.health_status).toBe("待完善");
+      expect(store.chapterReviews[1]?.status).toBe("通过");
+      expect(store.chapterReviews[2]?.status).toBe("需补充");
+      expect(store.batchReviewing).toBe(false);
+      expect(store.reviewProgress).toBeNull();
+    });
+
+    it("stopBatchReview: 中止时清除 reviewProgress 并重置 batchReviewing", () => {
+      const store = useProjectStore();
+      store.batchReviewing = true;
+      store.reviewProgress = {
+        currentSeq: 1,
+        currentTitle: "第一章",
+        currentIndex: 1,
+        totalTarget: 4,
+        percent: 25,
+        elapsedSeconds: 10,
+        thoughtText: "正在思考...",
+        completedIssuesCount: 0,
+      };
+
+      store.stopBatchReview();
+
+      expect(store.batchReviewing).toBe(false);
+      expect(store.reviewProgress).toBeNull();
     });
   });
 });

@@ -30,20 +30,35 @@ def fast_retries(monkeypatch):
 
 
 class ReviewLLMStub:
-    def __init__(self, content=""):
+    def __init__(self, content="", chunks=None, reasoning_chunks=None):
         self.content = content
+        self.chunks = chunks
+        self.reasoning_chunks = reasoning_chunks
         self.requests: list[httpx.Request] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        body = json.loads(request.content) if request.content else {}
+        if body.get("stream"):
+            events = ""
+            if self.reasoning_chunks:
+                for r in self.reasoning_chunks:
+                    events += f"data: {json.dumps({'choices': [{'delta': {'reasoning_content': r}}]})}\n\n"
+            chunks = self.chunks or [self.content]
+            for c in chunks:
+                events += f"data: {json.dumps({'choices': [{'delta': {'content': c}}]})}\n\n"
+            events += "data: [DONE]\n\n"
+            return httpx.Response(
+                200, text=events, headers={"content-type": "text/event-stream"}
+            )
         return httpx.Response(
             200,
             json={"choices": [{"message": {"content": self.content}}]},
         )
 
 
-def _set_stub_llm(content: str) -> ReviewLLMStub:
-    stub = ReviewLLMStub(content=content)
+def _set_stub_llm(content: str, chunks=None, reasoning_chunks=None) -> ReviewLLMStub:
+    stub = ReviewLLMStub(content=content, chunks=chunks, reasoning_chunks=reasoning_chunks)
     set_llm_transport(httpx.MockTransport(stub.handle))
     return stub
 
@@ -290,6 +305,53 @@ def test_api_review_and_revise_endpoints():
     })
     assert resp_rev.status_code == 200, resp_rev.text
     assert "经 AI 修订后的正文" in resp_rev.json()["revised_text"]
+
+
+def test_api_review_stream():
+    sample_review = {
+        "status": "通过",
+        "score": 96,
+        "summary": "全维度审查合格",
+        "issues": [],
+        "numerical_checks": [],
+        "data_gap_checklist": [],
+        "suggestions": "无",
+    }
+    raw_json = json.dumps(sample_review, ensure_ascii=False)
+    _set_stub_llm(
+        content=raw_json,
+        chunks=[raw_json[:20], raw_json[20:]],
+        reasoning_chunks=["思考：正在核对发改委规程...", "核对完成。"],
+    )
+
+    client = TestClient(app)
+    resp = client.post("/writing/review_stream", json={
+        "chapter_text": "# 第一章 概述\n项目建设内容...",
+        "chapter_title": "第一章 概述",
+        "report_type": "可行性研究报告",
+        "mode": "all",
+        "llm_config": LLM_CONFIG,
+    })
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    events = []
+    for line in resp.text.split("\n\n"):
+        line = line.strip()
+        if line.startswith("data: "):
+            val = line[6:]
+            if val == "[DONE]":
+                events.append({"done": True})
+            else:
+                events.append(json.loads(val))
+
+    assert any(e.get("type") == "stage" and e.get("stage") == "init" for e in events)
+    assert any(e.get("type") == "thought" and "思考" in e.get("chunk", "") for e in events)
+    assert any(e.get("type") == "chunk" for e in events)
+    done_ev = [e for e in events if e.get("type") == "done"]
+    assert len(done_ev) == 1
+    assert done_ev[0]["review"]["status"] == "通过"
+    assert done_ev[0]["review"]["score"] == 96
 
 
 def test_api_project_reviews_persistence(tmp_path, monkeypatch):

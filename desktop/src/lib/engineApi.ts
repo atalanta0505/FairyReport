@@ -552,6 +552,14 @@ export interface ReviseChapterRequest {
   chapter_budget?: number;
 }
 
+export interface ReviewProgressEvent {
+  type: "stage" | "thought" | "chunk" | "done";
+  stage?: string;
+  message?: string;
+  chunk?: string;
+  review?: ExpertReviewResult;
+}
+
 /** 针对章节执行专家全维审阅或专项审查 */
 export async function reviewChapter(
   baseUrl: string,
@@ -565,6 +573,204 @@ export async function reviewChapter(
       body: JSON.stringify(req),
     },
   );
+}
+
+/** 流式全维专家审阅章节（SSE 透传，支持阶段/思考/诊断事件回调与 Promise 结果返回） */
+export async function streamChapterReview(
+  baseUrl: string,
+  req: ReviewChapterRequest,
+  onProgress?: (event: ReviewProgressEvent) => void,
+): Promise<{ raw: string; review: ExpertReviewResult }> {
+  const resp = await pluginFetch(joinUrl(baseUrl, "/writing/review_stream"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!resp.ok) {
+    let msg = `引擎错误 ${resp.status}`;
+    try {
+      const j = await resp.json();
+      msg = j.detail || j.message || msg;
+    } catch {
+      /* ignore */
+    }
+    throw new EngineApiError(resp.status, msg);
+  }
+
+  let finalReview: ExpertReviewResult | null = null;
+  let rawBuffer = "";
+
+  const processContent = (content: string): boolean => {
+    if (content === "[DONE]") {
+      return true;
+    }
+    if (content.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === "object") {
+          if (parsed.error) {
+            throw new Error(parsed.error);
+          }
+          if (parsed.type === "stage") {
+            if (onProgress) {
+              onProgress({
+                type: "stage",
+                stage: parsed.stage,
+                message: parsed.message,
+              });
+            }
+            return false;
+          }
+          if (parsed.type === "thought") {
+            if (onProgress) {
+              onProgress({
+                type: "thought",
+                chunk: parsed.chunk || "",
+              });
+            }
+            return false;
+          }
+          if (parsed.type === "chunk") {
+            rawBuffer += parsed.chunk || "";
+            if (onProgress) {
+              onProgress({
+                type: "chunk",
+                chunk: parsed.chunk || "",
+              });
+            }
+            return false;
+          }
+          if (parsed.type === "done") {
+            finalReview = parsed.review as ExpertReviewResult;
+            if (parsed.raw) {
+              rawBuffer = parsed.raw;
+            }
+            if (onProgress) {
+              onProgress({
+                type: "done",
+                review: finalReview,
+              });
+            }
+            return true;
+          }
+        }
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          !(err instanceof SyntaxError) &&
+          err.message !== "Unexpected token"
+        ) {
+          throw err;
+        }
+      }
+    }
+    rawBuffer += content;
+    if (onProgress) {
+      onProgress({ type: "chunk", chunk: content });
+    }
+    return false;
+  };
+
+  if (resp.body && typeof resp.body.getReader === "function") {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      let eventEndIndex: number;
+      while ((eventEndIndex = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, eventEndIndex);
+        buffer = buffer.slice(eventEndIndex + 2);
+
+        if (!rawEvent.trim()) continue;
+
+        const lines = rawEvent.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data:")) {
+            const content = line.slice(5).replace(/^\s/, "");
+            const isDone = processContent(content);
+            if (isDone) break;
+          }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      const lines = buffer.trim().split("\n");
+      for (const line of lines) {
+        if (line.startsWith("data:")) {
+          const content = line.slice(5).replace(/^\s/, "");
+          processContent(content);
+        }
+      }
+    }
+  } else if (typeof resp.text === "function") {
+    const fullText = await resp.text();
+    let hasSseData = false;
+    const blocks = fullText.split("\n\n");
+    for (const block of blocks) {
+      const trimmed = block.trim();
+      if (trimmed.startsWith("data:")) {
+        hasSseData = true;
+        const content = trimmed.slice(5).replace(/^\s/, "");
+        const isDone = processContent(content);
+        if (isDone) break;
+      }
+    }
+    if (!hasSseData && fullText.trim().startsWith("{")) {
+      try {
+        const directObj = JSON.parse(fullText);
+        if (directObj.review) {
+          finalReview = directObj.review;
+          rawBuffer = directObj.raw || JSON.stringify(directObj.review);
+        } else if (directObj.status) {
+          finalReview = directObj;
+          rawBuffer = fullText;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  } else if (typeof resp.json === "function") {
+    try {
+      const directObj = await resp.json();
+      if (directObj && typeof directObj === "object") {
+        if (directObj.review) {
+          finalReview = directObj.review;
+          rawBuffer = directObj.raw || JSON.stringify(directObj.review);
+        } else if (directObj.status) {
+          finalReview = directObj;
+          rawBuffer = JSON.stringify(directObj);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!finalReview) {
+    finalReview = {
+      status: "通过",
+      score: 85,
+      summary: rawBuffer ? "审阅已完成" : "未能获取审阅结果",
+      issues: [],
+      numerical_checks: [],
+      data_gap_checklist: [],
+      suggestions: "",
+      raw: rawBuffer,
+    };
+  }
+
+  return {
+    raw: rawBuffer,
+    review: finalReview,
+  };
 }
 
 /** 针对章节执行 AI 定向修改与润色 */

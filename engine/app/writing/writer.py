@@ -539,10 +539,9 @@ class ChapterWriter:
         )
         return prompt, system
 
-    # ── 专家审阅 ──
-    def expert_review(self, chapter_title: str, chapter_text: str,
-                      mode: str = "all") -> tuple[str, dict]:
-        """对章节进行全维专家诊断或专项审阅。返回 (raw_output, parsed_dict)。"""
+    def _build_expert_review_args(self, chapter_title: str, chapter_text: str,
+                                   mode: str = "all") -> tuple[str, str]:
+        """构建专家审阅 prompt 与 system_prompt。"""
         prompt = (
             f"## 待审阅章节标题\n{chapter_title or '当前章节'}\n\n"
             f"## 待审阅正文内容\n{chapter_text}\n\n"
@@ -556,7 +555,13 @@ class ChapterWriter:
             system = TECH_REVIEW_SYSTEM_PROMPT
         else:
             system = FULL_EXPERT_REVIEW_SYSTEM_PROMPT
+        return prompt, system
 
+    # ── 专家审阅 ──
+    def expert_review(self, chapter_title: str, chapter_text: str,
+                      mode: str = "all") -> tuple[str, dict]:
+        """对章节进行全维专家诊断或专项审阅。返回 (raw_output, parsed_dict)。"""
+        prompt, system = self._build_expert_review_args(chapter_title, chapter_text, mode=mode)
         raw = self.llm.chat(prompt, system_prompt=system, temperature=0.2)
         if mode == "technical":
             parsed = parse_tech_review_result(raw)

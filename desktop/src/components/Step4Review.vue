@@ -49,15 +49,8 @@ const actionMessage = ref<{ type: "success" | "error" | "info"; text: string } |
 
 // ── 审阅动态心跳与计时器 ──
 const reviewElapsedSeconds = ref<number>(0);
-const reviewStageIndex = ref<number>(0);
+const showReviewThoughtDetails = ref<boolean>(true);
 let reviewTimer: ReturnType<typeof setInterval> | null = null;
-
-const reviewStages = [
-  { id: "params", title: "关键参数抽取", desc: "提取投资估算、规模与关键工程技术指标" },
-  { id: "compliance", title: "规程合规审查", desc: "对照国家发改委与行业编制规程标准" },
-  { id: "consistency", title: "跨章数值自洽", desc: "排查全书前后章节数据勾稽与量纲自洽性" },
-  { id: "report", title: "诊断报告生成", desc: "综合生成专家评审意见、批注与资料缺口" },
-];
 
 // ── 修订动态心跳与计时器 ──
 const revisionElapsedSeconds = ref<number>(0);
@@ -534,11 +527,9 @@ async function handleRunFullBookReview(forceAll = false) {
   }
 
   reviewElapsedSeconds.value = 0;
-  reviewStageIndex.value = 0;
   if (reviewTimer) clearInterval(reviewTimer);
   reviewTimer = setInterval(() => {
     reviewElapsedSeconds.value += 1;
-    reviewStageIndex.value = Math.min(3, Math.floor(reviewElapsedSeconds.value / 3));
   }, 1000);
 
   try {
@@ -582,11 +573,9 @@ async function handleRunSingleReview(
   }
 
   reviewElapsedSeconds.value = 0;
-  reviewStageIndex.value = 0;
   if (reviewTimer) clearInterval(reviewTimer);
   reviewTimer = setInterval(() => {
     reviewElapsedSeconds.value += 1;
-    reviewStageIndex.value = Math.min(3, Math.floor(reviewElapsedSeconds.value / 3));
   }, 1000);
 
   try {
@@ -869,31 +858,47 @@ function copyFullBookMarkdown() {
           <div class="hb-left">
             <span class="radar-pulse"></span>
             <div class="hb-title-box">
-              <strong>全书全维专家深度审阅进行中...</strong>
-              <span class="hb-desc">正在依照国家发改委与行业工程编制规程对全书进行系统体检</span>
-            </div>
-          </div>
-          <div class="hb-stepper">
-            <div
-              v-for="(stage, sIdx) in reviewStages"
-              :key="stage.id"
-              class="stepper-item"
-              :class="{
-                completed: reviewStageIndex > sIdx,
-                active: reviewStageIndex === sIdx,
-                pending: reviewStageIndex < sIdx,
-              }"
-            >
-              <div class="stepper-circle">
-                <span v-if="reviewStageIndex > sIdx">✓</span>
-                <span v-else-if="reviewStageIndex === sIdx" class="spinner-mini"></span>
-                <span v-else>{{ sIdx + 1 }}</span>
+              <div class="hb-main-title">
+                <strong>⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
               </div>
-              <span class="stepper-label">{{ stage.title }}</span>
+              <div class="hb-desc">
+                已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照国家发改委与行业工程编制规程进行系统体检
+              </div>
             </div>
           </div>
           <div class="hb-right">
-            <span class="hb-timer">⏱️ 已耗时 <strong>{{ reviewElapsedSeconds }}</strong> 秒</span>
+            <button
+              class="btn btn-danger btn-sm btn-stop-review"
+              @click="projectStore.stopBatchReview()"
+              title="中止当前正在执行的批量全书审阅任务"
+            >
+              ⏹ 停止审阅
+            </button>
+          </div>
+        </div>
+
+        <!-- 实时 AI 专家审阅思考推演窗 -->
+        <div class="review-thought-stream-wrapper">
+          <div class="review-thought-card">
+            <div class="review-thought-header" @click="showReviewThoughtDetails = !showReviewThoughtDetails">
+              <div class="review-thought-title">
+                <span class="review-thought-icon">🧠</span>
+                <span>专家审阅实时思考推演窗 <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
+                <span class="thinking-wave">
+                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                </span>
+              </div>
+              <button class="review-thought-toggle-btn" type="button">
+                {{ showReviewThoughtDetails ? '收起 ▲' : '展开 ▼' }}
+              </button>
+            </div>
+            <div v-show="showReviewThoughtDetails" class="review-thought-body">
+              <pre v-if="projectStore.reviewProgress?.thoughtText">{{ projectStore.reviewProgress.thoughtText }}</pre>
+              <div v-else class="review-thought-placeholder">
+                <span class="placeholder-spinner">🔍</span>
+                <span>AI 专家正在对照国家发改委与行业编制规程深度核查章节参数指标与数据自洽性...</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1935,6 +1940,9 @@ function copyFullBookMarkdown() {
   background: linear-gradient(90deg, #eff6ff 0%, #f0fdf4 100%);
   border: 1px solid #bfdbfe;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .heartbeat-inner {
   display: flex;
@@ -1946,6 +1954,8 @@ function copyFullBookMarkdown() {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
 }
 .radar-pulse {
   width: 10px;
@@ -1954,6 +1964,7 @@ function copyFullBookMarkdown() {
   border-radius: 50%;
   box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
   animation: pulse-ring 1.5s infinite;
+  flex-shrink: 0;
 }
 @keyframes pulse-ring {
   0% {
@@ -1972,71 +1983,132 @@ function copyFullBookMarkdown() {
 .hb-title-box {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
-.hb-title-box strong {
+.hb-main-title strong {
   font-size: 13px;
   color: #1e3a8a;
+  line-height: 1.4;
 }
 .hb-desc {
   font-size: 11px;
   color: #3b82f6;
 }
-
-.hb-stepper {
+.hb-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
-.stepper-item {
+.btn-stop-review {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+}
+
+/* 审阅实时思考推演窗 */
+.review-thought-stream-wrapper {
+  margin-top: 2px;
+}
+.review-thought-card {
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #ffffff;
+}
+.review-thought-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #f8fafc;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid #e2e8f0;
+  transition: background 0.15s;
+}
+.review-thought-header:hover {
+  background: #f1f5f9;
+}
+.review-thought-title {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #64748b;
-}
-.stepper-item.active {
-  color: #1d4ed8;
   font-weight: 600;
+  color: #1e293b;
 }
-.stepper-item.completed {
-  color: #059669;
-  font-weight: 500;
+.review-thought-icon {
+  font-size: 13px;
 }
-.stepper-circle {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #e2e8f0;
-  display: flex;
+.thinking-wave {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
+  gap: 3px;
+  margin-left: 4px;
 }
-.stepper-item.active .stepper-circle {
+.thinking-wave .dot {
+  width: 4px;
+  height: 4px;
   background: #3b82f6;
-  color: #fff;
-}
-.stepper-item.completed .stepper-circle {
-  background: #10b981;
-  color: #fff;
-}
-.spinner-mini {
-  width: 10px;
-  height: 10px;
-  border: 2px solid #fff;
-  border-top-color: transparent;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: wave-jump 1.2s infinite ease-in-out;
 }
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+.thinking-wave .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.thinking-wave .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes wave-jump {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-3px);
+    opacity: 1;
   }
 }
-.hb-timer {
-  font-size: 12px;
-  color: #475569;
+.review-thought-toggle-btn {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+  cursor: pointer;
+}
+.review-thought-body {
+  padding: 8px 12px;
+  max-height: 140px;
+  overflow-y: auto;
+  background: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #334155;
+}
+.review-thought-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.review-thought-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #64748b;
+  font-size: 11.5px;
+}
+.placeholder-spinner {
+  display: inline-block;
+  animation: pulse-icon 1.5s infinite;
+}
+@keyframes pulse-icon {
+  0%, 100% { opacity: 0.6; transform: scale(0.95); }
+  50% { opacity: 1; transform: scale(1.05); }
 }
 
 /* ═════════════════════════════════════════════════════════ */
@@ -2050,9 +2122,9 @@ function copyFullBookMarkdown() {
   overflow: hidden;
 }
 
-/* 左侧栏：全书多级标题导航 */
+/* 左侧栏：全书多级标题导航 (宽度调整为 320px) */
 .sidebar-nav-panel {
-  width: 300px;
+  width: 320px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -2177,9 +2249,9 @@ function copyFullBookMarkdown() {
   font-size: 12px;
   font-weight: 600;
   color: #1e293b;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .row-right {
@@ -2210,11 +2282,25 @@ function copyFullBookMarkdown() {
   color: #475569;
 }
 
-/* 子标题层级 */
+/* 子标题层级与独立平滑滚动 */
 .subheadings-subtree {
   padding: 2px 0 6px 0;
   background: #fafafa;
   border-top: 1px solid #f1f5f9;
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.subheadings-subtree::-webkit-scrollbar {
+  width: 4px;
+}
+.subheadings-subtree::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.subheadings-subtree::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 .subheading-item-row {
   padding: 4px 10px 4px 28px;

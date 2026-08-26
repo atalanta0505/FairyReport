@@ -277,6 +277,17 @@ export interface ChapterWritingProgress {
   thoughtText: string;
 }
 
+export interface ReviewProgress {
+  currentSeq: number;
+  currentTitle: string;
+  currentIndex: number;
+  totalTarget: number;
+  percent: number;
+  elapsedSeconds: number;
+  thoughtText: string;
+  completedIssuesCount: number;
+}
+
 export const useProjectStore = defineStore("project", () => {
   const currentStep = ref<number>(getStoredStep());
   const projects = ref<ProjectOut[]>([]);
@@ -308,6 +319,9 @@ export const useProjectStore = defineStore("project", () => {
   const fullBookReview = ref<engineApi.FullReviewData | null>(null);
   const reviewingSeq = ref<number | null>(null);
   const reviewingMode = ref<"all" | "compliance" | "numeric" | "technical">("all");
+  const batchReviewing = ref<boolean>(false);
+  const reviewProgress = ref<ReviewProgress | null>(null);
+  let reviewProgressTimer: ReturnType<typeof setInterval> | null = null;
   const revisingSeq = ref<number | null>(null);
   const activeRevision = ref<{
     seq: number;
@@ -1217,8 +1231,10 @@ export const useProjectStore = defineStore("project", () => {
     const titles = outlineChapters.value.find((c) => c.seq === seq);
     const chapterTitle = titles?.title || `第 ${seq} 章`;
 
+    const targetName = currentProject.value?.name;
+
     try {
-      const res = await engineApi.reviewChapter(baseUrl, {
+      const res = await engineApi.streamChapterReview(baseUrl, {
         chapter_text: targetText,
         report_type: reportType.value,
         chapter_title: chapterTitle,
@@ -1232,6 +1248,9 @@ export const useProjectStore = defineStore("project", () => {
       };
 
       chapterReviews.value[seq] = reviewRes;
+      if (targetName) {
+        saveReviewsToLocal(targetName, chapterReviews.value);
+      }
       await saveReview(baseUrl, seq, reviewRes);
       return reviewRes;
     } catch (e) {
@@ -1302,54 +1321,21 @@ export const useProjectStore = defineStore("project", () => {
     activeRevision.value = null;
   }
 
-  const batchReviewing = ref<boolean>(false);
-
   async function runAllChaptersReview(
     baseUrl: string,
     llmConfig: engineApi.LLMConfig,
     forceAll = false,
   ): Promise<void> {
-    if (baseUrl) lastBaseUrl.value = baseUrl;
-    if (!baseUrl) throw new Error("引擎未就绪");
-
-    const targetChapters = outlineChapters.value.filter((ch) => {
-      const text = chapters.value[ch.seq];
-      const hasContent = text && text.trim().length > 0;
-      if (!hasContent) return false;
-      if (forceAll) return true;
-      return !chapterReviews.value[ch.seq];
-    });
-
-    if (targetChapters.length === 0) {
-      const completed = outlineChapters.value.filter((ch) => chapters.value[ch.seq]?.trim());
-      if (completed.length === 0) {
-        throw new Error("暂无可审阅的章节（需先在步骤 3 写作并生成正文）");
-      }
-      return;
-    }
-
-    batchReviewing.value = true;
-    error.value = null;
-
-    try {
-      for (const ch of targetChapters) {
-        if (!batchReviewing.value) break;
-        try {
-          await runChapterReview(baseUrl, ch.seq, "all", llmConfig);
-        } catch {
-          // 章节审阅异常不中断批量任务
-        }
-      }
-    } catch (e) {
-      error.value = (e as Error).message;
-      throw e;
-    } finally {
-      batchReviewing.value = false;
-    }
+    await runFullBookReview(baseUrl, llmConfig, forceAll);
   }
 
   function stopBatchReview(): void {
     batchReviewing.value = false;
+    if (reviewProgressTimer) {
+      clearInterval(reviewProgressTimer);
+      reviewProgressTimer = null;
+    }
+    reviewProgress.value = null;
   }
 
   function discardRevision(): void {
@@ -1474,15 +1460,97 @@ export const useProjectStore = defineStore("project", () => {
     batchReviewing.value = true;
     error.value = null;
 
+    if (reviewProgressTimer) {
+      clearInterval(reviewProgressTimer);
+      reviewProgressTimer = null;
+    }
+
+    const firstChapter = targetChapters[0];
+    reviewProgress.value = {
+      currentSeq: firstChapter.seq,
+      currentTitle: firstChapter.title,
+      currentIndex: 1,
+      totalTarget: targetChapters.length,
+      percent: 0,
+      elapsedSeconds: 0,
+      thoughtText: "",
+      completedIssuesCount: 0,
+    };
+
+    reviewProgressTimer = setInterval(() => {
+      if (reviewProgress.value) {
+        reviewProgress.value.elapsedSeconds += 1;
+      }
+    }, 1000);
+
+    const targetName = currentProject.value?.name;
+
     try {
-      for (const ch of targetChapters) {
+      for (let idx = 0; idx < targetChapters.length; idx++) {
         if (!batchReviewing.value) break;
+        const ch = targetChapters[idx];
+        const text = chapters.value[ch.seq] || "";
+
+        if (reviewProgress.value) {
+          reviewProgress.value.currentSeq = ch.seq;
+          reviewProgress.value.currentTitle = ch.title;
+          reviewProgress.value.currentIndex = idx + 1;
+          reviewProgress.value.thoughtText = "";
+        }
+
         if (forceAll || !chapterReviews.value[ch.seq]) {
           try {
-            await runChapterReview(baseUrl, ch.seq, "all", llmConfig);
+            reviewingSeq.value = ch.seq;
+            const res = await engineApi.streamChapterReview(
+              baseUrl,
+              {
+                chapter_text: text,
+                report_type: reportType.value,
+                chapter_title: ch.title,
+                mode: "all",
+                llm_config: llmConfig,
+              },
+              (ev) => {
+                if (reviewProgress.value) {
+                  if (ev.type === "thought" && ev.chunk) {
+                    reviewProgress.value.thoughtText += ev.chunk;
+                  }
+                }
+              },
+            );
+
+            const reviewRes: engineApi.ExpertReviewResult = {
+              ...res.review,
+              updated_at: new Date().toISOString(),
+            };
+
+            chapterReviews.value[ch.seq] = reviewRes;
+            if (targetName) {
+              saveReviewsToLocal(targetName, chapterReviews.value);
+            }
+            try {
+              await saveReview(baseUrl, ch.seq, reviewRes);
+            } catch {
+              // non-fatal
+            }
           } catch {
             // 章节审阅异常不中断
+          } finally {
+            reviewingSeq.value = null;
           }
+        }
+
+        let issuesSum = 0;
+        for (let j = 0; j <= idx; j++) {
+          const cSeq = targetChapters[j].seq;
+          const r = chapterReviews.value[cSeq];
+          if (r && r.issues) {
+            issuesSum += r.issues.length;
+          }
+        }
+        if (reviewProgress.value) {
+          reviewProgress.value.completedIssuesCount = issuesSum;
+          reviewProgress.value.percent = Math.round(((idx + 1) / targetChapters.length) * 100);
         }
       }
 
@@ -1529,7 +1597,7 @@ export const useProjectStore = defineStore("project", () => {
               allGaps.push({
                 chapterSeq: ch.seq,
                 chapterTitle: ch.title,
-                gap: g,
+                gap: typeof g === "string" ? g : (g as any).gap || String(g),
               });
             }
           }
@@ -1593,7 +1661,12 @@ export const useProjectStore = defineStore("project", () => {
       error.value = (e as Error).message;
       throw e;
     } finally {
+      if (reviewProgressTimer) {
+        clearInterval(reviewProgressTimer);
+        reviewProgressTimer = null;
+      }
       batchReviewing.value = false;
+      reviewProgress.value = null;
     }
   }
 
@@ -1620,6 +1693,7 @@ export const useProjectStore = defineStore("project", () => {
     reviewingSeq,
     reviewingMode,
     batchReviewing,
+    reviewProgress,
     revisingSeq,
     activeRevision,
     lastBaseUrl,
