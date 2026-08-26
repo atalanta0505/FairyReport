@@ -293,9 +293,6 @@ def chapter(req: ChapterRequest):
     chapter_title = titles.get(req.chapter_seq, f"第{req.chapter_seq}章")
     topic = req.topic or req.project
 
-    # RAG（双源：项目库 + 已安装通用包）
-    rag_context = query_rag(req.project, chapter_title, include_generic=True)
-
     # 字数预算与是否综述章
     chapter_budget = tmpl.get_chapter_word_budget(req.report_type, req.chapter_seq)
     is_summary = tmpl.is_summary_chapter(req.report_type, req.chapter_seq)
@@ -304,12 +301,13 @@ def chapter(req: ChapterRequest):
 
     if req.stream:
         return StreamingResponse(
-            _stream_chapter(writer, llm, req, chapter_title, rag_context,
+            _stream_chapter(writer, llm, req, chapter_title,
                             chapter_budget, is_summary, topic),
             media_type="text/event-stream",
         )
 
     # 非流式 JSON
+    rag_context = query_rag(req.project, chapter_title, include_generic=True)
     try:
         content = writer.write_chapter(
             chapter_title, req.outline_md, req.predecessor_chapters,
@@ -322,17 +320,41 @@ def chapter(req: ChapterRequest):
     return {"chapter_text": content}
 
 
-def _stream_chapter(writer, llm, req, chapter_title, rag_context,
+def _stream_chapter(writer, llm, req, chapter_title,
                     chapter_budget, is_summary, topic):
-    """SSE 生成器：透传 LLM chunks。"""
-    prompt, system = writer._build_chapter_write_args(
-        chapter_title, req.outline_md, req.predecessor_chapters,
-        rag_context, topic, writing_hint=req.writing_hint,
-        report_name=req.project, chapter_budget=chapter_budget,
-        is_summary=is_summary,
-    )
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+    """SSE 生成器：阶段事件 + 思考事件 + 透传 LLM chunks。"""
     try:
+        # 1. RAG 检索阶段
+        yield _sse_event(json.dumps({
+            "type": "stage",
+            "stage": "rag",
+            "message": "🔍 正在双源检索工程底稿与标准规程库...",
+        }, ensure_ascii=False))
+
+        rag_context = query_rag(req.project, chapter_title, include_generic=True)
+
+        # 2. 骨架锁定与构建阶段
+        yield _sse_event(json.dumps({
+            "type": "stage",
+            "stage": "skeleton",
+            "message": "📋 正在提取并锁定章节全层级大纲骨架...",
+        }, ensure_ascii=False))
+
+        prompt, system = writer._build_chapter_write_args(
+            chapter_title, req.outline_md, req.predecessor_chapters,
+            rag_context, topic, writing_hint=req.writing_hint,
+            report_name=req.project, chapter_budget=chapter_budget,
+            is_summary=is_summary,
+        )
+
+        # 3. 深度推理构思阶段
+        yield _sse_event(json.dumps({
+            "type": "stage",
+            "stage": "reasoning",
+            "message": "🧠 大模型正在深度构思与组织水利专业论证与数据表格...",
+        }, ensure_ascii=False))
+
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
         for chunk in llm.chat_stream_iter(
             messages, temperature=TEMPERATURE_WRITING,
             frequency_penalty=FREQUENCY_PENALTY,
@@ -342,7 +364,9 @@ def _stream_chapter(writer, llm, req, chapter_title, rag_context,
             yield _sse_event(chunk)
         yield "data: [DONE]\n\n"
     except LLMError as e:
-        yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}))
+        yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}, ensure_ascii=False))
+    except Exception as e:
+        yield _sse_event(json.dumps({"error": str(e), "status": 500}, ensure_ascii=False))
 
 
 @router.post("/writing/review")

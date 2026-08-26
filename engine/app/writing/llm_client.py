@@ -185,11 +185,15 @@ class LLMClient:
         frequency_penalty: float = 0.0, presence_penalty: float = 0.0,
         top_p: float = 1.0, max_tokens: int = None,
     ) -> str:
-        """流式：累积完整文本，callback(chunk) 实时推送。"""
+        """流式：累积完整正文文本，callback(chunk) 实时推送。"""
         full = ""
         for chunk in self.chat_stream_iter(
             messages, temperature, frequency_penalty, presence_penalty, top_p, max_tokens
         ):
+            if chunk.startswith('{"type": "thought"'):
+                if callback:
+                    callback(chunk)
+                continue
             full += chunk
             if callback:
                 callback(chunk)
@@ -200,7 +204,7 @@ class LLMClient:
         frequency_penalty: float = 0.0, presence_penalty: float = 0.0,
         top_p: float = 1.0, max_tokens: int = None,
     ) -> Iterator[str]:
-        """流式 generator：yield 每个 content chunk（str）。
+        """流式 generator：yield 每个 thought/content chunk（str）。
 
         连接/首响应阶段重试 1+3；一旦 yield 开始后不再重试，错误转为 LLMError。
         """
@@ -236,6 +240,17 @@ class LLMClient:
                             if not choices:
                                 continue
                             delta = (choices[0] or {}).get("delta") or {}
+                            reasoning_content = (
+                                delta.get("reasoning_content")
+                                or delta.get("reasoning")
+                                or delta.get("thought")
+                            )
+                            if reasoning_content:
+                                yielded = True
+                                yield json.dumps(
+                                    {"type": "thought", "chunk": reasoning_content},
+                                    ensure_ascii=False,
+                                )
                             content = delta.get("content")
                             if content:
                                 yielded = True

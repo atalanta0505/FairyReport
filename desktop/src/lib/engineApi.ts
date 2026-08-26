@@ -341,16 +341,73 @@ export async function deleteProjectChapter(
   );
 }
 
-/** 流式写作单章（SSE 透传，支持中止取消） */
+export interface WritingProgressEvent {
+  type: "stage" | "thought" | "chunk";
+  stage?: string;
+  message?: string;
+  chunk?: string;
+}
+
+/** 流式写作单章（SSE 透传，支持中止取消与阶段/思考/正文事件回调） */
 export function streamChapterWriting(
   baseUrl: string,
   req: ChapterStreamRequest,
   onChunk: (chunk: string) => void,
   onDone: () => void,
   onError: (err: Error) => void,
+  onProgress?: (event: WritingProgressEvent) => void,
 ): () => void {
   const controller = new AbortController();
   const { signal } = controller;
+
+  const processContent = (content: string): boolean => {
+    if (content === "[DONE]") {
+      onDone();
+      return true;
+    }
+    if (content.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === "object") {
+          if (parsed.error) {
+            throw new Error(parsed.error);
+          }
+          if (parsed.type === "stage") {
+            if (onProgress) {
+              onProgress({
+                type: "stage",
+                stage: parsed.stage,
+                message: parsed.message,
+              });
+            }
+            return false;
+          }
+          if (parsed.type === "thought") {
+            if (onProgress) {
+              onProgress({
+                type: "thought",
+                chunk: parsed.chunk || "",
+              });
+            }
+            return false;
+          }
+        }
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          !(err instanceof SyntaxError) &&
+          err.message !== "Unexpected token"
+        ) {
+          throw err;
+        }
+      }
+    }
+    if (onProgress) {
+      onProgress({ type: "chunk", chunk: content });
+    }
+    onChunk(content);
+    return false;
+  };
 
   (async () => {
     try {
@@ -394,24 +451,12 @@ export function streamChapterWriting(
             for (const line of lines) {
               if (line.startsWith("data:")) {
                 const content = line.slice(5).replace(/^\s/, "");
-                if (content === "[DONE]") {
-                  onDone();
-                  return;
-                }
-                if (content.startsWith("{") && content.includes('"error"')) {
-                  try {
-                    const parsed = JSON.parse(content);
-                    if (parsed.error) {
-                      throw new Error(parsed.error);
-                    }
-                  } catch (err) {
-                    if (err instanceof Error && err.message !== "Unexpected token") {
-                      throw err;
-                    }
-                  }
-                }
-                onChunk(content);
+                const isDone = processContent(content);
+                if (isDone) return;
               } else if (!line.startsWith(":") && line.length > 0) {
+                if (onProgress) {
+                  onProgress({ type: "chunk", chunk: "\n" + line });
+                }
                 onChunk("\n" + line);
               }
             }
@@ -423,11 +468,8 @@ export function streamChapterWriting(
           for (const line of lines) {
             if (line.startsWith("data:")) {
               const content = line.slice(5).replace(/^\s/, "");
-              if (content === "[DONE]") {
-                onDone();
-                return;
-              }
-              onChunk(content);
+              const isDone = processContent(content);
+              if (isDone) return;
             }
           }
         }
@@ -438,11 +480,8 @@ export function streamChapterWriting(
           const trimmed = block.trim();
           if (trimmed.startsWith("data:")) {
             const content = trimmed.slice(5).replace(/^\s/, "");
-            if (content === "[DONE]") {
-              onDone();
-              return;
-            }
-            onChunk(content);
+            const isDone = processContent(content);
+            if (isDone) return;
           }
         }
       }

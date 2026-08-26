@@ -20,12 +20,39 @@ const showHintSection = ref<boolean>(false);
 const chapterHints = ref<Record<number, string>>({});
 const viewMode = ref<"rich" | "source">("rich");
 
+const collapsedChapters = ref<Record<number, boolean>>({});
+const showThoughtDetails = ref<boolean>(true);
+const thoughtContentRef = ref<HTMLDivElement | null>(null);
+
 const editorCanvasRef = ref<HTMLDivElement | null>(null);
 const editorTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 const outlineHeadings = computed(() => extractOutlineHeadings(projectStore.outlineMd));
+
+function isChapterCollapsed(seq: number): boolean {
+  return !!collapsedChapters.value[seq];
+}
+
+function toggleChapterCollapse(seq: number, event?: MouseEvent) {
+  if (event) {
+    event.stopPropagation();
+  }
+  collapsedChapters.value[seq] = !collapsedChapters.value[seq];
+}
+
+function expandAllChapters() {
+  for (const ch of projectStore.outlineChapters) {
+    collapsedChapters.value[ch.seq] = false;
+  }
+}
+
+function collapseAllChapters() {
+  for (const ch of projectStore.outlineChapters) {
+    collapsedChapters.value[ch.seq] = true;
+  }
+}
 
 function showMsg(text: string, type: "success" | "error" = "success") {
   actionMessage.value = { type, text };
@@ -222,7 +249,30 @@ watch(
 
 function selectChapter(seq: number) {
   projectStore.selectChapter(seq);
+  collapsedChapters.value[seq] = false;
 }
+
+watch(
+  () => projectStore.currentWritingSeq,
+  (seq) => {
+    if (seq) {
+      collapsedChapters.value[seq] = false;
+    }
+  },
+);
+
+watch(
+  () => projectStore.writingProgress?.thoughtText,
+  () => {
+    if (thoughtContentRef.value) {
+      nextTick(() => {
+        if (thoughtContentRef.value) {
+          thoughtContentRef.value.scrollTop = thoughtContentRef.value.scrollHeight;
+        }
+      });
+    }
+  },
+);
 
 function switchViewMode(mode: "rich" | "source") {
   if (viewMode.value === mode) return;
@@ -405,6 +455,19 @@ function nextStep() {
               <span class="stat-val">{{ totalWordCount.toLocaleString() }} 字</span>
             </div>
           </div>
+          <!-- 目录展开/收起全局快捷操作栏 -->
+          <div class="sidebar-collapse-toolbar">
+            <span class="collapse-hint-label">目录层级导航</span>
+            <div class="collapse-btn-group">
+              <button class="btn-xs-text" @click="expandAllChapters" title="展开所有章节的子标题目录">
+                ⊞ 全部展开
+              </button>
+              <span class="collapse-btn-divider">|</span>
+              <button class="btn-xs-text" @click="collapseAllChapters" title="收起所有章节的子标题目录">
+                ⊟ 全部收起
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- 全局写作主操作区 -->
@@ -446,6 +509,15 @@ function nextStep() {
                 <div class="chapter-card-top">
                   <span class="ch-seq-circle">{{ ch.seq }}</span>
                   <span class="ch-title" :title="ch.title">{{ ch.title }}</span>
+                  <button
+                    v-if="chapterSubHeadingsMap[ch.seq] && chapterSubHeadingsMap[ch.seq].length > 0"
+                    class="ch-collapse-toggle-btn"
+                    :class="{ collapsed: isChapterCollapsed(ch.seq) }"
+                    :title="isChapterCollapsed(ch.seq) ? '展开该章子标题目录' : '收起该章子标题目录'"
+                    @click="toggleChapterCollapse(ch.seq, $event)"
+                  >
+                    {{ isChapterCollapsed(ch.seq) ? '▶ 展开' : '▼ 收起' }}
+                  </button>
                 </div>
                 <div class="chapter-card-meta">
                   <span class="ch-words">{{ (projectStore.chapters[ch.seq] || "").length }} 字</span>
@@ -498,22 +570,24 @@ function nextStep() {
             </div>
 
             <!-- 该章节已存在内容时的多级子标题目录列表 -->
-            <div
-              v-if="chapterSubHeadingsMap[ch.seq] && chapterSubHeadingsMap[ch.seq].length > 0"
-              class="subheadings-tree"
-            >
+            <transition name="tree-collapse">
               <div
-                v-for="sub in chapterSubHeadingsMap[ch.seq]"
-                :key="sub.id"
-                class="subheading-item"
-                :class="`level-${sub.level}`"
-                :title="sub.title"
-                @click="handleSubHeadingClick(ch.seq, sub.id, $event)"
+                v-if="!isChapterCollapsed(ch.seq) && chapterSubHeadingsMap[ch.seq] && chapterSubHeadingsMap[ch.seq].length > 0"
+                class="subheadings-tree"
               >
-                <span class="subheading-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
-                <span class="subheading-text">{{ sub.title }}</span>
+                <div
+                  v-for="sub in chapterSubHeadingsMap[ch.seq]"
+                  :key="sub.id"
+                  class="subheading-item"
+                  :class="`level-${sub.level}`"
+                  :title="sub.title"
+                  @click="handleSubHeadingClick(ch.seq, sub.id, $event)"
+                >
+                  <span class="subheading-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
+                  <span class="subheading-text">{{ sub.title }}</span>
+                </div>
               </div>
-            </div>
+            </transition>
           </div>
 
           <div v-if="totalChapters === 0" class="empty-list-tip">
@@ -628,9 +702,145 @@ function nextStep() {
               </div>
             </div>
 
+            <!-- 动态构思等待卡片：当正在流式写作且正文字数为 0 时展示 -->
+            <transition name="fade">
+              <div
+                v-if="isCurrentChapterWriting && currentChapterWords === 0"
+                class="thinking-state-container"
+              >
+                <div class="thinking-card-inner">
+                  <!-- 顶部构思指示与秒级计时器 -->
+                  <div class="thinking-top-row">
+                    <div class="thinking-badge">
+                      <span class="radar-pulse"></span>
+                      <span class="thinking-badge-text">大模型深度推理与专业构思中</span>
+                    </div>
+                    <div class="thinking-elapsed-timer">
+                      ⚡ 构思已耗时 <strong>{{ projectStore.writingProgress?.elapsedSeconds || 0 }}</strong> 秒
+                    </div>
+                  </div>
+
+                  <!-- 流水线三段步进指示 -->
+                  <div class="pipeline-stepper">
+                    <!-- 步骤 1: RAG 检索 -->
+                    <div
+                      class="stepper-node"
+                      :class="{
+                        completed: projectStore.writingProgress?.stage !== 'rag',
+                        active: projectStore.writingProgress?.stage === 'rag',
+                      }"
+                    >
+                      <div class="stepper-badge">
+                        <span v-if="projectStore.writingProgress?.stage !== 'rag'" class="stepper-check">✓</span>
+                        <span v-else class="stepper-spinner"></span>
+                      </div>
+                      <div class="stepper-text">
+                        <span class="stepper-title">双源知识检索</span>
+                        <span class="stepper-desc">底稿数据与标准规程库</span>
+                      </div>
+                    </div>
+
+                    <div class="stepper-line" :class="{ completed: projectStore.writingProgress?.stage !== 'rag' }"></div>
+
+                    <!-- 步骤 2: 骨架锁定 -->
+                    <div
+                      class="stepper-node"
+                      :class="{
+                        completed: ['reasoning', 'writing'].includes(projectStore.writingProgress?.stage || ''),
+                        active: projectStore.writingProgress?.stage === 'skeleton',
+                        pending: projectStore.writingProgress?.stage === 'rag',
+                      }"
+                    >
+                      <div class="stepper-badge">
+                        <span v-if="['reasoning', 'writing'].includes(projectStore.writingProgress?.stage || '')" class="stepper-check">✓</span>
+                        <span v-else-if="projectStore.writingProgress?.stage === 'skeleton'" class="stepper-spinner"></span>
+                        <span v-else class="stepper-dot">2</span>
+                      </div>
+                      <div class="stepper-text">
+                        <span class="stepper-title">骨架提取锁定</span>
+                        <span class="stepper-desc">全层级大纲与结构骨架</span>
+                      </div>
+                    </div>
+
+                    <div class="stepper-line" :class="{ completed: ['reasoning', 'writing'].includes(projectStore.writingProgress?.stage || '') }"></div>
+
+                    <!-- 步骤 3: 深度推理 -->
+                    <div
+                      class="stepper-node"
+                      :class="{
+                        completed: projectStore.writingProgress?.stage === 'writing',
+                        active: ['reasoning', 'writing'].includes(projectStore.writingProgress?.stage || ''),
+                        pending: ['rag', 'skeleton'].includes(projectStore.writingProgress?.stage || ''),
+                      }"
+                    >
+                      <div class="stepper-badge">
+                        <span v-if="projectStore.writingProgress?.stage === 'writing'" class="stepper-check">✓</span>
+                        <span v-else-if="projectStore.writingProgress?.stage === 'reasoning'" class="stepper-wave">
+                          <span class="wave-bar wb-1"></span>
+                          <span class="wave-bar wb-2"></span>
+                          <span class="wave-bar wb-3"></span>
+                        </span>
+                        <span v-else class="stepper-dot">3</span>
+                      </div>
+                      <div class="stepper-text">
+                        <span class="stepper-title">专业论证推演</span>
+                        <span class="stepper-desc">水利工程方案与规范表格</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 动态状态消息栏 -->
+                  <div class="thinking-message-bar">
+                    <div class="sound-wave-indicator">
+                      <span class="sw-bar b1"></span>
+                      <span class="sw-bar b2"></span>
+                      <span class="sw-bar b3"></span>
+                      <span class="sw-bar b4"></span>
+                      <span class="sw-bar b5"></span>
+                    </div>
+                    <span class="thinking-msg-text">
+                      {{ projectStore.writingProgress?.message || '大模型正在深度思考与组织水利专业论证与数据表格...' }}
+                    </span>
+                  </div>
+
+                  <!-- 思维链推演窗（可折叠查看思考细节） -->
+                  <div v-if="projectStore.writingProgress?.thoughtText" class="thought-stream-card">
+                    <div class="thought-stream-header" @click="showThoughtDetails = !showThoughtDetails">
+                      <div class="thought-stream-title">
+                        <span class="thought-icon">💭</span>
+                        <span>思维链实时推演细节 ({{ projectStore.writingProgress.thoughtText.length }} 字符)</span>
+                      </div>
+                      <button class="thought-toggle-btn">
+                        {{ showThoughtDetails ? '收起 ▲' : '展开 ▼' }}
+                      </button>
+                    </div>
+                    <div v-show="showThoughtDetails" ref="thoughtContentRef" class="thought-stream-body">
+                      <pre>{{ projectStore.writingProgress.thoughtText }}</pre>
+                    </div>
+                  </div>
+
+                  <!-- 无单独思维链输出时的说明卡片 -->
+                  <div v-else class="thought-placeholder-card">
+                    <div class="placeholder-icon">✨</div>
+                    <div class="placeholder-desc">
+                      已提取并锁定本章全层级大纲骨架。大模型正结合双源资料进行水利方案论证与指标校核计算，正文到达后将自动进入实时排版打字机输出...
+                    </div>
+                  </div>
+
+                  <!-- 底部温馨提示 -->
+                  <div class="thinking-notice-footer">
+                    <span class="notice-icon">💡</span>
+                    <span class="notice-text">
+                      水利工程咨询报告专业性强、篇幅宏大，大模型深度组织论述需数十秒构思时间，请稍候。
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </transition>
+
             <!-- 排版模式：就地 contenteditable 编辑画布 -->
             <div
-              v-show="viewMode === 'rich'"
+              v-show="viewMode === 'rich' && (!isCurrentChapterWriting || currentChapterWords > 0)"
               ref="editorCanvasRef"
               contenteditable="true"
               class="rich-rendered-editor"
@@ -640,7 +850,7 @@ function nextStep() {
 
             <!-- 源码模式：纯文本 textarea -->
             <textarea
-              v-show="viewMode === 'source'"
+              v-show="viewMode === 'source' && (!isCurrentChapterWriting || currentChapterWords > 0)"
               ref="editorTextareaRef"
               class="writing-textarea"
               placeholder="点击上方「✍️ 单章流式写作」或「🚀 一键开始全书写作」，系统将结合工程底稿与标准规程自动流式生成 Markdown 章节正文..."
@@ -789,6 +999,45 @@ function nextStep() {
   background: #e2e8f0;
 }
 
+.sidebar-collapse-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: #f1f5f9;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+.collapse-hint-label {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+.collapse-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-xs-text {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: #2563eb;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+.btn-xs-text:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.collapse-btn-divider {
+  color: #cbd5e1;
+  font-size: 10px;
+}
+
 .global-actions {
   padding: 12px 16px;
   border-bottom: 1px solid #f1f5f9;
@@ -881,6 +1130,41 @@ function nextStep() {
 .chapter-card.active .ch-title {
   color: #1d4ed8;
   font-weight: 600;
+}
+
+.ch-collapse-toggle-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: all 0.15s ease;
+  font-weight: 500;
+}
+.ch-collapse-toggle-btn:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+.ch-collapse-toggle-btn.collapsed {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+
+.tree-collapse-enter-active,
+.tree-collapse-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.tree-collapse-enter-from,
+.tree-collapse-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+  max-height: 0;
 }
 
 .chapter-card-meta {
@@ -1194,6 +1478,379 @@ function nextStep() {
   color: #1d4ed8;
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* 动态构思指示卡片 */
+.thinking-state-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 24px;
+  min-height: 480px;
+  background: radial-gradient(circle at 50% 30%, #f8fafc 0%, #f1f5f9 100%);
+  overflow-y: auto;
+}
+
+.thinking-card-inner {
+  width: 100%;
+  max-width: 680px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.02);
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.thinking-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.thinking-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+
+.radar-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7);
+  animation: radarPulse 1.8s infinite;
+}
+
+@keyframes radarPulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(37, 99, 235, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+.thinking-elapsed-timer {
+  font-size: 12.5px;
+  color: #475569;
+  font-weight: 500;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.thinking-elapsed-timer strong {
+  color: #d97706;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* 流水线步进指示 */
+.pipeline-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  gap: 8px;
+}
+
+.stepper-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.stepper-badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: #e2e8f0;
+  color: #64748b;
+  transition: all 0.2s ease;
+}
+
+.stepper-node.completed .stepper-badge {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.stepper-node.active .stepper-badge {
+  background: #dbeafe;
+  color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.stepper-check {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.stepper-dot {
+  font-size: 11px;
+}
+
+.stepper-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #2563eb;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.stepper-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 12px;
+}
+.wave-bar {
+  width: 2px;
+  height: 100%;
+  background: #2563eb;
+  border-radius: 1px;
+  animation: waveBar 0.8s ease-in-out infinite alternate;
+}
+.wb-1 {
+  animation-delay: 0s;
+}
+.wb-2 {
+  animation-delay: 0.2s;
+}
+.wb-3 {
+  animation-delay: 0.4s;
+}
+@keyframes waveBar {
+  0% {
+    height: 3px;
+  }
+  100% {
+    height: 12px;
+  }
+}
+
+.stepper-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.stepper-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stepper-node.active .stepper-title {
+  color: #1d4ed8;
+}
+.stepper-node.completed .stepper-title {
+  color: #15803d;
+}
+
+.stepper-desc {
+  font-size: 10.5px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stepper-line {
+  flex: 0 0 20px;
+  height: 2px;
+  background: #e2e8f0;
+  border-radius: 1px;
+}
+.stepper-line.completed {
+  background: #86efac;
+}
+
+/* 动态状态消息栏 */
+.thinking-message-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.sound-wave-indicator {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.sw-bar {
+  width: 3px;
+  background: #d97706;
+  border-radius: 1px;
+  animation: soundWave 1s ease-in-out infinite alternate;
+}
+.b1 {
+  height: 6px;
+  animation-delay: 0s;
+}
+.b2 {
+  height: 14px;
+  animation-delay: 0.2s;
+}
+.b3 {
+  height: 10px;
+  animation-delay: 0.4s;
+}
+.b4 {
+  height: 16px;
+  animation-delay: 0.1s;
+}
+.b5 {
+  height: 8px;
+  animation-delay: 0.3s;
+}
+@keyframes soundWave {
+  0% {
+    transform: scaleY(0.4);
+  }
+  100% {
+    transform: scaleY(1.2);
+  }
+}
+
+.thinking-msg-text {
+  font-size: 12.5px;
+  color: #92400e;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* 思维链推演窗 */
+.thought-stream-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fafafa;
+}
+.thought-stream-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f1f5f9;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.thought-stream-header:hover {
+  background: #e2e8f0;
+}
+.thought-stream-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+.thought-icon {
+  font-size: 13px;
+}
+.thought-toggle-btn {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.thought-stream-body {
+  padding: 10px 14px;
+  max-height: 180px;
+  overflow-y: auto;
+  background: #ffffff;
+  border-top: 1px solid #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #475569;
+}
+.thought-stream-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 无思维链说明卡片 */
+.thought-placeholder-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+}
+.placeholder-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.placeholder-desc {
+  font-size: 11.5px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+/* 底部温馨提示 */
+.thinking-notice-footer {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.5;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 10px;
+}
+.notice-icon {
+  flex-shrink: 0;
+}
+.notice-text {
+  flex: 1;
 }
 
 /* 排版模式就地富文本编辑画布样式 */

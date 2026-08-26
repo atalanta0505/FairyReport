@@ -1162,13 +1162,109 @@ describe("Pinia useProjectStore", () => {
       expect(store.batchWriting).toBe(false);
     });
 
-    it("stopWriting: 中止当前流式生成任务", () => {
+    it("streamChapterWriting: 正确解析阶段指示事件与思考片段并通过 onProgress 派发", async () => {
+      mockFetch.mockResolvedValue(
+        mockSSEResponse([
+          '{"type": "stage", "stage": "rag", "message": "正在检索..."}',
+          '{"type": "stage", "stage": "skeleton", "message": "正在锁定骨架..."}',
+          '{"type": "thought", "chunk": "思考参数A"}',
+          '{"type": "thought", "chunk": "思考参数B"}',
+          "正文段落第一节。",
+        ]),
+      );
+
+      const chunks: string[] = [];
+      const events: engineApi.WritingProgressEvent[] = [];
+      let done = false;
+
+      await new Promise<void>((resolve) => {
+        engineApi.streamChapterWriting(
+          BASE_URL,
+          {
+            project: "项目A",
+            report_type: "可行性研究报告",
+            outline_md: "# 第一章",
+            chapter_seq: 1,
+            llm_config: { api_key: "sk-key", base_url: "http://api", model: "m" },
+          },
+          (c) => chunks.push(c),
+          () => {
+            done = true;
+            resolve();
+          },
+          () => {},
+          (ev) => events.push(ev),
+        );
+      });
+
+      // 验证普通 chunk 只包含正文，不包含 stage 和 thought JSON
+      expect(chunks).toEqual(["正文段落第一节。"]);
+      expect(done).toBe(true);
+
+      // 验证 events 包含 stage、thought 与 chunk
+      expect(events).toHaveLength(5);
+      expect(events[0]).toEqual({ type: "stage", stage: "rag", message: "正在检索..." });
+      expect(events[1]).toEqual({ type: "stage", stage: "skeleton", message: "正在锁定骨架..." });
+      expect(events[2]).toEqual({ type: "thought", chunk: "思考参数A" });
+      expect(events[3]).toEqual({ type: "thought", chunk: "思考参数B" });
+      expect(events[4]).toEqual({ type: "chunk", chunk: "正文段落第一节。" });
+    });
+
+    it("writeSingleChapterStream: 流式生成时维护 writingProgress并在完成时清理", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "思考项目", created_at: "2026-08-25T00:00:00Z" };
+      store.outlineMd = "# 第一章 概述";
+      store.outlineChapters = [{ seq: 1, title: "第一章 概述" }];
+
+      mockFetch.mockImplementation(async (url, opts) => {
+        const u = String(url);
+        const method = opts?.method || "GET";
+        if (u.includes("/writing/chapter") && method === "POST") {
+          return mockSSEResponse([
+            '{"type": "stage", "stage": "rag", "message": "检索底稿..."}',
+            '{"type": "thought", "chunk": "推演论点..."}',
+            "生成的第一章正文。",
+          ]);
+        }
+        if (u.includes("/chapters/1") && method === "POST") {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      const promise = store.writeSingleChapterStream(BASE_URL, 1, {
+        api_key: "sk-test",
+        base_url: "http://api",
+        model: "m",
+      });
+
+      // 生成刚启动时 writingProgress 存在
+      expect(store.writingProgress).not.toBeNull();
+      expect(store.writingProgress?.seq).toBe(1);
+
+      await promise;
+
+      // 生成完成后 writingProgress 恢复为 null
+      expect(store.writingProgress).toBeNull();
+      expect(store.chapters[1]).toBe("生成的第一章正文。");
+      expect(store.chapterStatuses[1]).toBe("completed");
+    });
+
+    it("stopWriting: 中止当前流式生成任务并清理 writingProgress", () => {
       const store = useProjectStore();
       store.batchWriting = true;
       store.currentWritingSeq = 1;
+      store.writingProgress = {
+        seq: 1,
+        stage: "reasoning",
+        message: "正在构思...",
+        elapsedSeconds: 5,
+        thoughtText: "思考中",
+      };
       store.stopWriting();
       expect(store.batchWriting).toBe(false);
       expect(store.currentWritingSeq).toBeNull();
+      expect(store.writingProgress).toBeNull();
     });
   });
 });

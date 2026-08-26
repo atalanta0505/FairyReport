@@ -189,6 +189,14 @@ export function saveChaptersToLocal(
   }
 }
 
+export interface ChapterWritingProgress {
+  seq: number;
+  stage: "rag" | "skeleton" | "reasoning" | "writing" | string;
+  message: string;
+  elapsedSeconds: number;
+  thoughtText: string;
+}
+
 export const useProjectStore = defineStore("project", () => {
   const currentStep = ref<number>(getStoredStep());
   const projects = ref<ProjectOut[]>([]);
@@ -210,6 +218,8 @@ export const useProjectStore = defineStore("project", () => {
   const selectedChapterSeq = ref<number>(1);
   const batchWriting = ref<boolean>(false);
   const currentWritingSeq = ref<number | null>(null);
+  const writingProgress = ref<ChapterWritingProgress | null>(null);
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
   let activeStopWriting: (() => void) | null = null;
   const chapterDebounceTimers: Record<number, ReturnType<typeof setTimeout>> = {};
 
@@ -783,6 +793,11 @@ export const useProjectStore = defineStore("project", () => {
 
   function stopWriting() {
     batchWriting.value = false;
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+    writingProgress.value = null;
     if (activeStopWriting) {
       activeStopWriting();
       activeStopWriting = null;
@@ -805,11 +820,29 @@ export const useProjectStore = defineStore("project", () => {
       activeStopWriting();
       activeStopWriting = null;
     }
+    if (progressTimer) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
 
     selectedChapterSeq.value = seq;
     currentWritingSeq.value = seq;
     chapterStatuses.value[seq] = "writing";
     chapters.value[seq] = "";
+    writingProgress.value = {
+      seq,
+      stage: "rag",
+      message: "🔍 正在双源检索工程底稿与标准规程库...",
+      elapsedSeconds: 0,
+      thoughtText: "",
+    };
+
+    progressTimer = setInterval(() => {
+      if (writingProgress.value && writingProgress.value.seq === seq) {
+        writingProgress.value.elapsedSeconds += 1;
+      }
+    }, 1000);
+
     if (targetName) {
       saveChaptersToLocal(targetName, chapters.value);
     }
@@ -843,6 +876,11 @@ export const useProjectStore = defineStore("project", () => {
           }
         },
         async () => {
+          if (progressTimer) {
+            clearInterval(progressTimer);
+            progressTimer = null;
+          }
+          writingProgress.value = null;
           chapterStatuses.value[seq] = "completed";
           currentWritingSeq.value = null;
           activeStopWriting = null;
@@ -857,16 +895,38 @@ export const useProjectStore = defineStore("project", () => {
           resolve();
         },
         (err) => {
+          if (progressTimer) {
+            clearInterval(progressTimer);
+            progressTimer = null;
+          }
+          writingProgress.value = null;
           chapterStatuses.value[seq] = "error";
           currentWritingSeq.value = null;
           activeStopWriting = null;
           error.value = err.message;
           reject(err);
         },
+        (event) => {
+          if (!writingProgress.value || writingProgress.value.seq !== seq) return;
+          if (event.type === "stage") {
+            if (event.stage) writingProgress.value.stage = event.stage;
+            if (event.message) writingProgress.value.message = event.message;
+          } else if (event.type === "thought") {
+            writingProgress.value.stage = "reasoning";
+            writingProgress.value.thoughtText += event.chunk || "";
+          } else if (event.type === "chunk") {
+            writingProgress.value.stage = "writing";
+          }
+        },
       );
 
       activeStopWriting = () => {
         stop();
+        if (progressTimer) {
+          clearInterval(progressTimer);
+          progressTimer = null;
+        }
+        writingProgress.value = null;
         if (chapterStatuses.value[seq] === "writing") {
           chapterStatuses.value[seq] = chapters.value[seq] ? "completed" : "idle";
         }
@@ -939,6 +999,7 @@ export const useProjectStore = defineStore("project", () => {
     selectedChapterSeq,
     batchWriting,
     currentWritingSeq,
+    writingProgress,
     lastBaseUrl,
     loadingProjects,
     loadingMaterials,

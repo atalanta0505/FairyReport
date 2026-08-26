@@ -143,7 +143,7 @@ def test_outline_returns_template_chapters(client, installed_pack):
 
 # ── chapter SSE ──
 def test_chapter_stream_sse_format_and_rag(client, installed_pack):
-    """chapter stream=true：SSE 格式正确、含 RAG 引用标记。"""
+    """chapter stream=true：SSE 格式正确、含阶段指示与 RAG 引用标记。"""
     name = _make_project_with_material(client)
     stub = _set_llm(LLMStub(content="正文段落【源:sample.md】引用"))
     resp = client.post("/writing/chapter", json={
@@ -156,11 +156,35 @@ def test_chapter_stream_sse_format_and_rag(client, installed_pack):
     # SSE 格式：data: 行 + [DONE]
     assert "data: " in text
     assert "data: [DONE]" in text
+    # 包含阶段指示事件
+    assert '"stage": "rag"' in text
+    assert '"stage": "skeleton"' in text
+    assert '"stage": "reasoning"' in text
     # 透传 LLM 输出含引用标记
     assert "【源:sample.md】" in text
     # RAG 注入 prompt（LLM 收到的请求体含引用标记）
     sent = json.loads(stub.requests[0].content)
     assert "【源:sample.md】" in sent["messages"][-1]["content"]
+
+
+def test_chapter_stream_thought_chunks(client, installed_pack):
+    """chapter stream=true：透传思考片段。"""
+    name = _make_project_with_material(client)
+    stub = _set_llm(LLMStub(chunks=[
+        '{"type": "thought", "chunk": "正在推演水文参数"}',
+        '正文段落第一节。',
+    ]))
+    resp = client.post("/writing/chapter", json={
+        "project": name, "report_type": "可行性研究报告",
+        "outline_md": _outline_md(), "chapter_seq": 1, "stream": True,
+        "llm_config": LLM_CONFIG,
+    })
+    assert resp.status_code == 200
+    text = resp.text
+    assert '"type": "thought"' in text
+    assert "正在推演水文参数" in text
+    assert "正文段落第一节。" in text
+
 
 
 def test_chapter_nonstream_json(client, installed_pack):
@@ -567,6 +591,33 @@ def test_build_outline_system_prompt_deep_hierarchy():
     assert "三级（###）或四级（####）末级实施小节" in prompt
     assert "每个二级节（##）下必须细分 2~5 个具体的末级小节" in prompt
     assert "构建全书完整的标题骨架，严禁输出只有一级章或二级节的粗粒度空章" in prompt
+
+
+def test_llm_chat_stream_iter_with_thought(fast_retries):
+    """验证 LLMClient 捕获 reasoning_content 与 thought 并产生标准 JSON 思考事件。"""
+    from engine.app.writing.llm_client import LLMClient
+    sse = "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"思考步骤1\"}}]}\n\n" \
+          "data: {\"choices\":[{\"delta\":{\"thought\":\"思考步骤2\"}}]}\n\n" \
+          "data: {\"choices\":[{\"delta\":{\"content\":\"正文输出\"}}]}\n\n" \
+          "data: [DONE]\n\n"
+    set_llm_transport(httpx.MockTransport(lambda req: httpx.Response(
+        200, text=sse, headers={"content-type": "text/event-stream"}
+    )))
+    c = LLMClient(LLM_CONFIG)
+    chunks = list(c.chat_stream_iter([{"role": "user", "content": "x"}], temperature=0.2))
+    assert len(chunks) == 3
+    assert json.loads(chunks[0]) == {"type": "thought", "chunk": "思考步骤1"}
+    assert json.loads(chunks[1]) == {"type": "thought", "chunk": "思考步骤2"}
+    assert chunks[2] == "正文输出"
+
+    # 验证 chat_stream 累积正文时忽略 thought JSON
+    set_llm_transport(httpx.MockTransport(lambda req: httpx.Response(
+        200, text=sse, headers={"content-type": "text/event-stream"}
+    )))
+    full = c.chat_stream([{"role": "user", "content": "x"}], temperature=0.2)
+    assert full == "正文输出"
+    set_llm_transport(None)
+
 
 
 
