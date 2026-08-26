@@ -1,8 +1,10 @@
 # 任务合同 V2-T15 v3 — Step 4 章节导航栏优化与审阅流式思考推演 / 实时进度反馈改造
 
-- 状态：READY_FOR_MAKER（2026-08-26 产品负责人批准 V2-T15 第 3 轮方案）
+- 状态：ACCEPTED（2026-08-26 Checker 独立验收通过，锁定 SHA `b0d4a03e69e35ac4ce28d6c389cadc0c01e9e184`）
 - 依据：产品负责人确认 2 项核心诉求（左侧章节导航栏支持每章子标题内部自如滚动、长章标题 100% 完整显示无省略截断；专家审阅支持 SSE 流式思考推演输出、章节流转看板与每章即时落盘刷新）
-- 精确起始 SHA：`61122eef7e0af5b306934edcc9f4611252243182`
+- 精确起始 SHA：`76db1f2316ca815c189b5194c104f09b1648686f`
+- 候选交付 SHA：`b0d4a03e69e35ac4ce28d6c389cadc0c01e9e184`
+- 验收报告：`docs/dev-flow/tasks/V2-T15/rounds/03/checker-report.md`
 - 工作树门禁：`git status --short` 必须干净
 
 ---
@@ -64,10 +66,10 @@
 
 ## 4. 验收标准
 
-- [ ] `npx vitest run`（`desktop/`）全绿。
-- [ ] `python -m pytest engine/tests -q` 全绿。
-- [ ] `npx vue-tsc --noEmit`、`npm run build`、`cargo check` 全绿。
-- [ ] B 级实跑：
+- [x] `npx vitest run`（`desktop/`）全绿（123/123 通过）。
+- [x] `python -m pytest engine/tests -q` 全绿（95/95 通过）。
+- [x] `npx vue-tsc --noEmit`、`npm run build`、`cargo check` 全绿。
+- [x] B 级实跑：
   1. 左侧章节导航栏：章节标题自然换行，收起与展开均 100% 完整显示无 `...` 截断；
   2. 左侧子标题列表：多达数十项时可在该章卡片内自如平滑滚动，无底部切断；
   3. 执行「全书全维专家审阅」时，顶栏清晰呈现当前正在审阅的章节、序号与完成百分比；
