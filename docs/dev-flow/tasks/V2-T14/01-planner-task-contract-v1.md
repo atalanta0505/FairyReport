@@ -1,9 +1,9 @@
 # 任务合同 V2-T14 v1 — Step 4 专家审阅与修改系统（合规检查、数值校验、专家批注与修改对比）
 
-- 状态：READY_FOR_MAKER（2026-08-26 产品负责人批准 V2-T14 实施方案）
+- 状态：ACCEPTED（2026-08-26 Checker 独立验收 PASS，锁定候选 SHA：`8433313b9c66fb6fd7e026b842e1c0a2a55cb6af`）
 - 依据：产品负责人指令：“推进下一步‘专家审阅与修改（合规检查、数值校验、专家批注与修改对比）的开发’”
-- 精确起始 SHA：`fcefc0b58c43ce33ab4c0dbb173caf819bc429e1`
-- 工作树门禁：`git status --short` 必须干净
+- 精确起始 SHA：`3e89c2f53c49cb3684542201ef4d70b87ec6a396`
+- 锁定提交 SHA：`8433313b9c66fb6fd7e026b842e1c0a2a55cb6af`
 
 ---
 
