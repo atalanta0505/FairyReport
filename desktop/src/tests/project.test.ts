@@ -1488,5 +1488,163 @@ describe("Pinia useProjectStore", () => {
       store.stopBatchReview();
       expect(store.batchReviewing).toBe(false);
     });
+
+    it("engineApi 全书一体化审阅总档案 full_review CRUD", async () => {
+      const fullData: engineApi.FullReviewData = {
+        summary: "全书质量优良",
+        compliance_rate: 95,
+        health_status: "达标",
+        issues: [
+          {
+            id: "ISSUE-1",
+            severity: "suggestion",
+            category: "格式规范",
+            message: "表格格式建议统一",
+            location: "第 1 章",
+            suggestion: "采用三线表",
+          },
+        ],
+        numerical_checks: [
+          {
+            parameter: "总投资",
+            extracted_value: "5000万元",
+            status: "normal",
+            note: "一致",
+          },
+        ],
+        data_gap_checklist: ["环境影响评价报告批复"],
+        chapter_evaluations: {
+          "1": { status: "通过", summary: "合格", issues_count: 1, score: 95 },
+        },
+        general_suggestions: ["统一表格样式"],
+        updated_at: "2026-08-26T00:00:00Z",
+      };
+
+      // GET
+      mockFetch.mockResolvedValueOnce(jsonResponse(fullData));
+      const getRes = await engineApi.getProjectFullReview(BASE_URL, "测试项目");
+      expect(getRes.health_status).toBe("达标");
+      expect(getRes.compliance_rate).toBe(95);
+
+      // POST
+      mockFetch.mockResolvedValueOnce(jsonResponse(fullData));
+      const saveRes = await engineApi.saveProjectFullReview(BASE_URL, "测试项目", fullData);
+      expect(saveRes.summary).toBe("全书质量优良");
+
+      // DELETE
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+      const delRes = await engineApi.deleteProjectFullReview(BASE_URL, "测试项目");
+      expect(delRes.ok).toBe(true);
+    });
+
+    it("store: loadFullBookReview, saveFullBookReview 与 deleteFullBookReview", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "全书审阅项目", created_at: "2026-08-26T00:00:00Z" };
+
+      const fullData: engineApi.FullReviewData = {
+        summary: "全书测试通过",
+        compliance_rate: 90,
+        health_status: "达标",
+        issues: [],
+        numerical_checks: [],
+        data_gap_checklist: [],
+        chapter_evaluations: {
+          "1": { status: "通过", summary: "良好", issues_count: 0 },
+        },
+        general_suggestions: ["继续保持"],
+        updated_at: "2026-08-26T00:00:00Z",
+      };
+
+      mockFetch.mockResolvedValueOnce(jsonResponse(fullData));
+      const loaded = await store.loadFullBookReview(BASE_URL, "全书审阅项目");
+      expect(loaded?.summary).toBe("全书测试通过");
+      expect(store.fullBookReview?.health_status).toBe("达标");
+
+      // 本地缓存应当写入
+      const local = mockLocalStorage.getItem("frl_full_review_全书审阅项目");
+      expect(local).not.toBeNull();
+      expect(JSON.parse(local!).compliance_rate).toBe(90);
+
+      // saveFullBookReview
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ...fullData, compliance_rate: 96 }));
+      await store.saveFullBookReview(BASE_URL, { ...fullData, compliance_rate: 96 });
+      expect(store.fullBookReview?.compliance_rate).toBe(96);
+
+      // deleteFullBookReview
+      mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
+      await store.deleteFullBookReview(BASE_URL);
+      expect(store.fullBookReview).toBeNull();
+      expect(mockLocalStorage.getItem("frl_full_review_全书审阅项目")).toBeNull();
+    });
+
+    it("store: runFullBookReview 执行全书全维专家审阅并自动生成综合健康诊断", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "全书综合项目", created_at: "2026-08-26T00:00:00Z" };
+      store.outlineChapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 建设规模" },
+      ];
+      store.chapters = {
+        1: "# 第一章 概述\n正文1内容",
+        2: "# 第二章 建设规模\n正文2内容",
+      };
+
+      const mockRev1: engineApi.ExpertReviewResult = {
+        status: "通过",
+        score: 95,
+        summary: "第一章概述合格",
+        issues: [],
+        numerical_checks: [{ parameter: "总投资", extracted_value: "1000万", status: "normal" }],
+      };
+
+      const mockRev2: engineApi.ExpertReviewResult = {
+        status: "需补充",
+        score: 80,
+        summary: "第二章缺少数据",
+        issues: [
+          {
+            id: "ISS-2",
+            severity: "warning",
+            category: "数据自洽",
+            message: "规模数据待核验",
+            location: "第 2 章 2.1 节",
+            suggestion: "核对设计参数",
+          },
+        ],
+        data_gap_checklist: ["地质勘察专项报告"],
+      };
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/writing/review")) {
+          // returns either rev1 or rev2
+          return jsonResponse({ raw: "raw", review: mockRev2 });
+        }
+        if (u.includes("/full_review")) {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      store.chapterReviews[1] = mockRev1;
+      store.chapterReviews[2] = mockRev2;
+
+      const fullRes = await store.runFullBookReview(
+        BASE_URL,
+        {
+          api_key: "sk-test",
+          base_url: "http://api",
+          model: "m",
+        },
+        false,
+      );
+
+      expect(fullRes).toBeDefined();
+      expect(fullRes.health_status).toBe("待完善");
+      expect(fullRes.issues).toHaveLength(1);
+      expect(fullRes.numerical_checks).toHaveLength(1);
+      expect(fullRes.data_gap_checklist).toHaveLength(1);
+      expect(store.fullBookReview).not.toBeNull();
+    });
   });
 });

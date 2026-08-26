@@ -804,7 +804,7 @@ function nextStep() {
                       </div>
                       <div class="stepper-text">
                         <span class="stepper-title">专业论证推演</span>
-                        <span class="stepper-desc">水利工程方案与规范表格</span>
+                        <span class="stepper-desc">工程技术方案与规范表格</span>
                       </div>
                     </div>
                   </div>
@@ -819,7 +819,7 @@ function nextStep() {
                       <span class="sw-bar b5"></span>
                     </div>
                     <span class="thinking-msg-text">
-                      {{ projectStore.writingProgress?.message || '大模型正在深度思考与组织水利专业论证与数据表格...' }}
+                      {{ projectStore.writingProgress?.message || '大模型正在深度思考与组织专业工程论证与数据表格...' }}
                     </span>
                   </div>
 
@@ -843,7 +843,7 @@ function nextStep() {
                   <div v-else class="thought-placeholder-card">
                     <div class="placeholder-icon">✨</div>
                     <div class="placeholder-desc">
-                      已提取并锁定本章全层级大纲骨架。大模型正结合双源资料进行水利方案论证与指标校核计算，正文到达后将自动进入实时排版打字机输出...
+                      已提取并锁定本章全层级大纲骨架。大模型正结合双源资料进行工程技术方案论证与指标校核计算，正文到达后将自动进入实时排版打字机输出...
                     </div>
                   </div>
 
@@ -851,7 +851,7 @@ function nextStep() {
                   <div class="thinking-notice-footer">
                     <span class="notice-icon">💡</span>
                     <span class="notice-text">
-                      水利工程咨询报告专业性强、篇幅宏大，大模型深度组织论述需数十秒构思时间，请稍候。
+                      工程咨询报告专业性强、篇幅宏大，大模型深度组织论述需数十秒构思时间，请稍候。
                     </span>
                   </div>
                 </div>

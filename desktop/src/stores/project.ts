@@ -233,6 +233,42 @@ export function saveReviewsToLocal(
   }
 }
 
+export function getFullReviewStorageKey(projectName: string): string {
+  return `frl_full_review_${projectName}`;
+}
+
+export function loadFullReviewFromLocal(
+  projectName: string,
+): engineApi.FullReviewData | null {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(getFullReviewStorageKey(projectName));
+      if (raw) {
+        return JSON.parse(raw);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function saveFullReviewToLocal(
+  projectName: string,
+  data: engineApi.FullReviewData,
+): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(
+        getFullReviewStorageKey(projectName),
+        JSON.stringify(data),
+      );
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export interface ChapterWritingProgress {
   seq: number;
   stage: "rag" | "skeleton" | "reasoning" | "writing" | string;
@@ -269,6 +305,7 @@ export const useProjectStore = defineStore("project", () => {
 
   // Step 4 专家审阅与修改状态
   const chapterReviews = ref<Record<number, engineApi.ExpertReviewResult>>({});
+  const fullBookReview = ref<engineApi.FullReviewData | null>(null);
   const reviewingSeq = ref<number | null>(null);
   const reviewingMode = ref<"all" | "compliance" | "numeric" | "technical">("all");
   const revisingSeq = ref<number | null>(null);
@@ -317,6 +354,7 @@ export const useProjectStore = defineStore("project", () => {
           await loadOutline(baseUrl, found.name);
           await loadChapters(baseUrl, found.name);
           await loadReviews(baseUrl, found.name);
+          await loadFullBookReview(baseUrl, found.name);
         } else if (list.length > 0) {
           currentProject.value = list[0];
           setStoredProjectName(list[0].name);
@@ -324,6 +362,7 @@ export const useProjectStore = defineStore("project", () => {
           await loadOutline(baseUrl, list[0].name);
           await loadChapters(baseUrl, list[0].name);
           await loadReviews(baseUrl, list[0].name);
+          await loadFullBookReview(baseUrl, list[0].name);
         } else {
           currentProject.value = null;
           setStoredProjectName(null);
@@ -333,6 +372,7 @@ export const useProjectStore = defineStore("project", () => {
           chapters.value = {};
           chapterStatuses.value = {};
           chapterReviews.value = {};
+          fullBookReview.value = null;
           activeRevision.value = null;
         }
       } else if (list.length > 0) {
@@ -342,6 +382,7 @@ export const useProjectStore = defineStore("project", () => {
         await loadOutline(baseUrl, list[0].name);
         await loadChapters(baseUrl, list[0].name);
         await loadReviews(baseUrl, list[0].name);
+        await loadFullBookReview(baseUrl, list[0].name);
       } else {
         currentProject.value = null;
         setStoredProjectName(null);
@@ -351,6 +392,7 @@ export const useProjectStore = defineStore("project", () => {
         chapters.value = {};
         chapterStatuses.value = {};
         chapterReviews.value = {};
+        fullBookReview.value = null;
         activeRevision.value = null;
       }
     } catch (e) {
@@ -371,6 +413,7 @@ export const useProjectStore = defineStore("project", () => {
       await loadOutline(baseUrl, projectName);
       await loadChapters(baseUrl, projectName);
       await loadReviews(baseUrl, projectName);
+      await loadFullBookReview(baseUrl, projectName);
     }
   }
 
@@ -384,6 +427,7 @@ export const useProjectStore = defineStore("project", () => {
           localStorage.removeItem(getOutlineStorageKey(name));
           localStorage.removeItem(getChaptersStorageKey(name));
           localStorage.removeItem(getReviewsStorageKey(name));
+          localStorage.removeItem(getFullReviewStorageKey(name));
         } catch {
           // ignore
         }
@@ -394,6 +438,7 @@ export const useProjectStore = defineStore("project", () => {
       chapters.value = {};
       chapterStatuses.value = {};
       chapterReviews.value = {};
+      fullBookReview.value = null;
       activeRevision.value = null;
 
       const created = await engineApi.createProject(baseUrl, name);
@@ -417,6 +462,7 @@ export const useProjectStore = defineStore("project", () => {
           localStorage.removeItem(getOutlineStorageKey(name));
           localStorage.removeItem(getChaptersStorageKey(name));
           localStorage.removeItem(getReviewsStorageKey(name));
+          localStorage.removeItem(getFullReviewStorageKey(name));
         } catch {
           // ignore
         }
@@ -430,6 +476,7 @@ export const useProjectStore = defineStore("project", () => {
         chapters.value = {};
         chapterStatuses.value = {};
         chapterReviews.value = {};
+        fullBookReview.value = null;
         activeRevision.value = null;
       }
       await loadProjects(baseUrl);
@@ -1309,6 +1356,247 @@ export const useProjectStore = defineStore("project", () => {
     activeRevision.value = null;
   }
 
+  // ── 全书一体化审阅总档案持久化与审阅 ──
+
+  async function loadFullBookReview(
+    baseUrl?: string,
+    projectName?: string,
+  ): Promise<engineApi.FullReviewData | null> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = projectName || currentProject.value?.name;
+    if (!targetName) {
+      fullBookReview.value = null;
+      return null;
+    }
+
+    let loaded = false;
+    if (targetUrl) {
+      try {
+        const res = await engineApi.getProjectFullReview(targetUrl, targetName);
+        if (
+          res &&
+          (res.summary ||
+            (res.issues && res.issues.length > 0) ||
+            (res.numerical_checks && res.numerical_checks.length > 0) ||
+            (res.chapter_evaluations && Object.keys(res.chapter_evaluations).length > 0))
+        ) {
+          fullBookReview.value = res;
+          saveFullReviewToLocal(targetName, res);
+          loaded = true;
+          return res;
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    if (!loaded) {
+      const local = loadFullReviewFromLocal(targetName);
+      if (local) {
+        fullBookReview.value = local;
+        return local;
+      } else {
+        fullBookReview.value = null;
+      }
+    }
+    return fullBookReview.value;
+  }
+
+  async function saveFullBookReview(
+    baseUrl?: string,
+    data?: engineApi.FullReviewData,
+  ): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = currentProject.value?.name;
+    if (!targetName) return;
+
+    if (data) {
+      fullBookReview.value = data;
+    }
+
+    const currentData = fullBookReview.value;
+    if (!currentData) return;
+
+    saveFullReviewToLocal(targetName, currentData);
+
+    if (targetUrl) {
+      try {
+        await engineApi.saveProjectFullReview(targetUrl, targetName, currentData);
+      } catch {
+        // non-fatal
+      }
+    }
+  }
+
+  async function deleteFullBookReview(baseUrl?: string): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (targetUrl) lastBaseUrl.value = targetUrl;
+    const targetName = currentProject.value?.name;
+    if (!targetName) return;
+
+    fullBookReview.value = null;
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.removeItem(getFullReviewStorageKey(targetName));
+      }
+    } catch {
+      // ignore
+    }
+
+    if (targetUrl) {
+      try {
+        await engineApi.deleteProjectFullReview(targetUrl, targetName);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  async function runFullBookReview(
+    baseUrl: string,
+    llmConfig: engineApi.LLMConfig,
+    forceAll = false,
+  ): Promise<engineApi.FullReviewData> {
+    if (baseUrl) lastBaseUrl.value = baseUrl;
+    if (!baseUrl) throw new Error("引擎未就绪");
+
+    const targetChapters = outlineChapters.value.filter((ch) => {
+      const text = chapters.value[ch.seq];
+      return text && text.trim().length > 0;
+    });
+
+    if (targetChapters.length === 0) {
+      throw new Error("暂无可审阅的章节（需先在步骤 3 写作并生成正文）");
+    }
+
+    batchReviewing.value = true;
+    error.value = null;
+
+    try {
+      for (const ch of targetChapters) {
+        if (!batchReviewing.value) break;
+        if (forceAll || !chapterReviews.value[ch.seq]) {
+          try {
+            await runChapterReview(baseUrl, ch.seq, "all", llmConfig);
+          } catch {
+            // 章节审阅异常不中断
+          }
+        }
+      }
+
+      const allIssues: engineApi.ReviewIssue[] = [];
+      const allNumerical: engineApi.NumericalCheckItem[] = [];
+      const allGaps: (string | { chapterSeq?: number; chapterTitle?: string; gap: string })[] = [];
+      const chapterEvals: Record<
+        string,
+        {
+          status: string;
+          summary: string;
+          issues_count: number;
+          score?: number;
+        }
+      > = {};
+
+      let passedCount = 0;
+      let warningCount = 0;
+
+      for (const ch of outlineChapters.value) {
+        const rev = chapterReviews.value[ch.seq];
+        if (rev) {
+          if (rev.status === "通过") passedCount++;
+          if (rev.status === "需补充" || rev.status === "风险警告") warningCount++;
+
+          if (rev.issues && rev.issues.length > 0) {
+            for (const iss of rev.issues) {
+              allIssues.push({
+                ...iss,
+                location: iss.location || `第 ${ch.seq} 章 ${ch.title}`,
+              });
+            }
+          }
+          if (rev.numerical_checks && rev.numerical_checks.length > 0) {
+            for (const nc of rev.numerical_checks) {
+              allNumerical.push({
+                ...nc,
+                note: nc.note ? `${nc.note} (第 ${ch.seq} 章)` : `来自第 ${ch.seq} 章`,
+              });
+            }
+          }
+          if (rev.data_gap_checklist && rev.data_gap_checklist.length > 0) {
+            for (const g of rev.data_gap_checklist) {
+              allGaps.push({
+                chapterSeq: ch.seq,
+                chapterTitle: ch.title,
+                gap: g,
+              });
+            }
+          }
+          chapterEvals[String(ch.seq)] = {
+            status: rev.status || "通过",
+            summary: rev.summary || "",
+            issues_count: rev.issues?.length || 0,
+            score: rev.score,
+          };
+        } else {
+          chapterEvals[String(ch.seq)] = {
+            status: "未生成",
+            summary: "该章节尚无正文或未执行审阅",
+            issues_count: 0,
+          };
+        }
+      }
+
+      const totalTarget = targetChapters.length;
+      const complianceRate =
+        totalTarget > 0
+          ? Math.max(0, Math.min(100, Math.round((passedCount / totalTarget) * 100)))
+          : 100;
+      const healthStatus =
+        warningCount === 0 && allIssues.length === 0
+          ? "达标"
+          : warningCount > 2 ||
+            allIssues.some(
+              (i) =>
+                i.severity === "error" ||
+                (i.severity as string) === "danger" ||
+                (i.severity as string) === "high",
+            )
+          ? "存在重大缺陷"
+          : "待完善";
+
+      const summary = `全书共 ${outlineChapters.value.length} 章（已审阅 ${totalTarget} 章），发现 ${allIssues.length} 处待优化问题与 ${allGaps.length} 处资料缺口。整体合规与数据自洽达标度为 ${complianceRate}%，健康评估状态为「${healthStatus}」。`;
+
+      const generalSuggestions = [
+        "1. 严格对照发改委与行业工程编制规程，核对前后章节投资估算与建设规模数据自洽性；",
+        "2. 补充完善缺失的附表、附图与前置审批支撑性底稿；",
+        "3. 针对高亮批注与数据疑点小节进行专项润色与 AI 修订。",
+      ];
+
+      const fullData: engineApi.FullReviewData = {
+        summary,
+        compliance_rate: complianceRate,
+        health_status: healthStatus,
+        issues: allIssues,
+        numerical_checks: allNumerical,
+        data_gap_checklist: allGaps,
+        chapter_evaluations: chapterEvals,
+        general_suggestions: generalSuggestions,
+        updated_at: new Date().toISOString(),
+      };
+
+      fullBookReview.value = fullData;
+      await saveFullBookReview(baseUrl, fullData);
+      return fullData;
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      batchReviewing.value = false;
+    }
+  }
+
   return {
     currentStep,
     projects,
@@ -1328,6 +1616,7 @@ export const useProjectStore = defineStore("project", () => {
     currentWritingSeq,
     writingProgress,
     chapterReviews,
+    fullBookReview,
     reviewingSeq,
     reviewingMode,
     batchReviewing,
@@ -1373,6 +1662,10 @@ export const useProjectStore = defineStore("project", () => {
     runChapterRevision,
     applyRevision,
     discardRevision,
+    loadFullBookReview,
+    saveFullBookReview,
+    deleteFullBookReview,
+    runFullBookReview,
   };
 });
 

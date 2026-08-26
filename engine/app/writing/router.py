@@ -65,6 +65,18 @@ class ReviewSaveRequest(BaseModel):
     review: dict = Field(default_factory=dict)
 
 
+class FullReviewData(BaseModel):
+    summary: str = ""
+    compliance_rate: int = 100
+    health_status: str = "达标"  # "达标" | "待完善" | "存在重大缺陷"
+    issues: list[dict] = Field(default_factory=list)
+    numerical_checks: list[dict] = Field(default_factory=list)
+    data_gap_checklist: list[dict | str] = Field(default_factory=list)
+    chapter_evaluations: dict[str, dict] = Field(default_factory=dict)
+    general_suggestions: list[str] = Field(default_factory=list)
+    updated_at: str = ""
+
+
 class TemplateItemOut(BaseModel):
     report_type: str
     total_words_max: int
@@ -306,6 +318,57 @@ def delete_project_review(name: str, seq: int):
     return {"ok": True, "seq": seq}
 
 
+# ── 全书一体化审阅总档案持久化 ──
+def _read_full_review_file(name: str) -> FullReviewData:
+    p = settings.project_dir(name) / "full_review.json"
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return FullReviewData(**data)
+        except Exception:
+            pass
+    return FullReviewData()
+
+
+def _write_full_review_file(name: str, data: FullReviewData) -> FullReviewData:
+    pdir = settings.project_dir(name)
+    pdir.mkdir(parents=True, exist_ok=True)
+    p = pdir / "full_review.json"
+    if not data.updated_at:
+        data.updated_at = datetime.now(timezone.utc).isoformat()
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
+    return data
+
+
+@router.get("/projects/{name}/full_review", response_model=FullReviewData)
+@router.get("/writing/projects/{name}/full_review", response_model=FullReviewData)
+def get_project_full_review(name: str):
+    """读取项目全书专家审阅诊断持久化数据；不存在则返回默认空数据。"""
+    return _read_full_review_file(name)
+
+
+@router.post("/projects/{name}/full_review", response_model=FullReviewData)
+@router.post("/writing/projects/{name}/full_review", response_model=FullReviewData)
+def save_project_full_review(name: str, data: FullReviewData):
+    """保存项目全书专家审阅诊断总台账到 full_review.json。"""
+    return _write_full_review_file(name, data)
+
+
+@router.delete("/projects/{name}/full_review")
+@router.delete("/writing/projects/{name}/full_review")
+def delete_project_full_review(name: str):
+    """删除全书专家审阅档案 full_review.json。"""
+    p = settings.project_dir(name) / "full_review.json"
+    if p.exists():
+        try:
+            p.unlink()
+        except Exception:
+            pass
+    return {"ok": True}
+
+
 
 # ── 写作端点 ──
 @router.get("/writing/templates", response_model=list[TemplateItemOut])
@@ -423,7 +486,7 @@ def _stream_chapter(writer, llm, req, chapter_title,
         yield _sse_event(json.dumps({
             "type": "stage",
             "stage": "reasoning",
-            "message": "🧠 大模型正在深度构思与组织水利专业论证与数据表格...",
+            "message": "🧠 大模型正在深度构思与组织专业工程论证与数据表格...",
         }, ensure_ascii=False))
 
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]

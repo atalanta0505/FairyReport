@@ -350,3 +350,80 @@ def test_api_project_reviews_persistence(tmp_path, monkeypatch):
 
     # 清理项目
     client.delete(f"/projects/{proj_name}")
+
+
+def test_api_project_full_review_persistence():
+    client = TestClient(app)
+    proj_name = "test_full_review_persist_proj"
+
+    # 创建项目
+    client.post("/projects", json={"name": proj_name})
+
+    # 1. 初始 GET -> 默认空数据
+    r1 = client.get(f"/projects/{proj_name}/full_review")
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert d1["health_status"] == "达标"
+    assert d1["compliance_rate"] == 100
+    assert d1["issues"] == []
+
+    # 2. POST 保存全书审阅档案
+    full_data = {
+        "summary": "全书整体质量良好，但有 2 处跨章数据需要复核",
+        "compliance_rate": 92,
+        "health_status": "待完善",
+        "issues": [
+            {
+                "id": "F-ISSUE-1",
+                "severity": "warning",
+                "category": "跨章数据自洽",
+                "message": "第 2 章投资 1.2 亿与第 7 章 1.35 亿不一致",
+                "location": "第 2 章 / 第 7 章",
+                "suggestion": "统一采用第 7 章最终审定估算值",
+            }
+        ],
+        "numerical_checks": [
+            {
+                "parameter": "项目总投资",
+                "extracted_value": "13,500万元",
+                "status": "normal",
+                "note": "经复核一致",
+            }
+        ],
+        "data_gap_checklist": ["节能评估报告批复"],
+        "chapter_evaluations": {
+            "1": {"status": "通过", "summary": "概述合格", "issues_count": 0, "score": 95},
+            "2": {"status": "需补充", "summary": "需对齐投资", "issues_count": 1, "score": 80},
+        },
+        "general_suggestions": ["1. 统一各章投资数据；2. 补充附表。"],
+    }
+    r2 = client.post(f"/projects/{proj_name}/full_review", json=full_data)
+    assert r2.status_code == 200
+    d2 = r2.json()
+    assert d2["health_status"] == "待完善"
+    assert d2["compliance_rate"] == 92
+    assert len(d2["issues"]) == 1
+    assert len(d2["chapter_evaluations"]) == 2
+    assert d2["updated_at"] != ""
+
+    # 3. GET 读取验证
+    r3 = client.get(f"/projects/{proj_name}/full_review")
+    assert r3.status_code == 200
+    d3 = r3.json()
+    assert d3["summary"] == "全书整体质量良好，但有 2 处跨章数据需要复核"
+    assert d3["issues"][0]["id"] == "F-ISSUE-1"
+
+    # 4. DELETE 删除
+    r4 = client.delete(f"/projects/{proj_name}/full_review")
+    assert r4.status_code == 200
+    assert r4.json()["ok"] is True
+
+    # 5. 删除后再次 GET -> 恢复默认
+    r5 = client.get(f"/projects/{proj_name}/full_review")
+    assert r5.status_code == 200
+    assert r5.json()["summary"] == ""
+    assert r5.json()["issues"] == []
+
+    # 清理项目
+    client.delete(f"/projects/{proj_name}")
+

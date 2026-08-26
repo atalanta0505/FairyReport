@@ -502,11 +502,12 @@ export function streamChapterWriting(
 
 export interface ReviewIssue {
   id?: string;
-  severity: "error" | "warning" | "suggestion";
+  severity: "error" | "warning" | "suggestion" | string;
   category: string;
   message: string;
   location?: string;
   suggestion?: string;
+  chapterSeq?: number;
 }
 
 export interface NumericalCheckItem {
@@ -626,3 +627,65 @@ export async function deleteProjectReview(
     },
   );
 }
+
+export interface FullReviewData {
+  summary: string;
+  compliance_rate: number;
+  health_status: "达标" | "待完善" | "存在重大缺陷" | string;
+  issues: ReviewIssue[];
+  numerical_checks: NumericalCheckItem[];
+  data_gap_checklist: (string | { chapterSeq?: number; chapterTitle?: string; gap: string })[];
+  chapter_evaluations: Record<string, {
+    status: string;
+    summary: string;
+    issues_count: number;
+    score?: number;
+  }>;
+  general_suggestions: string[];
+  updated_at?: string;
+}
+
+/** 获取项目全书一体化专家审阅诊断总档案 */
+export async function getProjectFullReview(
+  baseUrl: string,
+  projectName: string,
+): Promise<FullReviewData> {
+  return request<FullReviewData>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/full_review`,
+    {
+      method: "GET",
+    },
+  );
+}
+
+/** 保存项目全书一体化专家审阅诊断总档案 */
+export async function saveProjectFullReview(
+  baseUrl: string,
+  projectName: string,
+  data: FullReviewData,
+): Promise<FullReviewData> {
+  return request<FullReviewData>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/full_review`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+/** 删除项目全书审阅总档案 */
+export async function deleteProjectFullReview(
+  baseUrl: string,
+  projectName: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/full_review`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
