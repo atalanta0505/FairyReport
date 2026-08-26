@@ -1,9 +1,11 @@
 # 任务合同 V2-T11 v1 — 全层级大纲细化与骨架靶向正文填充范式升级
 
-- 状态：READY_FOR_MAKER（2026-08-26 产品负责人批准 V2-T11 实施方案）
+- 状态：ACCEPTED（2026-08-26 独立 Checker 审查通过，锁定候选 SHA `7aff543aa8d57de90d936291c82875d65d25a423`）
+- 验收报告：[`docs/dev-flow/tasks/V2-T11/rounds/01/checker-report.md`](file:///d:/Repo/FairyReport_lite/docs/dev-flow/tasks/V2-T11/rounds/01/checker-report.md)
 - 依据：产品负责人设计指示：
   “在编写大纲时，就完成所有级别的标题编写，即生成一个完整的大纲，这样后面发送给LLM时，让LLM从最低级别的标题开始填充内容。”
-- 精确起始 SHA：`ee369b260d42029518bf732c78f9bb5d900a0aca`
+- 精确起始 SHA：`1d3b4ee66bd12f12c334f7f4d99d7adf7d6fae7b`
+- 候选交付 SHA：`7aff543aa8d57de90d936291c82875d65d25a423`
 - 工作树门禁：`git status --short` 必须干净
 
 ---
