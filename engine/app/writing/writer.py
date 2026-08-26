@@ -170,6 +170,39 @@ def _count_content_chars(text: str) -> int:
 
 # ── 大纲层级解析与每节字数预算分配 ──
 
+def _extract_chapter_skeleton(outline_md: str, chapter_seq: int) -> str:
+    """从大纲 Markdown 中提取指定章的纯结构骨架标题行（#、##、###、####、##### 等）。"""
+    if not outline_md or chapter_seq <= 0:
+        return ""
+
+    lines = outline_md.split('\n')
+    _cn_nums = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
+                '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
+                '二十一', '二十二', '二十三', '二十四', '二十五', '二十六', '二十七', '二十八', '二十九', '三十']
+    cn_num = _cn_nums[chapter_seq] if chapter_seq < len(_cn_nums) else str(chapter_seq)
+
+    ch_pattern = re.compile(
+        r'^#\s+(?:第\s*(?:' + str(chapter_seq) + r'|' + cn_num + r')\s*章|' + str(chapter_seq) + r'[\.\s])'
+    )
+    in_chapter = False
+    skeleton_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if ch_pattern.match(stripped):
+            in_chapter = True
+            skeleton_lines.append(stripped)
+            continue
+
+        if in_chapter:
+            if re.match(r'^#\s+', stripped) and not stripped.startswith('##'):
+                break
+            if stripped.startswith('#'):
+                skeleton_lines.append(stripped)
+
+    return '\n'.join(skeleton_lines)
+
+
 def _parse_outline_hierarchy(outline_md: str, chapter_seq: int) -> dict:
     """解析给定章的 H2/H3 层级。"""
     lines = outline_md.split('\n')
@@ -394,6 +427,8 @@ class ChapterWriter:
                                    is_summary: bool = False) -> tuple:
         """返回 (prompt, system)。含 RAG、字数预算、适用时技术分析框架。"""
         prev_context = self._build_prev_context(predecessor_chapters)
+        ch_seq = self._parse_chapter_seq(chapter_title)
+        skeleton = _extract_chapter_skeleton(outline_md, ch_seq) if ch_seq > 0 else ""
 
         report_label = f"## 项目名称\n{report_name}\n\n## 产业方向\n{topic}" if report_name else f"## 项目主题\n{topic}"
 
@@ -403,6 +438,9 @@ class ChapterWriter:
             f"## 当前章节\n请编写「{chapter_title}」的正文内容\n\n"
         )
 
+        if skeleton:
+            prompt += f"## 待填充的本章结构骨架（已锁定）\n{skeleton}\n\n"
+
         if prev_context:
             prompt += f"## 前文已完成章节（供参考衔接）\n{prev_context}\n\n"
 
@@ -410,18 +448,17 @@ class ChapterWriter:
             prompt += f"## 参考资料（RAG 检索结果）\n{rag_context}\n\n"
 
         prompt += (
-            f"## 写作要求\n"
-            f"- **硬性约束：必须严格按照上方完整大纲中「{chapter_title}」的所有子标题（##、###、####…）及其标题文字编写，一个子标题不少、不跳过、不自创标题**\n"
+            f"## 写作要求（骨架靶向填充模式）\n"
+            f"- **骨架锁定（最高优先级）：必须严格保留上方【待填充的本章结构骨架】中的所有标题行（#、##、###、####）及其完整文字与层级，严禁增删、修改或调换任何标题顺序！**\n"
+            f"- **末级小节精准填充：在每一个最低级别标题（### / ####）下方空一行，直接开始深入填充详实、专业、严谨的正文分析、工程参数、合规论证与数据表格！**\n"
+            f"- **非末级标题禁止堆砌正文：一级章（#）和二级节（##）作为分类与结构导引，正文必须具体归属到对应的末级小节下方！**\n"
             f"- **格式规范（极重要）：每个标题（#、##、###）必须独占一行且空一行后再写正文，严禁标题与正文连在同一行；表格每行末尾必须输出标准换行符 \\n，严禁使用 || 连写在同一行**\n"
-            f"- 对事实性陈述插入引用标记：**只能使用上方「参考资料」中实际出现的标签**。项目资料使用【源:文件名】，网页资料使用【网:标题】，AI 自有知识使用 [Z]。严禁编造不存在的【源:xxx】或【网:xxx】标签\n"
-            f"- 请输出完整的章节正文（Markdown 格式）\n"
-            f"- 禁止输出任何开场白、确认语、角色介绍，直接从标题和正文开始\n"
-            f"- **禁止在章节末尾自作主张添加「本章正文字数」等元数据标注**\n"
+            f"- 对事实性陈述插入引用标记：只能使用上方「参考资料」中实际出现的标签【源:文件名】、【网:标题】或 [Z]\n"
+            f"- 请输出完整的章节正文（Markdown 格式），直接从标题和正文开始，禁止任何开场白或字数统计元数据标注\n"
         )
 
         # 字数预算：注入结构配额块（_allocate_section_budgets 等价移植）
         if chapter_budget > 0:
-            ch_seq = self._parse_chapter_seq(chapter_title)
             if ch_seq > 0:
                 hierarchy = _parse_outline_hierarchy(outline_md, ch_seq)
                 allocation = _allocate_section_budgets(hierarchy, chapter_budget)

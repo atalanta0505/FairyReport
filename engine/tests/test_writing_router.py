@@ -451,5 +451,124 @@ def test_markdown_formatting_rules_in_prompts():
     assert "严禁使用 || 连写在同一行" in prompt
 
 
+def test_extract_chapter_skeleton():
+    """验证 _extract_chapter_skeleton 多层级提取、描述性内容剔除与跨章截断。"""
+    from engine.app.writing.writer import _extract_chapter_skeleton
+
+    outline = """# 第一章 概述
+本章概述项目的基本建设背景与范围。
+## 1.1 项目概况
+- 重点关注选址与规模
+### 1.1.1 建设地点与用地
+#### 1.1.1.1 地理坐标与四至范围
+#### 1.1.1.2 土地利用性质
+### 1.1.2 建设规模与内容
+## 1.2 编制依据
+一些说明文字
+
+# 第二章 项目建设背景和必要性
+## 2.1 建设背景
+### 2.1.1 宏观政策背景
+## 2.2 建设必要性
+
+# 第三章 研究结论及建议
+## 3.1 主要结论
+"""
+
+    # 1. 提取第1章：包含 H1, H2, H3, H4 标题，剔除说明文字与列表项，在第2章前截断
+    sk1 = _extract_chapter_skeleton(outline, 1)
+    expected_sk1 = "\n".join([
+        "# 第一章 概述",
+        "## 1.1 项目概况",
+        "### 1.1.1 建设地点与用地",
+        "#### 1.1.1.1 地理坐标与四至范围",
+        "#### 1.1.1.2 土地利用性质",
+        "### 1.1.2 建设规模与内容",
+        "## 1.2 编制依据",
+    ])
+    assert sk1 == expected_sk1
+    assert "本章概述项目的基本建设背景与范围" not in sk1
+    assert "第二章" not in sk1
+
+    # 2. 提取第2章：只含第2章的骨架
+    sk2 = _extract_chapter_skeleton(outline, 2)
+    expected_sk2 = "\n".join([
+        "# 第二章 项目建设背景和必要性",
+        "## 2.1 建设背景",
+        "### 2.1.1 宏观政策背景",
+        "## 2.2 建设必要性",
+    ])
+    assert sk2 == expected_sk2
+    assert "第一章" not in sk2
+    assert "第三章" not in sk2
+
+    # 3. 提取第3章（尾章）：在末尾正常结束
+    sk3 = _extract_chapter_skeleton(outline, 3)
+    expected_sk3 = "\n".join([
+        "# 第三章 研究结论及建议",
+        "## 3.1 主要结论",
+    ])
+    assert sk3 == expected_sk3
+
+    # 4. 提取不存在的章节
+    assert _extract_chapter_skeleton(outline, 99) == ""
+    assert _extract_chapter_skeleton(outline, 0) == ""
+    assert _extract_chapter_skeleton("", 1) == ""
+
+
+def test_build_chapter_write_args_skeleton_infilling():
+    """验证 _build_chapter_write_args 正确提取并注入结构骨架，且包含骨架靶向填空指令。"""
+    from engine.app.writing.writer import ChapterWriter
+
+    class FakeLLM:
+        pass
+
+    writer = ChapterWriter(FakeLLM(), report_type="可行性研究报告")
+    outline = (
+        "# 第一章 概述\n"
+        "## 1.1 项目概况\n"
+        "### 1.1.1 建设地点\n"
+        "#### 1.1.1.1 四至范围\n"
+        "## 1.2 编制依据\n"
+        "# 第二章 建设背景\n"
+        "## 2.1 政策背景\n"
+    )
+
+    prompt, system = writer._build_chapter_write_args(
+        chapter_title="第一章 概述",
+        outline_md=outline,
+        predecessor_chapters={},
+        rag_context="【源:data.docx】项目总投资5000万元",
+        topic="水利枢纽",
+        report_name="某水库工程",
+        chapter_budget=4000,
+    )
+
+    # 验证结构骨架块正确注入
+    assert "## 待填充的本章结构骨架（已锁定）" in prompt
+    assert "# 第一章 概述\n## 1.1 项目概况\n### 1.1.1 建设地点\n#### 1.1.1.1 四至范围\n## 1.2 编制依据" in prompt
+    assert "第二章" not in prompt.split("## 待填充的本章结构骨架（已锁定）")[1].split("## 前文已完成章节")[0]
+
+    # 验证骨架靶向填充写作要求
+    assert "## 写作要求（骨架靶向填充模式）" in prompt
+    assert "骨架锁定（最高优先级）" in prompt
+    assert "必须严格保留上方【待填充的本章结构骨架】中的所有标题行（#、##、###、####）及其完整文字与层级" in prompt
+    assert "末级小节精准填充：在每一个最低级别标题（### / ####）下方空一行" in prompt
+    assert "非末级标题禁止堆砌正文：一级章（#）和二级节（##）作为分类与结构导引" in prompt
+    assert "格式规范（极重要）" in prompt
+
+
+def test_build_outline_system_prompt_deep_hierarchy():
+    """验证 _build_outline_system_prompt 包含末级小节全层级深度覆盖强规则。"""
+    from engine.app.writing.outline import _build_outline_system_prompt
+
+    prompt = _build_outline_system_prompt(report_type="可行性研究报告", total_words=50000)
+    assert "深度要求（极重要）" in prompt
+    assert "三级（###）或四级（####）末级实施小节" in prompt
+    assert "每个二级节（##）下必须细分 2~5 个具体的末级小节" in prompt
+    assert "构建全书完整的标题骨架，严禁输出只有一级章或二级节的粗粒度空章" in prompt
+
+
+
 
 
