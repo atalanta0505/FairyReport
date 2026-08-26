@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   escapeHtml,
+  extractOutlineHeadings,
   extractSubHeadings,
   formatInline,
   htmlToMarkdown,
@@ -320,11 +321,45 @@ describe("Markdown 解析与排版工具", () => {
       expect(normalizeMarkdown(glued5)).toBe("### 1.1.4 投资估算\n\n总投资约为 3.5 亿元。");
     });
 
-    it("支持已知大纲标题库精确断行", () => {
+    it("工程咨询行业特征小节标题词法自动解耦（1.4.1、1.4.2、2.2.1、2.2.2、2.2.4、2.3.1、2.3.4等）", () => {
+      // 1.4.1 主要研究结论
+      const s1 = "### 1.4.1 主要研究结论经研究论证，本项目符合国家重大基础设施建设规划。";
+      expect(normalizeMarkdown(s1)).toBe("### 1.4.1 主要研究结论\n\n经研究论证，本项目符合国家重大基础设施建设规划。");
+
+      // 1.4.2 问题与建议
+      const s2 = "### 1.4.2 问题与建议重点关注问题：第一，资金落实进度；第二，征地拆迁。";
+      expect(normalizeMarkdown(s2)).toBe("### 1.4.2 问题与建议\n\n重点关注问题：第一，资金落实进度；第二，征地拆迁。");
+
+      // 2.2.1 与经济社会发展规划衔接性
+      const s3 = "### 2.2.1 与经济社会发展规划衔接性国家“十四五”发展规划明确指出要加快现代水网建设。";
+      expect(normalizeMarkdown(s3)).toBe("### 2.2.1 与经济社会发展规划衔接性\n\n国家“十四五”发展规划明确指出要加快现代水网建设。");
+
+      // 2.2.2 与区域规划衔接性
+      const s4 = "### 2.2.2 与区域规划衔接性从区域协同发展格局来看，本工程是关键节点。";
+      expect(normalizeMarkdown(s4)).toBe("### 2.2.2 与区域规划衔接性\n\n从区域协同发展格局来看，本工程是关键节点。");
+
+      // 2.2.4 与国土空间规划衔接性
+      const s5 = "### 2.2.4 与国土空间规划衔接性《利辛县国土空间总体规划》已将本项目列入重点工程名录。";
+      expect(normalizeMarkdown(s5)).toBe("### 2.2.4 与国土空间规划衔接性\n\n《利辛县国土空间总体规划》已将本项目列入重点工程名录。");
+
+      // 2.3.1 宏观层面必要性
+      const s6 = "### 2.3.1 宏观层面必要性从宏观国家安全与水资源配置战略出发，项目建设势在必行。";
+      expect(normalizeMarkdown(s6)).toBe("### 2.3.1 宏观层面必要性\n\n从宏观国家安全与水资源配置战略出发，项目建设势在必行。");
+
+      // 2.3.4 建设时机适当时
+      const s7 = "### 2.3.4 建设时机适当时当前推进时机成熟，前期准备工作已全部就绪。";
+      expect(normalizeMarkdown(s7)).toBe("### 2.3.4 建设时机适当时\n\n当前推进时机成熟，前期准备工作已全部就绪。");
+    });
+
+    it("支持已知大纲标题库精确断行与带序号匹配", () => {
       const customGlued = "### 1.1.6 特殊定制标题这里是自定义的正文开始...";
-      const knownHeadings = ["1.1.6 特殊定制标题"];
+      const knownHeadings = ["1.1.6 特殊定制标题", "特殊定制标题"];
       const normalized = normalizeMarkdown(customGlued, knownHeadings);
       expect(normalized).toBe("### 1.1.6 特殊定制标题\n\n这里是自定义的正文开始...");
+
+      const gluedWithoutNumInHeading = "### 1.4.1 主要研究结论经深入评估...";
+      const normWithOnlyTitle = normalizeMarkdown(gluedWithoutNumInHeading, ["主要研究结论"]);
+      expect(normWithOnlyTitle).toBe("### 1.4.1 主要研究结论\n\n经深入评估...");
     });
 
     it("空值或非字符串防御", () => {
@@ -357,6 +392,82 @@ describe("Markdown 解析与排版工具", () => {
       expect(html).toContain('<table>');
       expect(html).toContain('<td>投资</td>');
       expect(html).not.toContain('<h3 id="h-ch1-idx0">1.1.6 主要技术经济指标项目主要技术经济指标');
+    });
+  });
+
+  describe("大纲标题库提取 (extractOutlineHeadings)", () => {
+    it("从完整大纲 Markdown 中提取所有各级纯净标题并降序排序", () => {
+      const outlineMd = [
+        "# 第一章 概述",
+        "## 1.1 项目概况",
+        "### 1.4.1 主要研究结论",
+        "### 1.4.2 问题与建议",
+        "# 第二章 项目建设背景与必要性",
+        "## 2.2 规划符合性分析",
+        "### 2.2.1 与经济社会发展规划衔接性",
+        "### 2.2.2 与区域规划衔接性",
+        "### 2.2.4 与国土空间规划衔接性",
+        "## 2.3 项目建设必要性",
+        "### 2.3.1 宏观层面必要性",
+        "### 2.3.4 建设时机适当时",
+      ].join("\n");
+
+      const headings = extractOutlineHeadings(outlineMd);
+      expect(headings).toContain("第一章 概述");
+      expect(headings).toContain("概述");
+      expect(headings).toContain("1.4.1 主要研究结论");
+      expect(headings).toContain("主要研究结论");
+      expect(headings).toContain("2.2.1 与经济社会发展规划衔接性");
+      expect(headings).toContain("与经济社会发展规划衔接性");
+      expect(headings).toContain("2.3.4 建设时机适当时");
+      expect(headings).toContain("建设时机适当时");
+
+      // 验证按长度降序排列
+      for (let i = 0; i < headings.length - 1; i++) {
+        expect(headings[i].length).toBeGreaterThanOrEqual(headings[i + 1].length);
+      }
+    });
+
+    it("空值或非字符串防御", () => {
+      expect(extractOutlineHeadings("")).toEqual([]);
+      expect(extractOutlineHeadings(null as unknown as string)).toEqual([]);
+      expect(extractOutlineHeadings(undefined as unknown as string)).toEqual([]);
+    });
+
+    it("大纲标题与正文粘连全场景配合解耦验证", () => {
+      const outlineMd = [
+        "# 第一章 概述",
+        "### 1.4.1 主要研究结论",
+        "### 1.4.2 问题与建议",
+        "### 2.2.1 与经济社会发展规划衔接性",
+      ].join("\n");
+
+      const knownHeadings = extractOutlineHeadings(outlineMd);
+
+      const chapterText = [
+        "### 1.4.1 主要研究结论经系统论证，各项指标均满足要求。",
+        "### 1.4.2 问题与建议重点建议：抓紧前期审批。",
+        "### 2.2.1 与经济社会发展规划衔接性符合省市一体化战略。",
+      ].join("\n");
+
+      const normalized = normalizeMarkdown(chapterText, knownHeadings);
+      expect(normalized).toContain("### 1.4.1 主要研究结论\n\n经系统论证，各项指标均满足要求。");
+      expect(normalized).toContain("### 1.4.2 问题与建议\n\n重点建议：抓紧前期审批。");
+      expect(normalized).toContain("### 2.2.1 与经济社会发展规划衔接性\n\n符合省市一体化战略。");
+
+      const subHeadings = extractSubHeadings(chapterText, 1, knownHeadings);
+      expect(subHeadings).toHaveLength(3);
+      expect(subHeadings[0].title).toBe("1.4.1 主要研究结论");
+      expect(subHeadings[1].title).toBe("1.4.2 问题与建议");
+      expect(subHeadings[2].title).toBe("2.2.1 与经济社会发展规划衔接性");
+
+      const html = markdownToHtml(chapterText, 1, knownHeadings);
+      expect(html).toContain('<h3 id="h-ch1-idx0">1.4.1 主要研究结论</h3>');
+      expect(html).toContain('<p>经系统论证，各项指标均满足要求。</p>');
+      expect(html).toContain('<h3 id="h-ch1-idx1">1.4.2 问题与建议</h3>');
+      expect(html).toContain('<p>重点建议：抓紧前期审批。</p>');
+      expect(html).toContain('<h3 id="h-ch1-idx2">2.2.1 与经济社会发展规划衔接性</h3>');
+      expect(html).toContain('<p>符合省市一体化战略。</p>');
     });
   });
 });

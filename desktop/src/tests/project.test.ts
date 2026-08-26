@@ -599,45 +599,45 @@ describe("Pinia useProjectStore", () => {
     );
   });
 
-  describe("sessionStorage 状态保持与恢复", () => {
-    it("setStep: 写入 sessionStorage 并成功持久化", () => {
+  describe("localStorage 与跨会话阶段/项目自恢复", () => {
+    it("setStep: 写入 localStorage 与 sessionStorage 并成功持久化", () => {
       const store = useProjectStore();
-      expect(mockStorage.getItem("frl_current_step")).toBeNull();
+      expect(mockLocalStorage.getItem("frl_current_step")).toBeNull();
 
       store.setStep(2);
       expect(store.currentStep).toBe(2);
-      expect(mockStorage.getItem("frl_current_step")).toBe("2");
+      expect(mockLocalStorage.getItem("frl_current_step")).toBe("2");
 
       store.setStep(5);
       expect(store.currentStep).toBe(5);
-      expect(mockStorage.getItem("frl_current_step")).toBe("5");
+      expect(mockLocalStorage.getItem("frl_current_step")).toBe("5");
 
-      // 越界值不修改 sessionStorage
+      // 越界值不修改 localStorage
       store.setStep(9);
       expect(store.currentStep).toBe(5);
-      expect(mockStorage.getItem("frl_current_step")).toBe("5");
+      expect(mockLocalStorage.getItem("frl_current_step")).toBe("5");
     });
 
-    it("Pinia 初始化: 从 sessionStorage 恢复有效步骤 (1~5)", () => {
-      mockStorage.setItem("frl_current_step", "3");
+    it("Pinia 初始化: 从 localStorage 恢复有效步骤 (1~5)", () => {
+      mockLocalStorage.setItem("frl_current_step", "3");
       setActivePinia(createPinia());
       const store = useProjectStore();
       expect(store.currentStep).toBe(3);
     });
 
     it("Pinia 初始化: 遇非法或越界步骤值安全回退到 1", () => {
-      mockStorage.setItem("frl_current_step", "99");
+      mockLocalStorage.setItem("frl_current_step", "99");
       setActivePinia(createPinia());
       const store1 = useProjectStore();
       expect(store1.currentStep).toBe(1);
 
-      mockStorage.setItem("frl_current_step", "not-a-number");
+      mockLocalStorage.setItem("frl_current_step", "not-a-number");
       setActivePinia(createPinia());
       const store2 = useProjectStore();
       expect(store2.currentStep).toBe(1);
     });
 
-    it("selectProject: 同步项目名称到 sessionStorage", async () => {
+    it("selectProject: 同步项目名称到 localStorage", async () => {
       const store = useProjectStore();
       store.projects = [
         { id: 1, name: "水库A", created_at: "2026-08-25T00:00:00Z" },
@@ -648,11 +648,11 @@ describe("Pinia useProjectStore", () => {
       await store.selectProject(BASE_URL, "水库B");
 
       expect(store.currentProject?.name).toBe("水库B");
-      expect(mockStorage.getItem("frl_current_project")).toBe("水库B");
+      expect(mockLocalStorage.getItem("frl_current_project")).toBe("水库B");
     });
 
-    it("loadProjects: 优先从 sessionStorage 恢复之前选定的项目", async () => {
-      mockStorage.setItem("frl_current_project", "水库B");
+    it("loadProjects: 优先从 localStorage 恢复之前选定的项目", async () => {
+      mockLocalStorage.setItem("frl_current_project", "水库B");
       setActivePinia(createPinia());
       const store = useProjectStore();
 
@@ -672,14 +672,14 @@ describe("Pinia useProjectStore", () => {
 
       await store.loadProjects(BASE_URL);
       expect(store.currentProject?.name).toBe("水库B");
-      expect(mockStorage.getItem("frl_current_project")).toBe("水库B");
+      expect(mockLocalStorage.getItem("frl_current_project")).toBe("水库B");
     });
 
-    it("deleteProject: 删除当前选中项目后清除 sessionStorage 记录", async () => {
+    it("deleteProject: 删除当前选中项目后清除 localStorage 记录", async () => {
       const store = useProjectStore();
       store.projects = [{ id: 1, name: "待删项目", created_at: "2026-08-25T00:00:00Z" }];
       store.currentProject = store.projects[0];
-      mockStorage.setItem("frl_current_project", "待删项目");
+      mockLocalStorage.setItem("frl_current_project", "待删项目");
 
       mockFetch.mockImplementation(async (url, opts) => {
         const u = String(url);
@@ -695,7 +695,7 @@ describe("Pinia useProjectStore", () => {
 
       await store.deleteProject(BASE_URL, "待删项目");
       expect(store.currentProject).toBeNull();
-      expect(mockStorage.getItem("frl_current_project")).toBeNull();
+      expect(mockLocalStorage.getItem("frl_current_project")).toBeNull();
     });
   });
 

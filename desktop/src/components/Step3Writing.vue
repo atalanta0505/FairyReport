@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { extractSubHeadings, htmlToMarkdown, markdownToHtml, type SubHeading } from "../lib/markdown";
+import {
+  extractOutlineHeadings,
+  extractSubHeadings,
+  htmlToMarkdown,
+  markdownToHtml,
+  type SubHeading,
+} from "../lib/markdown";
 import { useEngineStore } from "../stores/engine";
 import { useProjectStore } from "../stores/project";
 import { useSettingsStore } from "../stores/settings";
@@ -18,6 +24,8 @@ const editorCanvasRef = ref<HTMLDivElement | null>(null);
 const editorTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const outlineHeadings = computed(() => extractOutlineHeadings(projectStore.outlineMd));
 
 function showMsg(text: string, type: "success" | "error" = "success") {
   actionMessage.value = { type, text };
@@ -57,6 +65,7 @@ function syncEditorContent() {
     editorCanvasRef.value.innerHTML = markdownToHtml(
       currentChapterText.value,
       currentChapter.value?.seq,
+      outlineHeadings.value,
     );
   }
 }
@@ -156,7 +165,7 @@ const chapterSubHeadingsMap = computed<Record<number, SubHeading[]>>(() => {
   for (const ch of projectStore.outlineChapters) {
     const text = projectStore.chapters[ch.seq];
     if (text && text.trim().length > 0) {
-      map[ch.seq] = extractSubHeadings(text, ch.seq).filter((h) => h.level > 1);
+      map[ch.seq] = extractSubHeadings(text, ch.seq, outlineHeadings.value).filter((h) => h.level > 1);
     } else {
       map[ch.seq] = [];
     }
@@ -189,7 +198,11 @@ watch(
   (newVal) => {
     if (isCurrentChapterWriting.value) {
       if (viewMode.value === "rich" && editorCanvasRef.value) {
-        editorCanvasRef.value.innerHTML = markdownToHtml(newVal, currentChapter.value?.seq);
+        editorCanvasRef.value.innerHTML = markdownToHtml(
+          newVal,
+          currentChapter.value?.seq,
+          outlineHeadings.value,
+        );
         nextTick(() => {
           if (editorCanvasRef.value) {
             editorCanvasRef.value.scrollTop = editorCanvasRef.value.scrollHeight;

@@ -34,6 +34,15 @@ export function parseChaptersFromOutline(outlineMd: string): ChapterInfo[] {
 
 function getStoredStep(): number {
   try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem("frl_current_step");
+      if (raw) {
+        const val = Number(raw);
+        if (Number.isInteger(val) && val >= 1 && val <= 5) {
+          return val;
+        }
+      }
+    }
     if (typeof sessionStorage !== "undefined") {
       const raw = sessionStorage.getItem("frl_current_step");
       if (raw) {
@@ -51,6 +60,10 @@ function getStoredStep(): number {
 
 function getStoredProjectName(): string | null {
   try {
+    if (typeof localStorage !== "undefined") {
+      const val = localStorage.getItem("frl_current_project");
+      if (val) return val;
+    }
     if (typeof sessionStorage !== "undefined") {
       return sessionStorage.getItem("frl_current_project");
     }
@@ -62,6 +75,9 @@ function getStoredProjectName(): string | null {
 
 function setStoredStep(step: number): void {
   try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("frl_current_step", String(step));
+    }
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.setItem("frl_current_step", String(step));
     }
@@ -72,6 +88,13 @@ function setStoredStep(step: number): void {
 
 function setStoredProjectName(name: string | null): void {
   try {
+    if (typeof localStorage !== "undefined") {
+      if (name) {
+        localStorage.setItem("frl_current_project", name);
+      } else {
+        localStorage.removeItem("frl_current_project");
+      }
+    }
     if (typeof sessionStorage !== "undefined") {
       if (name) {
         sessionStorage.setItem("frl_current_project", name);

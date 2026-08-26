@@ -96,6 +96,33 @@ function isTableSeparator(line: string): boolean {
   return cells.every((cell) => /^:?-{1,}:?$/.test(cell.trim()));
 }
 
+/**
+ * 从大纲 Markdown 中提取所有纯净标题文本（# ~ ####）
+ * 包含带序号和去除序号前缀的标题，按长度降序排序，保证长标题优先匹配
+ */
+export function extractOutlineHeadings(outlineMd: string): string[] {
+  if (!outlineMd || typeof outlineMd !== "string") return [];
+  const lines = outlineMd.split("\n");
+  const headingSet = new Set<string>();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^#{1,4}\s+(.+)$/);
+    if (match) {
+      const full = match[1].trim();
+      if (full) {
+        headingSet.add(full);
+        // 去除章节序号前缀（如 "1.4.1 主要研究结论" -> "主要研究结论", "第一章 概述" -> "概述"）
+        const noPrefix = full.replace(/^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*/, "").trim();
+        if (noPrefix) {
+          headingSet.add(noPrefix);
+        }
+      }
+    }
+  }
+  // 长度降序排序，保证长标题优先匹配
+  return Array.from(headingSet).sort((a, b) => b.length - a.length);
+}
+
 export function normalizeMarkdown(md: string, knownHeadings?: string[]): string {
   if (!md || typeof md !== "string") return "";
   let text = md.replace(/\r\n/g, "\n");
@@ -113,23 +140,30 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
   // 4. 标题与加粗/引用/表格粘连拆解（如 ### 1.1.1 建设地点**项目名称**）
   text = text.replace(/(#{1,6}\s+[^\n*|【]*?)\s*(\*\*|【源|\|)/g, "$1\n\n$2");
 
-  // 5. 最低级标题（H3/H4）与正文粘连拆解（解决 ### 1.1.6 主要技术经济指标项目主要技术经济指标...）
-  text = text.replace(
-    /(#{1,6}\s+\d+(?:\.\d+)*\s+[^\s#\n]{2,20}?)\s*(项目|本项目|该项目|本工程|工程|根据|按照|依据|经查|经核实|经测算|经评估|经分析|经过|为贯彻|为实现|为满足|为了?|为进一步|总投资|总用地|总建筑面积|规划建设|建设内容|建设规模为|建设地点位于|主要建设内容|主要指标如下|主要包括|涵盖|包含|如下表|如下所示|如下：|由|针对)([\u4e00-\u9fa5])/g,
-    "$1\n\n$2$3"
-  );
-
-  // 6. 若传入已知大纲标题库，进行精确前缀断行
+  // 5. 若传入已知大纲标题库，进行精确前缀断行（第一道防线）
   if (knownHeadings && Array.isArray(knownHeadings)) {
     for (const h of knownHeadings) {
       if (!h || typeof h !== "string") continue;
       const cleanH = h.replace(/^#+\s*/, "").trim();
       if (!cleanH) continue;
       const escaped = cleanH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const reg = new RegExp(`^(#{1,6}\\s+${escaped})\\s*([^\\n]+)$`, "gm");
+      // 匹配形如 ### 1.4.1 主要研究结论经研究论证， -> ### 1.4.1 主要研究结论\n\n经研究论证，
+      const reg = new RegExp(`^(#{1,6}\\s+(?:\\d+(?:\\.\\d+)*\\s+)?${escaped})\\s*([^\\n]+)$`, "gm");
       text = text.replace(reg, "$1\n\n$2");
     }
   }
+
+  // 6. 工程咨询行业特征小节标题与正文粘连拆解（第二道防线）
+  text = text.replace(
+    /(#{1,6}\s+\d+(?:\.\d+)*\s+[\u4e00-\u9fa5\w、—\-\/（）()]{1,20}?(?:概况|背景|进展|情况|分析|方案|建议|结论|目标|任务|内容|规模|地点|工期|来源|估算|指标|信息|依据|政策|规范|成果|其他|符合性|衔接性|必要性|适当时|要求|保障|评估|设计|组织|测算|预算|说明|构成|论证|原则|措施|布局|标准|选址|模式|效益|影响|评价|预案|附件|附表|附图))([，。：:（(《“\u4e00-\u9fa5].*)$/gm,
+    "$1\n\n$2"
+  );
+
+  // 7. 最低级标题（H3/H4）与中文句式词粘连拆解（解决 ### 1.1.6 主要技术经济指标项目主要技术经济指标...）
+  text = text.replace(
+    /(#{1,6}\s+\d+(?:\.\d+)*\s+[^\s#\n，。！？；]{2,20}?)\s*(项目|本项目|该项目|本工程|工程|根据|按照|依据|经查|经核实|经测算|经评估|经分析|经过|为贯彻|为实现|为满足|为了?|为进一步|总投资|总用地|总建筑面积|规划建设|建设内容|建设规模为|建设地点位于|主要建设内容|主要指标如下|主要包括|涵盖|包含|如下表|如下所示|如下：|由|针对)([\u4e00-\u9fa5])/g,
+    "$1\n\n$2$3"
+  );
 
   return text;
 }
