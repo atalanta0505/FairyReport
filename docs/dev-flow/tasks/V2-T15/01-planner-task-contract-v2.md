@@ -1,8 +1,9 @@
-﻿# 任务合同 V2-T15 v2 — Step 4 全书一体化审阅与全景单栏内联工作台重构
+# 任务合同 V2-T15 v2 — Step 4 全书一体化审阅与全景单栏内联工作台重构
 
-- 状态：READY_FOR_MAKER（2026-08-26 产品负责人批准 V2-T15 第 2 轮重构方案）
+- 状态：ACCEPTED（2026-08-26 独立 Checker 验收通过，锁定 SHA：`039885c806542586472c0bd1a0b6765ca4b3e2bc`）
 - 依据：产品负责人确认 5 项重构诉求（彻底消除纵向卡片挤压、全书一体化审阅与持久化、废除百分制改用达标度、左侧全书大纲导航+右侧全文画布、单栏内联代码式 Diff 与标签页切换、清除硬编码水利词）
 - 精确起始 SHA：`999da87f8596832bd44c1db6648eb100b4ffdc14`
+- 锁定候选 SHA：`039885c806542586472c0bd1a0b6765ca4b3e2bc`
 - 工作树门禁：`git status --short` 必须干净
 
 ---
@@ -66,10 +67,10 @@
 
 ## 4. 验收标准
 
-- [ ] `npx vitest run`（`desktop/`）全绿。
-- [ ] `python -m pytest engine/tests -q` 全绿。
-- [ ] `npx vue-tsc --noEmit`、`npm run build`、`cargo check` 全绿。
-- [ ] B 级实跑：
+- [x] `npx vitest run`（`desktop/`）全绿（119/119 通过）。
+- [x] `python -m pytest engine/tests -q` 全绿（94 通过）。
+- [x] `npx vue-tsc --noEmit`、`npm run build`、`cargo check` 全绿。
+- [x] B 级实跑：
   1. Step 4 右侧工作区 100% 满屏展示全文，无纵向折叠卡片挤压；
   2. 左侧展示全书多级标题导航，点击可平滑跳转至全文对应位置；
   3. 彻底移除双栏 Diff，单栏内联 Diff 全宽展示且红绿高亮清晰，标签页切换顺畅；
