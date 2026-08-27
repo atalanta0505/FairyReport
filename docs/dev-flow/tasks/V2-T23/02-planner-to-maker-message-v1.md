@@ -6,7 +6,7 @@ Maker 您好！请按合同执行任务 **V2-T23 第 1 轮**（免 Key 百度优
 
 ### 一、任务基础信息
 - **有效合同**：`docs/dev-flow/tasks/V2-T23/01-planner-task-contract-v1.md`
-- **精确起始 SHA**：`9942aec52e1f9abf2818c440fc13bf20c3f6c1c3`
+- **精确起始 SHA**：`e7757bc61b5cff49c150111c18521470a6e5dd7b`
 - **目标分支**：`master`
 
 ---
