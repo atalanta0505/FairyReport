@@ -1,8 +1,10 @@
 # 任务合同 V2-T21 v1 — 拓扑推荐章节写作顺序、断点智能续写、Step 3 目录平铺一体化与纯净排版画布
 
-- 状态：READY_FOR_MAKER（2026-08-27 用户反馈与计划自动批准）
+- 状态：ACCEPTED（2026-08-27 Round 01 独立验收全绿，锁定候选提交 `82aa6ae30a47a697e6bbd5e44efb6e8f6456a6ce`）
 - 依据：用户关于第一章综述推演耗时长、全书写作推荐拓扑顺序（如 2~10 -> 1 -> 11）、一键写作断点续写防清空、Step 3 导航对齐 Step 4 平铺一体化与移除源码视图的建议
-- 精确起始 SHA：`6318344e29bde3052110ac6cd404efff859992b8`
+- 精确起始 SHA：`8485a13db2a56135eeecdcd20612e766c308dc8e`
+- 验收候选 SHA：`82aa6ae30a47a697e6bbd5e44efb6e8f6456a6ce`
+- 验收报告：`docs/dev-flow/tasks/V2-T21/rounds/01/checker-report.md`
 - 工作树门禁：`git status --short` 必须干净
 
 ---
