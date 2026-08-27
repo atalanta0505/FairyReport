@@ -225,6 +225,11 @@ def test_chapter_writer_expert_review_modes():
     llm = LLMClient(LLM_CONFIG)
     writer = ChapterWriter(llm, report_type="可行性研究报告")
 
+    # mode="fast" (默认或显式常规审查)
+    raw_fast, res_fast = writer.expert_review("第三章 建设方案", "# 第三章 建设方案\n正文内容...", mode="fast")
+    assert res_fast["status"] == "通过"
+    assert res_fast["score"] == 90
+
     # mode="all"
     raw_all, res_all = writer.expert_review("第三章 建设方案", "# 第三章 建设方案\n正文内容...", mode="all")
     assert res_all["status"] == "通过"
@@ -239,8 +244,31 @@ def test_chapter_writer_expert_review_modes():
     assert res_num["status"] == "通过"
 
     # helper function
-    raw_h, res_h = expert_review_chapter("第一章 概述", "正文...", report_type="可行性研究报告", review_mode="all", llm=llm)
+    raw_h, res_h = expert_review_chapter("第一章 概述", "正文...", report_type="可行性研究报告", review_mode="fast", llm=llm)
     assert res_h["status"] == "通过"
+
+
+def test_chapter_writer_build_expert_review_args_modes():
+    from engine.app.writing.prompts import (
+        FAST_REVIEW_SYSTEM_PROMPT,
+        FULL_EXPERT_REVIEW_SYSTEM_PROMPT,
+        COMPLIANCE_REVIEW_SYSTEM_PROMPT,
+        NUMERICAL_REVIEW_SYSTEM_PROMPT,
+    )
+    llm = LLMClient(LLM_CONFIG)
+    writer = ChapterWriter(llm, report_type="可行性研究报告")
+
+    _, sys_fast = writer._build_expert_review_args("第一章", "正文", mode="fast")
+    assert sys_fast == FAST_REVIEW_SYSTEM_PROMPT
+
+    _, sys_all = writer._build_expert_review_args("第一章", "正文", mode="all")
+    assert sys_all == FULL_EXPERT_REVIEW_SYSTEM_PROMPT
+
+    _, sys_comp = writer._build_expert_review_args("第一章", "正文", mode="compliance")
+    assert sys_comp == COMPLIANCE_REVIEW_SYSTEM_PROMPT
+
+    _, sys_num = writer._build_expert_review_args("第一章", "正文", mode="numeric")
+    assert sys_num == NUMERICAL_REVIEW_SYSTEM_PROMPT
 
 
 def test_chapter_writer_modify_chapter():
@@ -278,12 +306,12 @@ def test_api_review_and_revise_endpoints():
 
     client = TestClient(app)
 
-    # 1. POST /writing/review
+    # 1. POST /writing/review with mode="fast"
     resp = client.post("/writing/review", json={
         "chapter_text": "# 第四章 技术方案\n技术参数详细内容...",
         "chapter_title": "第四章 技术方案",
         "report_type": "可行性研究报告",
-        "mode": "all",
+        "mode": "fast",
         "llm_config": LLM_CONFIG,
     })
     assert resp.status_code == 200, resp.text
@@ -311,7 +339,7 @@ def test_api_review_stream():
     sample_review = {
         "status": "通过",
         "score": 96,
-        "summary": "全维度审查合格",
+        "summary": "常规审查合格",
         "issues": [],
         "numerical_checks": [],
         "data_gap_checklist": [],
@@ -321,7 +349,7 @@ def test_api_review_stream():
     _set_stub_llm(
         content=raw_json,
         chunks=[raw_json[:20], raw_json[20:]],
-        reasoning_chunks=["思考：正在核对发改委规程...", "核对完成。"],
+        reasoning_chunks=["思考：正在核对发改委规程与数值自洽...", "核对完成。"],
     )
 
     client = TestClient(app)
@@ -329,7 +357,7 @@ def test_api_review_stream():
         "chapter_text": "# 第一章 概述\n项目建设内容...",
         "chapter_title": "第一章 概述",
         "report_type": "可行性研究报告",
-        "mode": "all",
+        "mode": "fast",
         "llm_config": LLM_CONFIG,
     })
     assert resp.status_code == 200
@@ -345,7 +373,7 @@ def test_api_review_stream():
             else:
                 events.append(json.loads(val))
 
-    assert any(e.get("type") == "stage" and e.get("stage") == "init" for e in events)
+    assert any(e.get("type") == "stage" and "常规快速体检" in e.get("message", "") for e in events)
     assert any(e.get("type") == "thought" and "思考" in e.get("chunk", "") for e in events)
     assert any(e.get("type") == "chunk" for e in events)
     done_ev = [e for e in events if e.get("type") == "done"]

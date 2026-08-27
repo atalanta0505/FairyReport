@@ -34,6 +34,21 @@ const showRefDrawer = ref<boolean>(false);
 const diagnosticTab = ref<"issues" | "numerical" | "gaps" | "evals" | "suggestions">("issues");
 const refFilterType = ref<"all" | "material" | "standard" | "web">("all");
 
+// ── 审查双模式与耗时预估弹窗 ──
+// fast: ⚡ 常规审查 (推荐) | all: 🔍 全维精审
+const reviewMode = ref<"fast" | "all">("fast");
+const showEstimateModal = ref<boolean>(false);
+const estimateForceAll = ref<boolean>(false);
+
+function openReviewEstimateModal(forceAll = false) {
+  if (completedChaptersCount.value === 0) {
+    showMsg("暂无可审阅的章节，请先在步骤 3 写作并生成正文", "error");
+    return;
+  }
+  estimateForceAll.value = forceAll;
+  showEstimateModal.value = true;
+}
+
 // ── AI 智能修订弹窗 / 浮层 ──
 const showRevisionModal = ref<boolean>(false);
 const revisionInstruction = ref<string>("");
@@ -518,7 +533,9 @@ function onSourceInput(seq: number, e: Event) {
 }
 
 // ── 全书全维专家审阅 ──
-async function handleRunFullBookReview(forceAll = false) {
+async function handleRunFullBookReview(forceAll = false, mode?: "fast" | "all") {
+  const targetMode = mode || reviewMode.value;
+  showEstimateModal.value = false;
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -543,8 +560,14 @@ async function handleRunFullBookReview(forceAll = false) {
   }, 1000);
 
   try {
-    showMsg("已启动「全书全维专家审阅」，正在全面体检合规与数据自洽...", "info");
-    const fullData = await projectStore.runFullBookReview(engine.baseUrl, llmConfig, forceAll);
+    const modeName = targetMode === "fast" ? "⚡ 常规审查" : "🔍 全维精审";
+    showMsg(`已启动「${modeName}」，正在执行合规与数据自洽体检...`, "info");
+    const fullData = await projectStore.runFullBookReview(
+      engine.baseUrl,
+      llmConfig,
+      forceAll,
+      targetMode,
+    );
     showMsg(
       `全书专家审阅完成！健康达标状态：「${fullData.health_status}」，发现 ${fullData.issues.length} 处待优化项。`,
     );
@@ -562,8 +585,9 @@ async function handleRunFullBookReview(forceAll = false) {
 // ── 单章专家审阅 ──
 async function handleRunSingleReview(
   seq: number,
-  mode: "all" | "compliance" | "numeric" | "technical" = "all",
+  mode?: "fast" | "all" | "compliance" | "numeric" | "technical",
 ) {
+  const targetMode = mode || reviewMode.value;
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -589,11 +613,12 @@ async function handleRunSingleReview(
   }, 1000);
 
   try {
-    showMsg(`正在对第 ${seq} 章执行专家审阅...`, "info");
-    const res = await projectStore.runChapterReview(engine.baseUrl, seq, mode, llmConfig);
+    const modeLabel = targetMode === "fast" ? "⚡ 常规审查" : (targetMode === "all" ? "🔍 全维精审" : targetMode);
+    showMsg(`正在对第 ${seq} 章执行【${modeLabel}】...`, "info");
+    const res = await projectStore.runChapterReview(engine.baseUrl, seq, targetMode, llmConfig);
     showMsg(`第 ${seq} 章审阅完成！结论：${res.status}，发现 ${res.issues?.length || 0} 处问题。`);
     // 重新整合全书总档案
-    await projectStore.runFullBookReview(engine.baseUrl, llmConfig, false);
+    await projectStore.runFullBookReview(engine.baseUrl, llmConfig, false, reviewMode.value);
   } catch (err) {
     showMsg(`单章审阅失败：${(err as Error).message}`, "error");
   } finally {
@@ -929,15 +954,35 @@ function copyFullBookMarkdown() {
       </div>
 
       <div class="header-right-actions">
+        <!-- 审查模式切换胶囊 -->
+        <div class="review-mode-pills">
+          <button
+            class="mode-pill-btn"
+            :class="{ active: reviewMode === 'fast' }"
+            @click="reviewMode = 'fast'"
+            title="常规审查：极速聚焦名词称谓、核心数值自洽与底线合规三大维度，单章约 8~12s（推荐）"
+          >
+            ⚡ 常规审查
+          </button>
+          <button
+            class="mode-pill-btn"
+            :class="{ active: reviewMode === 'all' }"
+            @click="reviewMode = 'all'"
+            title="全维精审：全维度专家逐句诊断与方案比选深度审查，单章约 30~45s"
+          >
+            🔍 全维精审
+          </button>
+        </div>
+
         <!-- 核心行动按钮 -->
         <button
           v-if="!projectStore.batchReviewing"
           class="btn btn-primary btn-review-hero"
           :disabled="completedChaptersCount === 0"
-          @click="handleRunFullBookReview(false)"
-          title="一键对全书执行规程符合性审查、跨章数据前后自洽核验与资料完整度体检"
+          @click="openReviewEstimateModal(false)"
+          title="运行全书审阅（可先查看耗时预估并确认审查模式）"
         >
-          🚀 全书全维专家审阅
+          🚀 运行全书审阅
         </button>
         <button
           v-else
@@ -1433,9 +1478,9 @@ function copyFullBookMarkdown() {
               <button
                 class="btn btn-primary btn-sm btn-block"
                 :disabled="projectStore.batchReviewing"
-                @click="handleRunFullBookReview(true)"
+                @click="openReviewEstimateModal(true)"
               >
-                🚀 重新运行全书全维专家审阅
+                🚀 重新运行全书审阅
               </button>
             </div>
           </div>
@@ -1731,6 +1776,116 @@ function copyFullBookMarkdown() {
             </div>
           </div>
         </aside>
+      </div>
+    </transition>
+
+    <!-- ═════════════════════════════════════════════════════════ -->
+    <!-- 全书审阅耗时预估与模式确认弹窗 (Estimate Modal) -->
+    <!-- ═════════════════════════════════════════════════════════ -->
+    <transition name="fade">
+      <div v-if="showEstimateModal" class="modal-overlay" @click="showEstimateModal = false">
+        <div class="estimate-modal-card" @click.stop>
+          <div class="modal-header">
+            <div class="modal-title-box">
+              <h3>⏱️ 全书审阅耗时预估与模式选择</h3>
+              <span class="modal-sub">依照国家发改委投资项目编制规程，提供常规快速体检与全维精审双模式</span>
+            </div>
+            <button class="modal-close-btn" @click="showEstimateModal = false">✕</button>
+          </div>
+
+          <div class="modal-body">
+            <!-- 统计摘要栏 -->
+            <div class="estimate-stats-banner">
+              <div class="estimate-stat-item">
+                <span class="stat-label">待审阅正文章节</span>
+                <span class="stat-val">共 {{ completedChaptersCount }} 章</span>
+              </div>
+              <div class="estimate-stat-item">
+                <span class="stat-label">全书正文总字数</span>
+                <span class="stat-val">{{ totalWordCount.toLocaleString() }} 字</span>
+              </div>
+              <div class="estimate-stat-item">
+                <span class="stat-label">审阅范围</span>
+                <span class="stat-val">{{ estimateForceAll ? '全量覆盖重审' : '增量/未完成章节' }}</span>
+              </div>
+            </div>
+
+            <!-- 模式双选卡片 -->
+            <div class="mode-select-grid">
+              <!-- 模式 A: ⚡ 常规审查 (推荐) -->
+              <div
+                class="mode-card"
+                :class="{ selected: reviewMode === 'fast' }"
+                @click="reviewMode = 'fast'"
+              >
+                <div class="mode-card-header">
+                  <div class="mode-title-row">
+                    <span class="mode-card-icon">⚡</span>
+                    <strong class="mode-name">常规审查</strong>
+                  </div>
+                  <span class="mode-pill-badge badge-rec">推荐 · 极速</span>
+                </div>
+                <div class="mode-time-estimate">
+                  预计耗时：<strong class="time-num">{{ Math.max(1, Math.ceil((completedChaptersCount * 10) / 60)) }} 分钟</strong>
+                  <span class="time-sub">（每章约 8~12s）</span>
+                </div>
+                <div class="mode-features-list">
+                  <div class="feature-item">1️⃣ 重点名词称谓与专有名词一致性</div>
+                  <div class="feature-item">2️⃣ 核心数值指标自洽性（投资、用地、规模等）</div>
+                  <div class="feature-item">3️⃣ 发改委与行业核心规程底线合规</div>
+                </div>
+                <p class="mode-card-desc">
+                  单章推理压缩 70%，极速输出精简诊断，适合高频自查与敏捷迭代。
+                </p>
+              </div>
+
+              <!-- 模式 B: 🔍 全维逐句精审 -->
+              <div
+                class="mode-card"
+                :class="{ selected: reviewMode === 'all' }"
+                @click="reviewMode = 'all'"
+              >
+                <div class="mode-card-header">
+                  <div class="mode-title-row">
+                    <span class="mode-card-icon">🔍</span>
+                    <strong class="mode-name">全维精审</strong>
+                  </div>
+                  <span class="mode-pill-badge badge-deep">全科 · 深度</span>
+                </div>
+                <div class="mode-time-estimate">
+                  预计耗时：<strong class="time-num">{{ Math.max(2, Math.ceil((completedChaptersCount * 35) / 60)) }} 分钟</strong>
+                  <span class="time-sub">（每章约 30~45s）</span>
+                </div>
+                <div class="mode-features-list">
+                  <div class="feature-item">1️⃣ 全维度逐句专家诊断与套话严格压制</div>
+                  <div class="feature-item">2️⃣ 技术方案可行性与工艺多方案比选深度审查</div>
+                  <div class="feature-item">3️⃣ 财务经济指标与政策前置审批要件全覆盖</div>
+                </div>
+                <p class="mode-card-desc">
+                  全科专家全维度诊断，适合定稿终审、重大投资评审与申报报批。
+                </p>
+              </div>
+            </div>
+
+            <!-- 纯中文思考硬约束提示 -->
+            <div class="quality-note-box">
+              <span class="note-icon">🛡️</span>
+              <span class="note-text">
+                <strong>纯中文思考硬控制</strong>：已强制注入 100% 纯中文内部构思与推理推演硬约束，严禁英文思考句，确保工程咨询与水利专业论证水准。
+              </span>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="showEstimateModal = false">取消</button>
+            <button
+              class="btn btn-primary btn-confirm-start"
+              @click="handleRunFullBookReview(estimateForceAll, reviewMode)"
+            >
+              🚀 确认开始【{{ reviewMode === 'fast' ? '⚡ 常规审查' : '🔍 全维精审' }}】
+            </button>
+          </div>
+        </div>
       </div>
     </transition>
 
@@ -3633,6 +3788,183 @@ function copyFullBookMarkdown() {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 审查模式切换胶囊与耗时预估弹窗样式 */
+.review-mode-pills {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 2px;
+  border: 1px solid #e2e8f0;
+  gap: 2px;
+}
+.mode-pill-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.mode-pill-btn:hover {
+  color: #1e293b;
+}
+.mode-pill-btn.active {
+  background: #ffffff;
+  color: #2563eb;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.estimate-modal-card {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 680px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.estimate-stats-banner {
+  display: flex;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+}
+.estimate-stat-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.estimate-stat-item .stat-label {
+  font-size: 11px;
+  color: #64748b;
+}
+.estimate-stat-item .stat-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mode-select-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.mode-card {
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mode-card:hover {
+  border-color: #93c5fd;
+  background: #f8faff;
+}
+.mode-card.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 1px #2563eb;
+}
+.mode-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mode-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mode-card-icon {
+  font-size: 16px;
+}
+.mode-name {
+  font-size: 14px;
+  color: #0f172a;
+}
+.mode-pill-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.badge-rec {
+  background: #dcfce7;
+  color: #15803d;
+}
+.badge-deep {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+.mode-time-estimate {
+  font-size: 12px;
+  color: #334155;
+}
+.time-num {
+  color: #2563eb;
+  font-size: 14px;
+}
+.time-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+.mode-features-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.feature-item {
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.4;
+}
+.mode-card-desc {
+  font-size: 11px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.4;
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 8px;
+}
+
+.quality-note-box {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: #166534;
+  line-height: 1.5;
+}
+.quality-note-box strong {
+  color: #14532d;
+}
+
+.btn-confirm-start {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 /* 动画效果 */

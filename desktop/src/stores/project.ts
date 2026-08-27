@@ -318,7 +318,7 @@ export const useProjectStore = defineStore("project", () => {
   const chapterReviews = ref<Record<number, engineApi.ExpertReviewResult>>({});
   const fullBookReview = ref<engineApi.FullReviewData | null>(null);
   const reviewingSeq = ref<number | null>(null);
-  const reviewingMode = ref<"all" | "compliance" | "numeric" | "technical">("all");
+  const reviewingMode = ref<"fast" | "all" | "compliance" | "numeric" | "technical">("fast");
   const batchReviewing = ref<boolean>(false);
   const reviewProgress = ref<ReviewProgress | null>(null);
   let reviewProgressTimer: ReturnType<typeof setInterval> | null = null;
@@ -1215,7 +1215,7 @@ export const useProjectStore = defineStore("project", () => {
   async function runChapterReview(
     baseUrl: string,
     seq: number,
-    mode: "all" | "compliance" | "numeric" | "technical" = "all",
+    mode: "fast" | "all" | "compliance" | "numeric" | "technical" = "fast",
     llmConfig: engineApi.LLMConfig,
   ): Promise<engineApi.ExpertReviewResult> {
     if (baseUrl) lastBaseUrl.value = baseUrl;
@@ -1325,8 +1325,9 @@ export const useProjectStore = defineStore("project", () => {
     baseUrl: string,
     llmConfig: engineApi.LLMConfig,
     forceAll = false,
+    mode: "fast" | "all" = "fast",
   ): Promise<void> {
-    await runFullBookReview(baseUrl, llmConfig, forceAll);
+    await runFullBookReview(baseUrl, llmConfig, forceAll, mode);
   }
 
   function stopBatchReview(): void {
@@ -1444,6 +1445,7 @@ export const useProjectStore = defineStore("project", () => {
     baseUrl: string,
     llmConfig: engineApi.LLMConfig,
     forceAll = false,
+    mode: "fast" | "all" = "fast",
   ): Promise<engineApi.FullReviewData> {
     if (baseUrl) lastBaseUrl.value = baseUrl;
     if (!baseUrl) throw new Error("引擎未就绪");
@@ -1507,7 +1509,7 @@ export const useProjectStore = defineStore("project", () => {
                 chapter_text: text,
                 report_type: reportType.value,
                 chapter_title: ch.title,
-                mode: "all",
+                mode,
                 llm_config: llmConfig,
               },
               (ev) => {

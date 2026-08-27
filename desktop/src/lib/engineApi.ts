@@ -540,7 +540,7 @@ export interface ReviewChapterRequest {
   chapter_text: string;
   report_type?: string;
   chapter_title?: string;
-  mode?: "all" | "compliance" | "numeric" | "technical";
+  mode?: "fast" | "all" | "compliance" | "numeric" | "technical";
   llm_config: LLMConfig;
 }
 

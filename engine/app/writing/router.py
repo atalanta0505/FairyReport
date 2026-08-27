@@ -111,7 +111,7 @@ class ReviewRequest(BaseModel):
     chapter_text: str
     report_type: str = ""
     chapter_title: str = ""
-    mode: str = "all"
+    mode: str = "fast"
     llm_config: LLMConfig
 
 
@@ -506,14 +506,14 @@ def _stream_chapter(writer, llm, req, chapter_title,
 
 @router.post("/writing/review")
 def review(req: ReviewRequest):
-    """全维专家审阅或专项审查 → 结构化结果。"""
+    """常规快速审查或全维专家审阅/专项审查 → 结构化结果。"""
     llm = _make_llm(req.llm_config)
     writer = ChapterWriter(llm, report_type=req.report_type)
     try:
         raw, parsed = writer.expert_review(
             chapter_title=req.chapter_title,
             chapter_text=req.chapter_text,
-            mode=req.mode or "all",
+            mode=req.mode or "fast",
         )
     except LLMError as e:
         raise _map_llm_error(e)
@@ -523,17 +523,29 @@ def review(req: ReviewRequest):
 def _stream_review(writer: ChapterWriter, llm: LLMClient, req: ReviewRequest):
     """SSE 生成器：阶段事件 + 思考事件 + 输出 chunks + 最终解析 review 结果。"""
     try:
+        mode = req.mode or "fast"
         # 1. 阶段事件
+        if mode == "fast":
+            stage_msg = "⚡ 正在执行常规快速体检：校核专有名词称谓、关键数值自洽与底线合规..."
+        elif mode == "compliance":
+            stage_msg = "🔍 正在对照国家政策法规与行业技术规程进行专项合规校核..."
+        elif mode in ("numeric", "numerical"):
+            stage_msg = "🔢 正在提取并复核关键工程技术参数与投资测算自洽性..."
+        elif mode == "technical":
+            stage_msg = "🛠️ 正在进行技术方案可行性与工艺路线专项审校..."
+        else:
+            stage_msg = "🔍 正在对照国家发改委规程与工程底稿进行全维度专家逐句诊断..."
+
         yield _sse_event(json.dumps({
             "type": "stage",
             "stage": "init",
-            "message": "🔍 正在对照国家发改委规程与工程底稿进行合规核查...",
+            "message": stage_msg,
         }, ensure_ascii=False))
 
         prompt, system = writer._build_expert_review_args(
             chapter_title=req.chapter_title,
             chapter_text=req.chapter_text,
-            mode=req.mode or "all",
+            mode=mode,
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
 
@@ -548,7 +560,6 @@ def _stream_review(writer: ChapterWriter, llm: LLMClient, req: ReviewRequest):
                     "chunk": chunk,
                 }, ensure_ascii=False))
 
-        mode = req.mode or "all"
         if mode == "technical":
             parsed = parse_tech_review_result(raw_buffer)
         else:

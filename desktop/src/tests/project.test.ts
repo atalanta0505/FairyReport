@@ -1789,5 +1789,69 @@ describe("Pinia useProjectStore", () => {
       expect(store.batchReviewing).toBe(false);
       expect(store.reviewProgress).toBeNull();
     });
+
+    it("runFullBookReview & runChapterReview: 支持 fast 常规审查与 all 全维精审双模式", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "双模式项目", created_at: "2026-08-25T00:00:00Z" };
+      store.outlineChapters = [{ seq: 1, title: "第一章 概述" }];
+      store.chapters = { 1: "第一章正文..." };
+
+      let capturedMode = "";
+      mockFetch.mockImplementation(async (url, opts) => {
+        const u = String(url);
+        if (u.includes("/writing/review_stream")) {
+          const body = JSON.parse(opts?.body as string);
+          capturedMode = body.mode;
+          return mockSSEResponse([
+            '{"type": "stage", "stage": "init", "message": "核对中..."}',
+            JSON.stringify({
+              type: "done",
+              review: { status: "通过", score: 95, summary: "合格" },
+              raw: "{}",
+            }),
+          ]);
+        }
+        if (u.includes("/reviews/") || u.includes("/full_review")) {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      // 1. runChapterReview 默认 fast 模式
+      await store.runChapterReview(
+        BASE_URL,
+        1,
+        "fast",
+        { api_key: "sk-test", base_url: "http://api", model: "m" },
+      );
+      expect(capturedMode).toBe("fast");
+
+      // 2. runChapterReview 传入 all 模式
+      await store.runChapterReview(
+        BASE_URL,
+        1,
+        "all",
+        { api_key: "sk-test", base_url: "http://api", model: "m" },
+      );
+      expect(capturedMode).toBe("all");
+
+      // 3. runFullBookReview 传入 fast
+      await store.runFullBookReview(
+        BASE_URL,
+        { api_key: "sk-test", base_url: "http://api", model: "m" },
+        true,
+        "fast",
+      );
+      expect(capturedMode).toBe("fast");
+
+      // 4. runFullBookReview 传入 all
+      await store.runFullBookReview(
+        BASE_URL,
+        { api_key: "sk-test", base_url: "http://api", model: "m" },
+        true,
+        "all",
+      );
+      expect(capturedMode).toBe("all");
+    });
   });
 });

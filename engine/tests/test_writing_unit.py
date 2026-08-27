@@ -76,7 +76,7 @@ def test_parse_outline_hierarchy_extracts_h2_h3():
     assert h["h2_sections"][0]["title"] == "1.1 项目概况"
 
 
-def test_build_section_quota_block_contains_budgets():
+def test_build_section_quota_block_contains_budgets_and_sentences():
     hierarchy = {
         "chapter_title": "第二章 测试",
         "h2_sections": [
@@ -86,9 +86,31 @@ def test_build_section_quota_block_contains_budgets():
         ],
     }
     block = _build_section_quota_block(hierarchy, {"h2_sections": hierarchy["h2_sections"], "total_allocated": 1700})
-    assert "结构参考" in block
+    assert "结构参考与小节句数/字数硬控制" in block
     assert "2.1 A" in block
     assert "1,700" in block  # 逗号格式化
+    assert "34~49 句话以内" in block  # 1700/50=34, 1700/35=49
+    assert "以中文句号『。』为准计" in block
+    assert "达到句数上限即行收尾" in block
+
+
+def test_pure_chinese_reasoning_constraint_in_prompts():
+    from engine.app.writing.prompts import (
+        FAST_REVIEW_SYSTEM_PROMPT,
+        FULL_EXPERT_REVIEW_SYSTEM_PROMPT,
+        COMPLIANCE_REVIEW_SYSTEM_PROMPT,
+        NUMERICAL_REVIEW_SYSTEM_PROMPT,
+        _BASE_WRITING_PROMPT,
+    )
+    expected_rule = "内部构思与推理推演过程必须 100% 使用纯中文进行水利与工程咨询专业论证"
+    assert expected_rule in FAST_REVIEW_SYSTEM_PROMPT
+    assert expected_rule in FULL_EXPERT_REVIEW_SYSTEM_PROMPT
+    assert expected_rule in COMPLIANCE_REVIEW_SYSTEM_PROMPT
+    assert expected_rule in NUMERICAL_REVIEW_SYSTEM_PROMPT
+    assert expected_rule in _BASE_WRITING_PROMPT
+    assert "⚡ 常规审查" in FAST_REVIEW_SYSTEM_PROMPT
+    assert "专有名词一致性" in FAST_REVIEW_SYSTEM_PROMPT
+    assert "核心数值指标前后自洽性" in FAST_REVIEW_SYSTEM_PROMPT
 
 
 # ── writer.parse_tech_review_result ──
