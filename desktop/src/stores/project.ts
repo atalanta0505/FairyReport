@@ -964,7 +964,7 @@ export const useProjectStore = defineStore("project", () => {
     writingProgress.value = {
       seq,
       stage: "rag",
-      message: "🔍 正在双源检索工程底稿与标准规程库...",
+      message: "🔍 正在三源检索：工程底稿库 + 行业规程库 + 权威政务联网信息(.gov.cn)...",
       elapsedSeconds: 0,
       thoughtText: "",
     };

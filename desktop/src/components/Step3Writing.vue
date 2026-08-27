@@ -730,8 +730,8 @@ function nextStep() {
                         <span v-else class="stepper-spinner"></span>
                       </div>
                       <div class="stepper-text">
-                        <span class="stepper-title">双源知识检索</span>
-                        <span class="stepper-desc">底稿数据与标准规程库</span>
+                        <span class="stepper-title">三源知识检索</span>
+                        <span class="stepper-desc">底稿数据 + 行业规程 + 权威政务</span>
                       </div>
                     </div>
 
@@ -818,7 +818,7 @@ function nextStep() {
                   <div v-else class="thought-placeholder-card">
                     <div class="placeholder-icon">✨</div>
                     <div class="placeholder-desc">
-                      已提取并锁定本章全层级大纲骨架。大模型正结合双源资料进行工程技术方案论证与指标校核计算，正文到达后将自动进入实时排版打字机输出...
+                      已提取并锁定本章全层级大纲骨架。大模型正结合工程底稿、行业规程与权威政务联网资料进行方案论证与指标校核计算，正文到达后将自动进入实时排版打字机输出...
                     </div>
                   </div>
 
