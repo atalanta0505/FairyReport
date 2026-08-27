@@ -859,6 +859,7 @@ def parse_expert_review_result(raw_output: str) -> dict:
                                 "category": str(it.get("category", "综合诊断")),
                                 "message": str(it.get("message", "")),
                                 "location": str(it.get("location", "")),
+                                "quote": str(it.get("quote", "")).strip(),
                                 "suggestion": str(it.get("suggestion", "")),
                             })
 

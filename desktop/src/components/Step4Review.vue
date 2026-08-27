@@ -224,6 +224,28 @@ const chapterIssuesCount = computed<Record<number, number>>(() => {
   return map;
 });
 
+function getSubheadingIssueCount(seq: number, sub: SubHeading): number {
+  const rev = projectStore.chapterReviews[seq];
+  if (!rev?.issues || rev.issues.length === 0) return 0;
+
+  const subNumMatch = sub.title.match(/^\d+(?:\.\d+)*/);
+  const subNum = subNumMatch ? subNumMatch[0] : null;
+  const cleanSubTitle = sub.title.replace(/^\d+(?:\.\d+)*\s*/, "").trim();
+
+  let count = 0;
+  for (const iss of rev.issues) {
+    const loc = iss.location || "";
+    if (subNum && loc.includes(subNum)) {
+      count++;
+    } else if (cleanSubTitle && loc.includes(cleanSubTitle)) {
+      count++;
+    } else if (iss.quote && cleanSubTitle && iss.quote.includes(cleanSubTitle)) {
+      count++;
+    }
+  }
+  return count;
+}
+
 const chapterGapsCount = computed<Record<number, number>>(() => {
   const map: Record<number, number> = {};
   for (const ch of projectStore.outlineChapters) {
@@ -417,18 +439,6 @@ function isChapterCollapsed(seq: number): boolean {
 function toggleChapterCollapse(seq: number, e?: Event) {
   if (e) e.stopPropagation();
   chapterCollapsedMap.value[seq] = !chapterCollapsedMap.value[seq];
-}
-
-function expandAllChapters() {
-  for (const ch of projectStore.outlineChapters) {
-    chapterCollapsedMap.value[ch.seq] = false;
-  }
-}
-
-function collapseAllChapters() {
-  for (const ch of projectStore.outlineChapters) {
-    chapterCollapsedMap.value[ch.seq] = true;
-  }
 }
 
 async function scrollToChapter(seq: number) {
@@ -679,19 +689,143 @@ function handleDiscardRevision() {
   showMsg("已放弃本次修订结果，恢复原正文。", "info");
 }
 
-// ── 定位问题到正文 ──
-async function locateIssueInCanvas(locationText?: string, chapterSeq?: number) {
-  let targetSeq = chapterSeq;
-  if (!targetSeq && locationText) {
-    const m = locationText.match(/第\s*([一二三四五六七八九十百零\d]+)\s*章/);
+// ── 审阅问题句子级精准定位与呼吸波纹高亮 ──
+async function locateIssueInCanvas(
+  issueOrLocation?: engineApi.ReviewIssue | string,
+  optionalChapterSeq?: number,
+) {
+  let targetSeq = optionalChapterSeq;
+  let quote = "";
+  let location = "";
+  let message = "";
+
+  if (issueOrLocation && typeof issueOrLocation === "object") {
+    targetSeq = issueOrLocation.chapterSeq || targetSeq;
+    quote = (issueOrLocation.quote || "").trim();
+    location = (issueOrLocation.location || "").trim();
+    message = (issueOrLocation.message || "").trim();
+  } else if (typeof issueOrLocation === "string") {
+    location = issueOrLocation.trim();
+  }
+
+  // 从 location 推断 chapterSeq
+  if (!targetSeq && location) {
+    const m = location.match(/第\s*([一二三四五六七八九十百零\d]+)\s*章/);
     if (m) {
       targetSeq = Number(m[1]) || 1;
+    } else {
+      const numM = location.match(/^(\d+)(?:\.\d+)*/);
+      if (numM) {
+        targetSeq = Number(numM[1]) || 1;
+      }
     }
   }
   if (!targetSeq) targetSeq = 1;
 
-  await scrollToChapter(targetSeq);
-  showMsg(`已定位至第 ${targetSeq} 章对应段落`, "info");
+  // 1. 确保在 rich 视图模式并激活章节
+  if (viewMode.value !== "rich") {
+    viewMode.value = "rich";
+    await nextTick();
+    syncAllChaptersHtml();
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  activeChapterSeq.value = targetSeq;
+
+  // 2. 找到对应章节的 canvas DOM 容器
+  const canvasEl = document.getElementById(`chapter-canvas-${targetSeq}`);
+  let targetEl: HTMLElement | null = null;
+
+  if (canvasEl) {
+    // 递归/遍历候选元素：p, h1, h2, h3, h4, h5, h6, tr, li, blockquote, pre, td, th
+    const candidates = Array.from(
+      canvasEl.querySelectorAll<HTMLElement>(
+        "p, h1, h2, h3, h4, h5, h6, tr, li, blockquote, pre, td, th",
+      ),
+    );
+
+    // 匹配策略 A: quote 精确匹配或子串匹配
+    if (quote && quote.length >= 2) {
+      for (const el of candidates) {
+        if (el.textContent && el.textContent.includes(quote)) {
+          targetEl = el;
+          break;
+        }
+      }
+      if (!targetEl && quote.length > 8) {
+        const shortQuote = quote.slice(0, 8);
+        for (const el of candidates) {
+          if (el.textContent && el.textContent.includes(shortQuote)) {
+            targetEl = el;
+            break;
+          }
+        }
+      }
+    }
+
+    // 匹配策略 B: location 标题或小节号匹配
+    if (!targetEl && location) {
+      const cleanLoc = location.replace(/^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*/, "").trim();
+      const locNumMatch = location.match(/^\d+(?:\.\d+)*/);
+      const locNum = locNumMatch ? locNumMatch[0] : null;
+
+      // 优先匹配标题标签
+      for (const el of candidates) {
+        if (/^H[1-6]$/i.test(el.tagName)) {
+          if (cleanLoc && el.textContent?.includes(cleanLoc)) {
+            targetEl = el;
+            break;
+          }
+          if (locNum && el.textContent?.includes(locNum)) {
+            targetEl = el;
+            break;
+          }
+        }
+      }
+      // 其次匹配段落
+      if (!targetEl) {
+        for (const el of candidates) {
+          if (cleanLoc && el.textContent && el.textContent.includes(cleanLoc)) {
+            targetEl = el;
+            break;
+          }
+        }
+      }
+    }
+
+    // 匹配策略 C: message 核心关键词匹配
+    if (!targetEl && message) {
+      const quoteInMsg = message.match(/[“"「]([^”"」]+)[”"」]/);
+      if (quoteInMsg && quoteInMsg[1].length >= 2) {
+        const kw = quoteInMsg[1].trim();
+        for (const el of candidates) {
+          if (el.textContent && el.textContent.includes(kw)) {
+            targetEl = el;
+            break;
+          }
+        }
+      }
+    }
+
+    // 如果是 td/th，提升为 tr
+    if (targetEl && (targetEl.tagName === "TD" || targetEl.tagName === "TH")) {
+      targetEl = (targetEl.closest("tr") as HTMLElement) || targetEl;
+    }
+  }
+
+  if (targetEl) {
+    targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    targetEl.classList.remove("issue-highlight-pulse");
+    void targetEl.offsetWidth; // 强制触发 reflow 播放呼吸动画
+    targetEl.classList.add("issue-highlight-pulse");
+    setTimeout(() => {
+      targetEl?.classList.remove("issue-highlight-pulse");
+    }, 2500);
+    showMsg(`已精准定位至第 ${targetSeq} 章对应问题语句/段落`, "info");
+  } else {
+    // 降级：平滑滚动到章节头部
+    await scrollToChapter(targetSeq);
+    showMsg(`已定位至第 ${targetSeq} 章`, "info");
+  }
 }
 
 // ── 复制全书 Markdown ──
@@ -915,15 +1049,6 @@ function copyFullBookMarkdown() {
             <h4>📑 全书多级目录导航</h4>
             <span class="nav-count">{{ totalChapters }} 章</span>
           </div>
-          <div class="nav-quick-actions">
-            <button class="btn-text-action" @click="expandAllChapters" title="展开全部章节的多级子标题">
-              ⊞ 全部展开
-            </button>
-            <span class="action-divider">|</span>
-            <button class="btn-text-action" @click="collapseAllChapters" title="收起全部章节的多级子标题">
-              ⊟ 全部收起
-            </button>
-          </div>
         </div>
 
         <div class="outline-tree-scrollable">
@@ -953,16 +1078,18 @@ function copyFullBookMarkdown() {
               </div>
 
               <div class="row-right">
-                <!-- 预警小黄点 / 小红点 -->
+                <!-- 预警角标 -->
                 <span
                   v-if="(chapterIssuesCount[ch.seq] || 0) > 0"
-                  class="warning-dot"
+                  class="warning-badge-pill"
                   :title="`第 ${ch.seq} 章存在 ${chapterIssuesCount[ch.seq]} 处待优化诊断`"
-                ></span>
+                >
+                  ⚠️ {{ chapterIssuesCount[ch.seq] }}
+                </span>
                 <span
                   v-else-if="projectStore.chapterReviews[ch.seq]?.status === '通过'"
                   class="pass-dot"
-                  title="第该章专家体检合格"
+                  title="该章专家体检合格"
                 >✓</span>
 
                 <button
@@ -996,6 +1123,13 @@ function copyFullBookMarkdown() {
                 >
                   <span class="sub-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
                   <span class="sub-text">{{ sub.title }}</span>
+                  <span
+                    v-if="getSubheadingIssueCount(ch.seq, sub) > 0"
+                    class="sub-issue-badge"
+                    :title="`该小节存在 ${getSubheadingIssueCount(ch.seq, sub)} 处审阅问题`"
+                  >
+                    ⚠️ {{ getSubheadingIssueCount(ch.seq, sub) }}
+                  </span>
                 </div>
               </div>
             </transition>
@@ -1379,7 +1513,7 @@ function copyFullBookMarkdown() {
                   <div class="issue-actions-row">
                     <button
                       class="btn-text-link"
-                      @click="locateIssueInCanvas(issue.location, issue.chapterSeq)"
+                      @click="locateIssueInCanvas(issue)"
                     >
                       🎯 点击定位正文段落 &rarr;
                     </button>
@@ -2156,35 +2290,28 @@ function copyFullBookMarkdown() {
   padding: 1px 6px;
   border-radius: 10px;
 }
-.nav-quick-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.btn-text-action {
-  background: transparent;
-  border: none;
-  font-size: 11px;
-  color: #2563eb;
-  cursor: pointer;
-  padding: 2px 4px;
-}
-.btn-text-action:hover {
-  text-decoration: underline;
-}
-.action-divider {
-  color: #cbd5e1;
-  font-size: 11px;
-}
-
 .outline-tree-scrollable {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
+.outline-tree-scrollable::-webkit-scrollbar {
+  width: 5px;
+}
+.outline-tree-scrollable::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.outline-tree-scrollable::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 .empty-outline-tip {
   padding: 20px;
   text-align: center;
@@ -2259,11 +2386,18 @@ function copyFullBookMarkdown() {
   align-items: center;
   gap: 6px;
 }
-.warning-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #f59e0b;
+.warning-badge-pill {
+  font-size: 10px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  padding: 1px 5px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
 }
 .pass-dot {
   font-size: 11px;
@@ -2282,25 +2416,11 @@ function copyFullBookMarkdown() {
   color: #475569;
 }
 
-/* 子标题层级与独立平滑滚动 */
+/* 子标题层级：完全展开由外层单一定高滚动条滚动，杜绝次级滚动条 */
 .subheadings-subtree {
   padding: 2px 0 6px 0;
   background: #fafafa;
   border-top: 1px solid #f1f5f9;
-  max-height: 280px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
-}
-.subheadings-subtree::-webkit-scrollbar {
-  width: 4px;
-}
-.subheadings-subtree::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
-}
-.subheadings-subtree::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
 }
 .subheading-item-row {
   padding: 4px 10px 4px 28px;
@@ -2330,10 +2450,25 @@ function copyFullBookMarkdown() {
 .sub-bullet {
   font-size: 8px;
   opacity: 0.6;
+  flex-shrink: 0;
 }
 .sub-text {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub-issue-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  padding: 0 4px;
+  border-radius: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
   white-space: nowrap;
 }
 
@@ -2539,6 +2674,30 @@ function copyFullBookMarkdown() {
   0% {
     background-color: #fef08a;
     box-shadow: 0 0 0 4px #fde047;
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* 审阅问题精准定位句子级呼吸波纹高亮 (持续 2.5s) */
+.issue-highlight-pulse {
+  animation: issuePulse 2.5s ease-out forwards;
+  border-radius: 4px;
+}
+@keyframes issuePulse {
+  0% {
+    background-color: rgba(251, 191, 36, 0.6);
+    box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.4);
+  }
+  30% {
+    background-color: rgba(251, 191, 36, 0.45);
+    box-shadow: 0 0 0 8px rgba(251, 191, 36, 0.25);
+  }
+  65% {
+    background-color: rgba(251, 191, 36, 0.25);
+    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.15);
   }
   100% {
     background-color: transparent;

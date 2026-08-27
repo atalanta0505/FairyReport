@@ -182,6 +182,7 @@ FULL_EXPERT_REVIEW_SYSTEM_PROMPT = """\
       "category": "合规性" | "数值计算" | "技术方案" | "逻辑结构" | "文字表达",
       "message": "问题描述",
       "location": "问题所在段落或小节标题",
+      "quote": "问题所在具体语句/关键词摘录",
       "suggestion": "具体改进建议"
     }
   ],
@@ -229,6 +230,7 @@ COMPLIANCE_REVIEW_SYSTEM_PROMPT = """\
       "category": "合规性",
       "message": "合规问题说明",
       "location": "涉及段落或条款",
+      "quote": "原文具体语句摘录",
       "suggestion": "合规整改建议"
     }
   ],
@@ -263,6 +265,7 @@ NUMERICAL_REVIEW_SYSTEM_PROMPT = """\
       "category": "数值计算",
       "message": "数值矛盾或量纲错误说明",
       "location": "涉及小节或表格",
+      "quote": "涉及的具体数据或语句摘录",
       "suggestion": "数据修正建议"
     }
   ],

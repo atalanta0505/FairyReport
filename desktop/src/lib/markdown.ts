@@ -152,29 +152,29 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
   // 4. 标题与加粗/引用/表格粘连拆解（如 ### 1.1.1 建设地点**项目名称**）
   text = text.replace(/(#{1,6}\s+[^\n*|【]*?)\s*(\*\*|【源|\|)/g, "$1\n\n$2");
 
-  // 5. 若传入已知大纲标题库，进行精确前缀断行（第一道防线）
+  // 5. 若传入已知大纲标题库，仅在标题后紧跟标点符号时才执行断行拆分（第一道防线）
   if (knownHeadings && Array.isArray(knownHeadings)) {
     for (const h of knownHeadings) {
       if (!h || typeof h !== "string") continue;
       const cleanH = h.replace(/^#+\s*/, "").trim();
       if (!cleanH) continue;
       const escaped = cleanH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // 匹配形如 ### 1.4.1 主要研究结论经研究论证， -> ### 1.4.1 主要研究结论\n\n经研究论证，
-      const reg = new RegExp(`^(#{1,6}\\s+(?:\\d+(?:\\.\\d+)*\\s+)?${escaped})\\s*([^\\n]+)$`, "gm");
-      text = text.replace(reg, "$1\n\n$2");
+      // 匹配形如 ### 1.4.1 主要研究结论：经研究论证， -> ### 1.4.1 主要研究结论\n\n经研究论证，
+      const reg = new RegExp(`^(#{1,6}\\s+(?:\\d+(?:\\.\\d+)*\\s+)?${escaped})\\s*([，。：:—\\-\\u2014\\u2013]+[^\\n]*)$`, "gm");
+      text = text.replace(reg, (_match, hPart, restPart) => {
+        const cleanRest = restPart.replace(/^[:：—\-\u2014\u2013,，。\s]+/, "").trim();
+        return cleanRest ? `${hPart}\n\n${cleanRest}` : hPart;
+      });
     }
   }
 
-  // 6. 工程咨询行业特征小节标题与正文粘连拆解（第二道防线）
+  // 6. 仅在单行标题后紧跟冒号/句号/破折号等明显正文标点时才执行标题正文拆分（如 ### 1.1.1 建设地点：本项目位于...）
   text = text.replace(
-    /(#{1,6}\s+\d+(?:\.\d+)*\s+[\u4e00-\u9fa5\w、—\-\/（）()]{1,20}?(?:概况|背景|进展|情况|分析|方案|建议|结论|目标|任务|内容|规模|地点|工期|来源|估算|指标|信息|依据|政策|规范|成果|其他|符合性|衔接性|必要性|适当时|要求|保障|评估|设计|组织|测算|预算|说明|构成|论证|原则|措施|布局|标准|选址|模式|效益|影响|评价|预案|附件|附表|附图))([，。：:（(《“\u4e00-\u9fa5].*)$/gm,
-    "$1\n\n$2"
-  );
-
-  // 7. 最低级标题（H3/H4）与中文句式词粘连拆解（解决 ### 1.1.6 主要技术经济指标项目主要技术经济指标...）
-  text = text.replace(
-    /(#{1,6}\s+\d+(?:\.\d+)*\s+[^\s#\n，。！？；]{2,20}?)\s*(项目|本项目|该项目|本工程|工程|根据|按照|依据|经查|经核实|经测算|经评估|经分析|经过|为贯彻|为实现|为满足|为了?|为进一步|总投资|总用地|总建筑面积|规划建设|建设内容|建设规模为|建设地点位于|主要建设内容|主要指标如下|主要包括|涵盖|包含|如下表|如下所示|如下：|由|针对)([\u4e00-\u9fa5])/g,
-    "$1\n\n$2$3"
+    /^(#{1,6}\s+[^\n:：。—\-\u2014\u2013]{2,50}?)\s*([:：。—\-\u2014\u2013]+)\s*([^\n]+)$/gm,
+    (_match, titlePart, _punct, rest) => {
+      const cleanRest = rest.replace(/^[:：。—\-\u2014\u2013\s]+/, "").trim();
+      return cleanRest ? `${titlePart}\n\n${cleanRest}` : titlePart;
+    }
   );
 
   return text;

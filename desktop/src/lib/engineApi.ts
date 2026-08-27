@@ -506,6 +506,7 @@ export interface ReviewIssue {
   category: string;
   message: string;
   location?: string;
+  quote?: string;
   suggestion?: string;
   chapterSeq?: number;
 }

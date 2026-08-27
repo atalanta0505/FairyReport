@@ -45,18 +45,6 @@ function toggleChapterCollapse(seq: number, event?: MouseEvent) {
   collapsedChapters.value[seq] = !collapsedChapters.value[seq];
 }
 
-function expandAllChapters() {
-  for (const ch of projectStore.outlineChapters) {
-    collapsedChapters.value[ch.seq] = false;
-  }
-}
-
-function collapseAllChapters() {
-  for (const ch of projectStore.outlineChapters) {
-    collapsedChapters.value[ch.seq] = true;
-  }
-}
-
 function showMsg(text: string, type: "success" | "error" = "success") {
   actionMessage.value = { type, text };
   setTimeout(() => {
@@ -464,19 +452,6 @@ function nextStep() {
             <div class="stat-item">
               <span class="stat-label">总字数</span>
               <span class="stat-val">{{ totalWordCount.toLocaleString() }} 字</span>
-            </div>
-          </div>
-          <!-- 目录展开/收起全局快捷操作栏 -->
-          <div class="sidebar-collapse-toolbar">
-            <span class="collapse-hint-label">目录层级导航</span>
-            <div class="collapse-btn-group">
-              <button class="btn-xs-text" @click="expandAllChapters" title="展开所有章节的子标题目录">
-                ⊞ 全部展开
-              </button>
-              <span class="collapse-btn-divider">|</span>
-              <button class="btn-xs-text" @click="collapseAllChapters" title="收起所有章节的子标题目录">
-                ⊟ 全部收起
-              </button>
             </div>
           </div>
         </div>

@@ -260,7 +260,7 @@ describe("Markdown 解析与排版工具", () => {
 
   describe("Markdown 预处理与标题断行规范化 (normalizeMarkdown)", () => {
     it("自动解开粘连的各级标题", () => {
-      const glued = "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称\n本工程位于长江中下游流域。";
+      const glued = "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称\n\n本工程位于长江中下游流域。";
       const normalized = normalizeMarkdown(glued);
       expect(normalized).toContain("# 第一章 概述\n\n## 1.1 项目概况\n\n### 1.1.1 项目名称\n\n本工程位于长江中下游流域。");
     });
@@ -305,60 +305,46 @@ describe("Markdown 解析与排版工具", () => {
       expect(normTable).toContain("| 1 | 产能 |");
     });
 
-    it("最低级标题（H3/H4）与中文句式词粘连自动拆解", () => {
-      const glued1 = "### 1.1.6 主要技术经济指标项目主要技术经济指标如下表所示：";
-      expect(normalizeMarkdown(glued1)).toBe("### 1.1.6 主要技术经济指标\n\n项目主要技术经济指标如下表所示：");
-
-      const glued2 = "### 1.1.7 绩效目标本项目绩效目标涵盖生态效益与经济效益。";
-      expect(normalizeMarkdown(glued2)).toBe("### 1.1.7 绩效目标\n\n本项目绩效目标涵盖生态效益与经济效益。");
-
-      const glued3 = "### 1.2.1 基本信息项目单位为省水利投资集团有限公司。";
-      expect(normalizeMarkdown(glued3)).toBe("### 1.2.1 基本信息\n\n项目单位为省水利投资集团有限公司。");
-
-      const glued4 = "### 1.1.3 建设规模根据批复规划，总用地面积为 500 亩。";
-      expect(normalizeMarkdown(glued4)).toBe("### 1.1.3 建设规模\n\n根据批复规划，总用地面积为 500 亩。");
-
-      const glued5 = "### 1.1.4 投资估算总投资约为 3.5 亿元。";
-      expect(normalizeMarkdown(glued5)).toBe("### 1.1.4 投资估算\n\n总投资约为 3.5 亿元。");
+    it("复合章节小节标题完整保留为单行（杜绝掉字与断行 Bug）", () => {
+      // 8.1 经济影响分析
+      expect(normalizeMarkdown("### 8.1 经济影响分析")).toBe("### 8.1 经济影响分析");
+      // 1.3.3 主要标准规范
+      expect(normalizeMarkdown("### 1.3.3 主要标准规范")).toBe("### 1.3.3 主要标准规范");
+      // 1.1.2 项目建设目标与任务
+      expect(normalizeMarkdown("### 1.1.2 项目建设目标与任务")).toBe("### 1.1.2 项目建设目标与任务");
+      // 1.4.1 主要研究结论
+      expect(normalizeMarkdown("### 1.4.1 主要研究结论")).toBe("### 1.4.1 主要研究结论");
+      // 2.2.1 规划政策符合性分析
+      expect(normalizeMarkdown("### 2.2.1 规划政策符合性分析")).toBe("### 2.2.1 规划政策符合性分析");
+      // 1.1.4 投资估算与资金筹措方案
+      expect(normalizeMarkdown("### 1.1.4 投资估算与资金筹措方案")).toBe("### 1.1.4 投资估算与资金筹措方案");
     });
 
-    it("工程咨询行业特征小节标题词法自动解耦（1.4.1、1.4.2、2.2.1、2.2.2、2.2.4、2.3.1、2.3.4等）", () => {
-      // 1.4.1 主要研究结论
-      const s1 = "### 1.4.1 主要研究结论经研究论证，本项目符合国家重大基础设施建设规划。";
+    it("单行标题紧跟正文标点时精确拆分为独立标题与正文段落", () => {
+      // 冒号拆分
+      const s1 = "### 1.4.1 主要研究结论：经研究论证，本项目符合国家重大基础设施建设规划。";
       expect(normalizeMarkdown(s1)).toBe("### 1.4.1 主要研究结论\n\n经研究论证，本项目符合国家重大基础设施建设规划。");
 
-      // 1.4.2 问题与建议
-      const s2 = "### 1.4.2 问题与建议重点关注问题：第一，资金落实进度；第二，征地拆迁。";
+      // 句号拆分
+      const s2 = "### 1.4.2 问题与建议。重点关注问题：第一，资金落实进度；第二，征地拆迁。";
       expect(normalizeMarkdown(s2)).toBe("### 1.4.2 问题与建议\n\n重点关注问题：第一，资金落实进度；第二，征地拆迁。");
 
-      // 2.2.1 与经济社会发展规划衔接性
-      const s3 = "### 2.2.1 与经济社会发展规划衔接性国家“十四五”发展规划明确指出要加快现代水网建设。";
+      // 破折号拆分
+      const s3 = "### 2.2.1 与经济社会发展规划衔接性——国家“十四五”发展规划明确指出要加快现代水网建设。";
       expect(normalizeMarkdown(s3)).toBe("### 2.2.1 与经济社会发展规划衔接性\n\n国家“十四五”发展规划明确指出要加快现代水网建设。");
 
-      // 2.2.2 与区域规划衔接性
-      const s4 = "### 2.2.2 与区域规划衔接性从区域协同发展格局来看，本工程是关键节点。";
-      expect(normalizeMarkdown(s4)).toBe("### 2.2.2 与区域规划衔接性\n\n从区域协同发展格局来看，本工程是关键节点。");
-
-      // 2.2.4 与国土空间规划衔接性
-      const s5 = "### 2.2.4 与国土空间规划衔接性《利辛县国土空间总体规划》已将本项目列入重点工程名录。";
-      expect(normalizeMarkdown(s5)).toBe("### 2.2.4 与国土空间规划衔接性\n\n《利辛县国土空间总体规划》已将本项目列入重点工程名录。");
-
-      // 2.3.1 宏观层面必要性
-      const s6 = "### 2.3.1 宏观层面必要性从宏观国家安全与水资源配置战略出发，项目建设势在必行。";
-      expect(normalizeMarkdown(s6)).toBe("### 2.3.1 宏观层面必要性\n\n从宏观国家安全与水资源配置战略出发，项目建设势在必行。");
-
-      // 2.3.4 建设时机适当时
-      const s7 = "### 2.3.4 建设时机适当时当前推进时机成熟，前期准备工作已全部就绪。";
-      expect(normalizeMarkdown(s7)).toBe("### 2.3.4 建设时机适当时\n\n当前推进时机成熟，前期准备工作已全部就绪。");
+      // 英文冒号拆分
+      const s4 = "### 1.1.1 建设地点: 本项目位于武汉市江夏区。";
+      expect(normalizeMarkdown(s4)).toBe("### 1.1.1 建设地点\n\n本项目位于武汉市江夏区。");
     });
 
-    it("支持已知大纲标题库精确断行与带序号匹配", () => {
-      const customGlued = "### 1.1.6 特殊定制标题这里是自定义的正文开始...";
+    it("支持已知大纲标题库配合正文标点精确断行", () => {
+      const customGlued = "### 1.1.6 特殊定制标题：这里是自定义的正文开始...";
       const knownHeadings = ["1.1.6 特殊定制标题", "特殊定制标题"];
       const normalized = normalizeMarkdown(customGlued, knownHeadings);
       expect(normalized).toBe("### 1.1.6 特殊定制标题\n\n这里是自定义的正文开始...");
 
-      const gluedWithoutNumInHeading = "### 1.4.1 主要研究结论经深入评估...";
+      const gluedWithoutNumInHeading = "### 1.4.1 主要研究结论：经深入评估...";
       const normWithOnlyTitle = normalizeMarkdown(gluedWithoutNumInHeading, ["主要研究结论"]);
       expect(normWithOnlyTitle).toBe("### 1.4.1 主要研究结论\n\n经深入评估...");
     });
@@ -372,7 +358,7 @@ describe("Markdown 解析与排版工具", () => {
     it("粘连标题在 extractSubHeadings 中被精准拆分为独立纯净标题（不含正文）", () => {
       const glued = [
         "# 第一章 概述## 1.1 项目概况### 1.1.1 项目名称",
-        "### 1.1.6 主要技术经济指标项目主要技术经济指标如下表所示：",
+        "### 1.1.6 主要技术经济指标：项目主要技术经济指标如下表所示：",
         "| 序号 | 指标 || --- | --- || 1 | 库容 |",
       ].join("\n");
 
@@ -386,7 +372,7 @@ describe("Markdown 解析与排版工具", () => {
     });
 
     it("粘连标题与单行表格在 markdownToHtml 中被正确渲染为独立 HTML 标签与表格", () => {
-      const glued = "### 1.1.6 主要技术经济指标项目主要技术经济指标如下：| 序号 | 指标 || --- | --- || 1 | 投资 |";
+      const glued = "### 1.1.6 主要技术经济指标：项目主要技术经济指标如下：| 序号 | 指标 || --- | --- || 1 | 投资 |";
       const html = markdownToHtml(glued, 1);
       expect(html).toContain('<h3 id="h-ch1-idx0">1.1.6 主要技术经济指标</h3>');
       expect(html).toContain('<p>项目主要技术经济指标如下：</p>');
@@ -446,9 +432,9 @@ describe("Markdown 解析与排版工具", () => {
       const knownHeadings = extractOutlineHeadings(outlineMd);
 
       const chapterText = [
-        "### 1.4.1 主要研究结论经系统论证，各项指标均满足要求。",
-        "### 1.4.2 问题与建议重点建议：抓紧前期审批。",
-        "### 2.2.1 与经济社会发展规划衔接性符合省市一体化战略。",
+        "### 1.4.1 主要研究结论：经系统论证，各项指标均满足要求。",
+        "### 1.4.2 问题与建议：重点建议：抓紧前期审批。",
+        "### 2.2.1 与经济社会发展规划衔接性：符合省市一体化战略。",
       ].join("\n");
 
       const normalized = normalizeMarkdown(chapterText, knownHeadings);
