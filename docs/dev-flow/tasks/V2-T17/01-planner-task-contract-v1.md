@@ -1,8 +1,10 @@
 # 任务合同 V2-T17 v1 — 项目资料向量化摄取模型本地化加载与异常容错增强
 
-- 状态：READY_FOR_MAKER（2026-08-27 产品负责人报告上传项目资料卡顿，排查定位完成）
+- 状态：ACCEPTED（2026-08-27 Checker 独立验收通过，锁定候选 SHA `3f84c2ddd9561fef1b80ecd6b349f85da33d55a5`）
 - 依据：用户反馈 Step 1 上传资料时界面长时间卡在「正在向量化摄取...」与「文件解析与分块向量化入库中，请稍候...」。排查发现 FastEmbed 在 Windows Temp 临时目录中的 ONNX 模型文件下载中断导致 `NO_SUCHFILE` 损坏。
-- 精确起始 SHA：`b8ff383bca9bc255df27d5320ee13589b25208f3`
+- 精确起始 SHA：`205b3003360b3911c48ceecc5c37f68e4279ddcb`
+- 候选交付 SHA：`3f84c2ddd9561fef1b80ecd6b349f85da33d55a5`
+- 验收报告：`docs/dev-flow/tasks/V2-T17/rounds/01/checker-report.md` (PASS)
 - 工作树门禁：`git status --short` 必须干净
 
 ---
