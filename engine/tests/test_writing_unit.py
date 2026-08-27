@@ -15,17 +15,19 @@ from engine.app.writing.writer import (
 
 
 # ── refs.strip_fabricated_labels ──
-def test_strip_fabricated_labels_keeps_valid_replaces_fabricated():
+def test_strip_fabricated_labels_keeps_valid_strips_fabricated():
     rag = "【源:policy.md】: 政策内容\n\n【网:示例】: 网页内容"
     body = "正文【源:policy.md】引用，【源:fake.docx】编造标签。"
     cleaned = strip_fabricated_labels(body, rag)
     assert "【源:policy.md】" in cleaned  # 保留有效
     assert "【源:fake.docx】" not in cleaned  # 剥离编造
-    assert "[Z]" in cleaned  # 替换为 [Z]
+    assert "[Z]" not in cleaned  # 彻底消灭孤立 [Z]
 
 
-def test_strip_fabricated_labels_empty_rag_noop():
-    assert strip_fabricated_labels("正文【源:x】", "") == "正文【源:x】"
+def test_strip_fabricated_labels_empty_rag():
+    cleaned = strip_fabricated_labels("正文【源:fake.docx】", "")
+    assert "【源:fake.docx】" not in cleaned
+    assert "[Z]" not in cleaned
 
 
 # ── writer._allocate_section_budgets（移植等价）──
@@ -264,7 +266,7 @@ def test_normalize_chapter_markdown_heading_separation_and_skeleton():
     assert normalize_chapter_markdown(raw5) == "### 1.1.3 建设内容\n\n本项目建设内容包含泵站与涵闸。"
 
 
-# ── rag.query_rag 复合检索 ──
+# ── rag.query_rag 智能检索词提炼 ──
 def test_query_rag_composite_query(monkeypatch):
     from engine.app.writing.rag import query_rag
     from engine.app.writing import web_search
@@ -278,19 +280,19 @@ def test_query_rag_composite_query(monkeypatch):
     monkeypatch.setattr(web_search, "search_gov_web", stub_search)
 
     res = query_rag(
-        project_name="汉江水利枢纽",
-        query_text="第一章 概述",
+        project_name="汉江水利枢纽建设工程可行性研究报告",
+        query_text="第二章 项目建设背景与生态保护规划符合性",
         include_generic=False,
         include_web=True,
-        topic="生态防洪工程",
+        topic="生态防洪保护",
         report_name="汉江水利枢纽",
     )
     assert len(captured_web_query) == 1
     q = captured_web_query[0]
     assert "汉江水利枢纽" in q
-    assert "生态防洪工程" in q
-    assert "第一章 概述" in q
-    assert "产业政策 规程 建设方案" in q
+    # 验证公文噪音已被剥离
+    assert "可行性研究报告" not in q
+    assert "第二章" not in q
     assert "【网:权威报告】" in res
 
 

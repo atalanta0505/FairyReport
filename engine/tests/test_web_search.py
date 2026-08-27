@@ -1,17 +1,22 @@
 """
-权威政务与智库联网检索单元测试 — 覆盖免 Key 搜索解析、域名白黑名单过滤、异常熔断降级与三源 RAG 融合。
+权威政务与智库联网检索单元测试 — 覆盖百度第一优先搜索解析、自媒体黑名单精准过滤、智能检索词提炼与标准引用体系。
 """
 import httpx
 import pytest
 
 from engine.app.writing import web_search as ws_mod
-from engine.app.writing.rag import query_rag
+from engine.app.writing.rag import extract_smart_web_query, query_rag
 from engine.app.writing.refs import (
     _extract_url_for_label,
+    build_chapter_ref_section,
     extract_chapter_refs,
+    global_assign_ref_numbers,
     strip_fabricated_labels,
 )
 from engine.app.writing.web_search import (
+    BLACKLIST_DOMAINS,
+    _parse_baidu_html,
+    _search_baidu,
     clean_snippet,
     clean_title,
     enhance_gov_query,
@@ -32,69 +37,68 @@ def reset_transport():
 
 
 # ═══════════════════════════════════════════════════════════════
-# 1. 域名与 URL 权威性白名单/黑名单判定
+# 1. 域名与 URL 黑名单严格拦截与广泛采信判定
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_is_authoritative_domain_whitelist_suffixes():
-    # .gov.cn 各级政务网站
+def test_is_authoritative_domain_accepted_sources():
+    # 1. 政府与公共机构
     assert is_authoritative_domain("www.gov.cn")
     assert is_authoritative_domain("ndrc.gov.cn")
-    assert is_authoritative_domain("zcfb.ndrc.gov.cn")
-    assert is_authoritative_domain("mof.gov.cn")
     assert is_authoritative_domain("mee.gov.cn")
-    assert is_authoritative_domain("beijing.gov.cn")
     assert is_authoritative_domain("samr.gov.cn")
 
-    # .edu.cn 高校智库
+    # 2. 高校与智库
     assert is_authoritative_domain("tsinghua.edu.cn")
     assert is_authoritative_domain("pku.edu.cn")
     assert is_authoritative_domain("www.zju.edu.cn")
 
-    # .org.cn 行业学会协会与标准组织
+    # 3. 行业协会与国家标准组织
     assert is_authoritative_domain("cnea.org.cn")
     assert is_authoritative_domain("cnis.org.cn")
-    assert is_authoritative_domain("csre.org.cn")
+    assert is_authoritative_domain("std.samr.gov.cn")
 
-
-def test_is_authoritative_domain_whitelist_portals():
+    # 4. 行业权威平台、企业公示与门户
     assert is_authoritative_domain("news.cn")
-    assert is_authoritative_domain("www.news.cn")
     assert is_authoritative_domain("people.com.cn")
-    assert is_authoritative_domain("xinhuanet.com")
-    assert is_authoritative_domain("cctv.com")
-    assert is_authoritative_domain("ce.cn")
-    assert is_authoritative_domain("chinanews.com.cn")
-    assert is_authoritative_domain("qstheory.cn")
-    assert is_authoritative_domain("scio.gov.cn")
+    assert is_authoritative_domain("chinanews.com")
+    assert is_authoritative_domain("industry-standard.cn")
+    assert is_authoritative_domain("enterprise-portal.com")
 
 
 def test_is_authoritative_domain_blacklist_rejections():
-    # 自媒体/论坛/非权威网站必须严格剔除
+    # 严格过滤自媒体、论坛与非权威博客
+    for bad in BLACKLIST_DOMAINS:
+        assert not is_authoritative_domain(bad)
+        assert not is_authoritative_domain(f"www.{bad}")
+        assert not is_authoritative_domain(f"sub.{bad}")
+
     assert not is_authoritative_domain("zhihu.com")
-    assert not is_authoritative_domain("www.zhihu.com")
     assert not is_authoritative_domain("zhuanlan.zhihu.com")
-    assert not is_authoritative_domain("sohu.com")
-    assert not is_authoritative_domain("163.com")
-    assert not is_authoritative_domain("weibo.com")
-    assert not is_authoritative_domain("baijiahao.baidu.com")
-    assert not is_authoritative_domain("toutiao.com")
-    assert not is_authoritative_domain("bilibili.com")
     assert not is_authoritative_domain("csdn.net")
+    assert not is_authoritative_domain("blog.csdn.net")
+    assert not is_authoritative_domain("baijiahao.baidu.com")
     assert not is_authoritative_domain("xiaohongshu.com")
     assert not is_authoritative_domain("mp.weixin.qq.com")
     assert not is_authoritative_domain("tieba.baidu.com")
-    assert not is_authoritative_domain("baidu.com")
+    assert not is_authoritative_domain("zhidao.baidu.com")
+    assert not is_authoritative_domain("wenku.baidu.com")
+    assert not is_authoritative_domain("toutiao.com")
+    assert not is_authoritative_domain("jianshu.com")
+    assert not is_authoritative_domain("sohu.com")
+    assert not is_authoritative_domain("163.com")
 
 
 def test_is_authoritative_url():
     assert is_authoritative_url("https://www.ndrc.gov.cn/xxgk/zcfb/tz/202303/t20230324_1352467.html")
     assert is_authoritative_url("http://www.gov.cn/zhengce/content/2022-01/24/content_5669984.htm")
-    assert is_authoritative_url("https://www.news.cn/fortune/2023-01/01/c_123.htm")
+    assert is_authoritative_url("https://std.samr.gov.cn/gb/search/gbDetailed?id=123")
+    assert is_authoritative_url("https://www.cnea.org.cn/reports/2023.pdf")
 
-    # 非法或自媒体 URL
+    # 非法或黑名单 URL
     assert not is_authoritative_url("https://zhuanlan.zhihu.com/p/123456")
     assert not is_authoritative_url("https://baijiahao.baidu.com/s?id=987654")
+    assert not is_authoritative_url("https://blog.csdn.net/user/article/123")
     assert not is_authoritative_url("ftp://ndrc.gov.cn/file.pdf")
     assert not is_authoritative_url("")
     assert not is_authoritative_url("invalid_url")
@@ -137,111 +141,136 @@ def test_format_web_item_standard_structure():
 
 
 def test_enhance_gov_query():
-    assert "site:gov.cn" in enhance_gov_query("节能减排技术方案")
-    assert enhance_gov_query("第二章 项目建设背景") == "项目建设背景 site:gov.cn"
-    # 已包含 site: 或 gov.cn 时不重复附加
-    assert enhance_gov_query("ndrc.gov.cn 产业政策") == "ndrc.gov.cn 产业政策"
+    assert enhance_gov_query("第二章 项目建设背景与必要性") == "项目建设背景与必要性"
+    assert enhance_gov_query("第1章 概述") == "概述"
+    assert enhance_gov_query("节能减排技术方案") == "节能减排技术方案"
 
 
 # ═══════════════════════════════════════════════════════════════
-# 3. 免 Key 搜索引擎 HTML 解析测试
+# 3. 百度第 1 优先免 Key 搜索与 HTML 解析测试
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_bing_html_parsing_and_authority_filtering():
-    fake_bing_html = """
+def test_baidu_html_parsing_and_blacklist_filtering():
+    fake_baidu_html = """
     <html>
       <body>
-        <ol id="b_results">
-          <li class="b_algo">
-            <h2><a href="https://www.ndrc.gov.cn/xxgk/zcfb/tz/202201/t20220124_1312520.html">十四五节能减排综合工作方案 - 国家发展改革委</a></h2>
-            <div class="b_caption"><p>国家发改委关于印发十四五节能减排综合工作方案的通知，部署十大重点工程。</p></div>
-          </li>
-          <li class="b_algo">
-            <h2><a href="https://zhuanlan.zhihu.com/p/123456">深度解读节能减排工作方案 - 知乎</a></h2>
-            <div class="b_caption"><p>个人博客分析与解读节能减排细节。</p></div>
-          </li>
-          <li class="b_algo">
-            <h2><a href="http://www.gov.cn/zhengce/2023-03/content.htm">国务院关于推进绿色低碳发展的指导意见 - 中国政府网</a></h2>
-            <div class="b_caption"><p>推进产业结构绿色转型升级，加强资源节约集约利用。</p></div>
-          </li>
-        </ol>
+        <div id="content_left">
+          <div class="result c-container xpath-log" data-tools='{"title":"制革及毛皮加工工业水污染排放标准","url":"https://www.mee.gov.cn/ywgz/fgbz/bz/bzwb/shjbh/gwjhb/201312/t20131230_265691.shtml"}'>
+            <h3 class="c-title t">
+              <a href="https://www.mee.gov.cn/ywgz/fgbz/bz/bzwb/shjbh/gwjhb/201312/t20131230_265691.shtml">
+                <em>制革</em>及毛皮加工工业水污染物排放标准(GB 30486-2013)
+              </a>
+            </h3>
+            <div class="c-abstract">
+              本标准规定了制革及毛皮加工工业企业水污染物排放限值、监测和监控要求。
+            </div>
+          </div>
+
+          <div class="result c-container" data-tools='{"title":"制革废水处理知乎讨论","url":"https://zhuanlan.zhihu.com/p/888999"}'>
+            <h3 class="c-title t">
+              <a href="https://zhuanlan.zhihu.com/p/888999">制革废水深度处理经验分享 - 知乎</a>
+            </h3>
+            <div class="c-abstract">知乎个人专栏文章...</div>
+          </div>
+
+          <div class="result c-container">
+            <h3 class="c-title t">
+              <a href="https://baijiahao.baidu.com/s?id=123456">百家号皮革产业分析</a>
+            </h3>
+            <div class="c-abstract">自媒体营销号文章...</div>
+          </div>
+
+          <div class="result c-container" data-tools='{"title":"利辛县国民经济和社会发展第十四个五年规划纲要","url":"http://www.lixin.gov.cn/content/detail/1234.html"}'>
+            <h3 class="c-title t">
+              <a href="http://www.lixin.gov.cn/content/detail/1234.html">利辛县国民经济和社会发展第十四个五年规划纲要</a>
+            </h3>
+            <div class="c-abstract">
+              利辛县围绕现代轻纺服装、牛皮革及肉牛全产业链打造产业集群。
+            </div>
+          </div>
+        </div>
       </body>
     </html>
     """
 
     def handler(request: httpx.Request):
-        return httpx.Response(200, text=fake_bing_html)
+        assert "baidu.com/s" in str(request.url)
+        return httpx.Response(200, text=fake_baidu_html)
 
     set_transport(httpx.MockTransport(handler))
 
-    res = search_gov_web("节能减排", max_results=5)
-    assert "【网:十四五节能减排综合工作方案" in res
-    assert "https://www.ndrc.gov.cn/xxgk/zcfb/tz/202201/t20220124_1312520.html" in res
-    assert "【网:国务院关于推进绿色低碳发展的指导意见" in res
-    assert "http://www.gov.cn/zhengce/2023-03/content.htm" in res
-    # 严格剔除知乎
+    res = search_gov_web("利辛县 牛皮革 环保标准", max_results=5)
+    assert "【网:制革及毛皮加工工业水污染物排放标准(GB 30486-2013)】" in res
+    assert "https://www.mee.gov.cn/ywgz/fgbz/bz/bzwb/shjbh/gwjhb/201312/t20131230_265691.shtml" in res
+    assert "【网:利辛县国民经济和社会发展第十四个五年规划纲要】" in res
+    assert "http://www.lixin.gov.cn/content/detail/1234.html" in res
+
+    # 严格拦截知乎与百家号
     assert "zhihu.com" not in res
+    assert "baijiahao.baidu.com" not in res
 
 
-def test_duckduckgo_html_redirect_parsing():
-    fake_ddg_html = """
-    <div class="results">
-      <div class="result results_links">
-        <h2 class="result__title">
-          <a class="result__url" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.mee.gov.cn%2Fzcwj%2Fzyygwj%2F202201%2Ft20220124_968032.shtml&rut=xxx">生态环境部关于印发方案的通知</a>
-        </h2>
-        <a class="result__snippet">生态环境保护综合规划要求...</a>
-      </div>
-    </div>
+def test_search_zero_key_fallback_to_bing_and_ddg():
+    # 百度返回空，降级由 Bing / DuckDuckGo 提供
+    fake_bing_html = """
+    <html><body><ol id="b_results">
+      <li class="b_algo">
+        <h2><a href="https://www.samr.gov.cn/policy/samr_1.html">国家市场监督管理总局标准化指导意见</a></h2>
+        <div class="b_caption"><p>全面加强国家标准建设与行业规范管理。</p></div>
+      </li>
+    </ol></body></html>
     """
 
     def handler(request: httpx.Request):
-        if "bing.com" in str(request.url):
+        url_str = str(request.url)
+        if "baidu.com" in url_str:
             return httpx.Response(200, text="<html><body></body></html>")
-        return httpx.Response(200, text=fake_ddg_html)
+        if "bing.com" in url_str:
+            return httpx.Response(200, text=fake_bing_html)
+        return httpx.Response(200, text="<html><body></body></html>")
 
     set_transport(httpx.MockTransport(handler))
 
-    res = search_gov_web("生态环境规划", max_results=5)
-    assert "【网:生态环境部关于印发方案的通知】" in res
-    assert "https://www.mee.gov.cn/zcwj/zyygwj/202201/t20220124_968032.shtml" in res
+    res = search_gov_web("国家标准建设", max_results=5)
+    assert "【网:国家市场监督管理总局标准化指导意见】" in res
+    assert "https://www.samr.gov.cn/policy/samr_1.html" in res
 
 
 # ═══════════════════════════════════════════════════════════════
-# 4. 可选 TAVILY_API_KEY 通道测试
+# 4. 智能精简搜索词提炼测试
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_tavily_api_channel(monkeypatch):
-    monkeypatch.setenv("TAVILY_API_KEY", "tvly-testkey-123456")
+def test_extract_smart_web_query():
+    # 1. 复杂长项目名称与公文噪音剥离
+    q1 = extract_smart_web_query(
+        project_name="安徽省亳州市利辛县年产50万张高档牛皮革深加工及肉牛屠宰综合产业园项目可行性研究报告",
+        chapter_title="第二章 项目建设背景与产业政策符合性分析",
+        report_type="可行性研究报告",
+    )
+    assert "可行性研究报告" not in q1
+    assert "第二章" not in q1
+    assert "利辛县" in q1
+    assert "产业政策" in q1
 
-    fake_tavily_json = {
-        "results": [
-            {
-                "title": "国家能源局关于组织开展新型储能试点示范工作的通知",
-                "url": "https://www.nea.gov.cn/2023-12/27/c_1310757234.htm",
-                "content": "新型储能试点示范项目申报要求与技术标准。",
-            },
-            {
-                "title": "自媒体储能分析",
-                "url": "https://baijiahao.baidu.com/s?id=123",
-                "content": "非官方分析内容。",
-            },
-        ]
-    }
+    # 2. 环保排放章节
+    q2 = extract_smart_web_query(
+        project_name="制革工业清洁生产技术改造项目",
+        chapter_title="第五章 环境保护与水污染治理技术方案",
+        report_type="可行性研究报告",
+    )
+    assert "环保" in q2 or "排放标准" in q2
+    assert "制革工业" in q2
 
-    def handler(request: httpx.Request):
-        if "api.tavily.com" in str(request.url):
-            return httpx.Response(200, json=fake_tavily_json)
-        return httpx.Response(500)
-
-    set_transport(httpx.MockTransport(handler))
-
-    res = search_gov_web("新型储能试点", max_results=5)
-    assert "【网:国家能源局关于组织开展新型储能试点示范工作的通知】" in res
-    assert "https://www.nea.gov.cn/2023-12/27/c_1310757234.htm" in res
-    assert "baijiahao.baidu.com" not in res
+    # 3. 节能减碳章节
+    q3 = extract_smart_web_query(
+        project_name="分布式光伏电站项目建议书",
+        chapter_title="第七章 能源消耗与碳达峰碳中和利用分析",
+        report_type="项目建议书",
+    )
+    assert "项目建议书" not in q3
+    assert "节能" in q3 or "能耗" in q3
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -255,7 +284,6 @@ def test_search_gov_web_timeout_silent_fallback():
 
     set_transport(httpx.MockTransport(handler))
 
-    # 遇到超时应静默返回空字符串，绝不向外抛出异常
     res = search_gov_web("技术方案与投资估算", timeout=1.0)
     assert res == ""
 
@@ -281,7 +309,6 @@ def test_search_gov_web_empty_query():
 
 
 def test_query_rag_tri_source_fusion(monkeypatch):
-    # 打桩 search_gov_web
     fake_web_block = (
         "【网:国家发改委投资项目管理办法】\n"
         "  https://www.ndrc.gov.cn/xxgk/zcfb/tz/202303/t20230324_1352467.html\n"
@@ -289,9 +316,8 @@ def test_query_rag_tri_source_fusion(monkeypatch):
     )
     monkeypatch.setattr(ws_mod, "search_gov_web", lambda q, max_results=5, timeout=3.5: fake_web_block)
 
-    # 1. 检索三源
     rag_out = query_rag(
-        project_name="",
+        project_name="水利投资示范项目",
         query_text="投资管理与可行性研究",
         include_generic=False,
         include_web=True,
@@ -299,7 +325,6 @@ def test_query_rag_tri_source_fusion(monkeypatch):
     assert "【网:国家发改委投资项目管理办法】" in rag_out
     assert "https://www.ndrc.gov.cn/xxgk/zcfb/tz/202303/t20230324_1352467.html" in rag_out
 
-    # 2. 禁用联网检索
     rag_no_web = query_rag(
         project_name="",
         query_text="投资管理与可行性研究",
@@ -310,38 +335,59 @@ def test_query_rag_tri_source_fusion(monkeypatch):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 7. 引用管理集成测试 (refs.py 配合)
+# 7. 规范引用标记体系集成测试（消灭孤立 [Z]）
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_refs_integration_with_web_search():
+def test_refs_standardization_and_no_isolated_z():
     rag_context = (
         "【源:工程勘测底稿.docx】: 地质构造稳定。\n\n---\n\n"
-        "【网:发改委规程】\n"
+        "【标:制革工业水污染物排放标准(GB 30486—2013)】: 排放限值。\n\n---\n\n"
+        "【网:发改委可研编制大纲】\n"
         "  https://www.ndrc.gov.cn/policy/123\n"
         "  > 建设标准规程正文。"
     )
 
     body = (
         "根据项目地质资料【源:工程勘测底稿.docx】，场地地基稳固。"
-        "同时对照国家规程【网:发改委规程】，建设方案符合产业导向。"
-        "另外存在编造标签【网:未检索自媒体】。"
+        "同时对照国家标准【标:制革工业水污染物排放标准(GB 30486—2013)】与政策【网:发改委可研编制大纲】，建设方案合规。"
+        "另外存在编造标签【网:未检索自媒体】和【源:虚假底稿.pdf】。"
     )
 
-    # 1. 过滤编造标签：保留真实网页与底稿标签，编造转为 [Z]
+    # 1. 过滤编造标签：保留真实标签，虚构标签直接剥离，严禁替换为孤立 [Z]
     cleaned = strip_fabricated_labels(body, rag_context)
     assert "【源:工程勘测底稿.docx】" in cleaned
-    assert "【网:发改委规程】" in cleaned
+    assert "【标:制革工业水污染物排放标准(GB 30486—2013)】" in cleaned
+    assert "【网:发改委可研编制大纲】" in cleaned
     assert "【网:未检索自媒体】" not in cleaned
-    assert "[Z]" in cleaned
+    assert "【源:虚假底稿.pdf】" not in cleaned
+    assert "[Z]" not in cleaned
 
     # 2. 提取 URL 关联
-    url = _extract_url_for_label("【网:发改委规程】", rag_context)
+    url = _extract_url_for_label("【网:发改委可研编制大纲】", rag_context)
     assert url == "https://www.ndrc.gov.cn/policy/123"
 
-    # 3. 提取章节引用列表
+    # 3. 提取章节引用列表分类
     refs = extract_chapter_refs(cleaned, rag_context)
-    web_ref = next((r for r in refs if r["label"] == "【网:发改委规程】"), None)
-    assert web_ref is not None
-    assert web_ref["type"] == "网页链接"
-    assert web_ref["source"] == "https://www.ndrc.gov.cn/policy/123"
+    types = {r["type"] for r in refs}
+    assert "项目资料" in types
+    assert "规程标准" in types
+    assert "网页链接" in types
+
+    # 4. 生成本章参考资料 Markdown 段
+    sec_md = build_chapter_ref_section(refs)
+    assert "### 项目资料" in sec_md
+    assert "### 规程标准" in sec_md
+    assert "### 网页链接" in sec_md
+    assert "- 工程勘测底稿.docx" in sec_md
+    assert "- 制革工业水污染物排放标准(GB 30486—2013)" in sec_md
+    assert "https://www.ndrc.gov.cn/policy/123" in sec_md
+
+    # 5. 全文编号分配 [1], [2], [3]
+    numbered_body, numbering = global_assign_ref_numbers(cleaned)
+    assert "[1]" in numbered_body
+    assert "[2]" in numbered_body
+    assert "[3]" in numbered_body
+    assert "【源:" not in numbered_body
+    assert "【标:" not in numbered_body
+    assert "【网:" not in numbered_body

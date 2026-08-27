@@ -19,6 +19,7 @@ export interface ReferenceItem {
   title: string;
   raw: string;
   count: number;
+  url?: string;
 }
 
 export function escapeHtml(text: string): string {
@@ -238,10 +239,10 @@ export function extractSubHeadings(
 /**
  * 从正文中提取所有参考资料与底稿规程引用来源标签清单
  */
-export function extractReferences(text: string): ReferenceItem[] {
+export function extractReferences(text: string, ragContext?: string): ReferenceItem[] {
   if (!text || typeof text !== "string") return [];
 
-  const map = new Map<string, { type: "material" | "standard" | "web" | "other"; typeLabel: string; title: string; raw: string; count: number }>();
+  const map = new Map<string, { type: "material" | "standard" | "web" | "other"; typeLabel: string; title: string; raw: string; count: number; url?: string }>();
 
   // 1. 匹配 【源:...】 / 【材料:...】 / 【标:...】 / 【网:...】 / 【规:...】
   const bracketRegex = /【(源|材料|网|网络|标|标准|规|规程|法|法规)[:：]\s*([^】]+)】/g;
@@ -254,10 +255,23 @@ export function extractReferences(text: string): ReferenceItem[] {
 
     let type: "material" | "standard" | "web" | "other" = "material";
     let typeLabel = "底稿文件";
+    let url: string | undefined = undefined;
 
     if (prefix.startsWith("网")) {
       type = "web";
       typeLabel = "网络检索";
+      // 尝试提取真实 URL（从正文、附带格式或 ragContext 中）
+      const escapedTitle = content.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const urlPattern = new RegExp(`【(?:网|网络)[:：]\\s*${escapedTitle}】\\s*\\n?\\s*(https?:\\/\\/[^\\s\\n>"]+)`);
+      const urlMatch = text.match(urlPattern) || (ragContext ? ragContext.match(urlPattern) : null);
+      if (urlMatch) {
+        url = urlMatch[1].trim();
+      } else {
+        const generalMatch = (ragContext || text).match(new RegExp(`${escapedTitle}[\\s\\S]{0,80}?(https?:\\/\\/[^\\s\\n>"]+)`));
+        if (generalMatch) {
+          url = generalMatch[1].trim();
+        }
+      }
     } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
       type = "standard";
       typeLabel = "规程标准";
@@ -273,7 +287,11 @@ export function extractReferences(text: string): ReferenceItem[] {
 
     const key = `${type}::${content}`;
     if (map.has(key)) {
-      map.get(key)!.count += 1;
+      const item = map.get(key)!;
+      item.count += 1;
+      if (!item.url && url) {
+        item.url = url;
+      }
     } else {
       map.set(key, {
         type,
@@ -281,11 +299,12 @@ export function extractReferences(text: string): ReferenceItem[] {
         title: content,
         raw: rawTag,
         count: 1,
+        url,
       });
     }
   }
 
-  // 2. 匹配标准引用标签 [Z] 或 [Z-1] 或 [文献...]
+  // 2. 匹配标准引用标签 [Z] 或 [Z-1] 或 [文献...]（向下兼容）
   const citationRegex = /\[Z(?::|：|-)?([a-zA-Z0-9_\-\u4e00-\u9fa5]*)\]/g;
   while ((m = citationRegex.exec(text)) !== null) {
     const rawTag = m[0];

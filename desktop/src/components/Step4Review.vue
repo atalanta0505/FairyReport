@@ -551,19 +551,36 @@ async function scrollToChapter(seq: number) {
   await nextTick();
   const anchorId =
     viewMode.value === "source" ? `source-chapter-${seq}` : `full-chapter-anchor-${seq}`;
-  const el = document.getElementById(anchorId);
+  let el = document.getElementById(anchorId);
+  if (!el && viewMode.value === "rich") {
+    el = document.querySelector(`[data-seq="${seq}"]`) as HTMLElement | null;
+  }
   if (el) {
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    const container = (
+      viewMode.value === "source"
+        ? document.querySelector(".canvas-source-view .source-editor-wrap")
+        : document.querySelector(".full-book-scroll-canvas")
+    ) as HTMLElement | null;
+
+    if (container) {
+      const containerRect = container.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const targetTop = container.scrollTop + (elRect.top - containerRect.top) - 16;
+      container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+    } else {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
     el.classList.remove("heading-anchor-pulse");
     void el.offsetWidth;
     el.classList.add("heading-anchor-pulse");
     setTimeout(() => {
-      el.classList.remove("heading-anchor-pulse");
+      el?.classList.remove("heading-anchor-pulse");
     }, 1500);
   }
 }
 
-async function scrollToSubheading(seq: number, headingId: string, e?: Event) {
+async function scrollToSubheading(seq: number, headingId: string, sub?: SubHeading, e?: Event) {
   if (e) e.stopPropagation();
   activeChapterSeq.value = seq;
   activeHeadingId.value = headingId;
@@ -573,18 +590,121 @@ async function scrollToSubheading(seq: number, headingId: string, e?: Event) {
     syncAllChaptersHtml();
     await new Promise((r) => setTimeout(r, 60));
   }
-  const el = document.getElementById(headingId);
+  await nextTick();
+
+  let el = document.getElementById(headingId);
+  // 模糊查找匹配的 DOM 标题元素
+  if (!el) {
+    const canvas = document.getElementById(`chapter-canvas-${seq}`);
+    if (canvas) {
+      const headings = Array.from(canvas.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+      const cleanSubTitle = sub ? sub.title.replace(/^\d+(?:\.\d+)*\s*/, "").trim() : "";
+      for (const h of headings) {
+        const hText = (h.textContent || "").trim();
+        if (
+          sub &&
+          (hText === sub.title ||
+            (cleanSubTitle && hText.includes(cleanSubTitle)) ||
+            (cleanSubTitle && cleanSubTitle.includes(hText)))
+        ) {
+          el = h as HTMLElement;
+          break;
+        }
+      }
+    }
+  }
+
   if (el) {
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    const container = document.querySelector(".full-book-scroll-canvas") as HTMLElement | null;
+    if (container) {
+      const containerRect = container.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const targetTop = container.scrollTop + (elRect.top - containerRect.top) - 16;
+      container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+    } else {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
     el.classList.remove("heading-anchor-pulse");
     void el.offsetWidth;
     el.classList.add("heading-anchor-pulse");
     setTimeout(() => {
-      el.classList.remove("heading-anchor-pulse");
+      el?.classList.remove("heading-anchor-pulse");
     }, 1500);
   } else {
     scrollToChapter(seq);
   }
+}
+
+function openChapterIssuesDrawer(seq: number, e?: Event) {
+  if (e) e.stopPropagation();
+  activeChapterSeq.value = seq;
+  showDiagnosticDrawer.value = true;
+  diagnosticTab.value = "issues";
+  nextTick(() => {
+    const targetCard =
+      (document.querySelector(`.issue-card[data-chapter-seq="${seq}"]`) as HTMLElement | null) ||
+      (document.querySelector(".issue-card") as HTMLElement | null);
+    if (targetCard) {
+      targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetCard.classList.remove("issue-card-focused");
+      void targetCard.offsetWidth;
+      targetCard.classList.add("issue-card-focused");
+      setTimeout(() => {
+        targetCard?.classList.remove("issue-card-focused");
+      }, 2500);
+    }
+  });
+}
+
+function openSubheadingIssuesDrawer(seq: number, sub: SubHeading, e?: Event) {
+  if (e) e.stopPropagation();
+  activeChapterSeq.value = seq;
+  showDiagnosticDrawer.value = true;
+  diagnosticTab.value = "issues";
+
+  const rev = projectStore.chapterReviews[seq];
+  const issues = rev?.issues || [];
+  const subNumMatch = sub.title.match(/^\d+(?:\.\d+)*/);
+  const subNum = subNumMatch ? subNumMatch[0] : null;
+  const cleanSubTitle = sub.title.replace(/^\d+(?:\.\d+)*\s*/, "").trim();
+
+  let matchedIssueId: string | null = null;
+  for (const iss of issues) {
+    const loc = iss.location || "";
+    if (
+      (subNum && loc.includes(subNum)) ||
+      (cleanSubTitle && loc.includes(cleanSubTitle)) ||
+      (iss.quote && cleanSubTitle && iss.quote.includes(cleanSubTitle))
+    ) {
+      matchedIssueId = iss.id || null;
+      break;
+    }
+  }
+
+  nextTick(() => {
+    let targetCard: HTMLElement | null = null;
+    if (matchedIssueId) {
+      targetCard =
+        document.getElementById(`issue-card-${matchedIssueId}`) ||
+        (document.querySelector(`[data-issue-card-id="${matchedIssueId}"]`) as HTMLElement | null);
+    }
+    if (!targetCard) {
+      targetCard =
+        (document.querySelector(`.issue-card[data-chapter-seq="${seq}"]`) as HTMLElement | null) ||
+        (document.querySelector(".issue-card") as HTMLElement | null);
+    }
+
+    if (targetCard) {
+      targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetCard.classList.remove("issue-card-focused");
+      void targetCard.offsetWidth;
+      targetCard.classList.add("issue-card-focused");
+      setTimeout(() => {
+        targetCard?.classList.remove("issue-card-focused");
+      }, 2500);
+    }
+  });
 }
 
 // ── 就地排版编辑输入 (contenteditable 防抖 300ms 自动落盘) ──
@@ -1210,10 +1330,27 @@ function copyFullBookMarkdown() {
     <div class="workbench-main-layout">
       <!-- 左侧：全书多级标题目录导航 (Sidebar Outline Tree) -->
       <aside class="sidebar-nav-panel card">
-        <div class="nav-panel-header">
-          <div class="nav-header-title">
-            <h4>📑 全书多级目录导航</h4>
-            <span class="nav-count">{{ totalChapters }} 章</span>
+        <div class="card-header sidebar-header">
+          <div class="header-titles">
+            <h3>📑 全书多级目录导航</h3>
+            <span class="proj-badge">{{ projectStore.currentProject?.name || "未选项目" }}</span>
+          </div>
+          <!-- 统计指示条 (100% 对齐 Step 3) -->
+          <div class="stats-overview">
+            <div class="stat-item">
+              <span class="stat-label">总章节</span>
+              <span class="stat-val">{{ totalChapters }} 章</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-label">已审阅</span>
+              <span class="stat-val stat-success">{{ reviewedChaptersCount }} / {{ totalChapters }}</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-label">总字数</span>
+              <span class="stat-val">{{ totalWordCount.toLocaleString() }} 字</span>
+            </div>
           </div>
         </div>
 
@@ -1248,7 +1385,8 @@ function copyFullBookMarkdown() {
                 <span
                   v-if="(chapterIssuesCount[ch.seq] || 0) > 0"
                   class="warning-badge-pill"
-                  :title="`第 ${ch.seq} 章存在 ${chapterIssuesCount[ch.seq]} 处待优化诊断`"
+                  :title="`第 ${ch.seq} 章存在 ${chapterIssuesCount[ch.seq]} 处待优化诊断，点击定位问题`"
+                  @click.stop="openChapterIssuesDrawer(ch.seq, $event)"
                 >
                   ⚠️ {{ chapterIssuesCount[ch.seq] }}
                 </span>
@@ -1284,7 +1422,7 @@ function copyFullBookMarkdown() {
                     `level-${sub.level}`,
                     { 'is-active-heading': activeHeadingId === sub.id },
                   ]"
-                  @click="scrollToSubheading(ch.seq, sub.id, $event)"
+                  @click="scrollToSubheading(ch.seq, sub.id, sub, $event)"
                   :title="sub.title"
                 >
                   <span class="sub-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
@@ -1292,7 +1430,8 @@ function copyFullBookMarkdown() {
                   <span
                     v-if="getSubheadingIssueCount(ch.seq, sub) > 0"
                     class="sub-issue-badge"
-                    :title="`该小节存在 ${getSubheadingIssueCount(ch.seq, sub)} 处审阅问题`"
+                    :title="`该小节存在 ${getSubheadingIssueCount(ch.seq, sub)} 处审阅问题，点击直达诊断卡片`"
+                    @click.stop="openSubheadingIssuesDrawer(ch.seq, sub, $event)"
                   >
                     ⚠️ {{ getSubheadingIssueCount(ch.seq, sub) }}
                   </span>
@@ -1614,6 +1753,7 @@ function copyFullBookMarkdown() {
                   :key="idx"
                   :id="`issue-card-${issue.id || ('idx-' + idx)}`"
                   :data-issue-card-id="issue.id"
+                  :data-chapter-seq="issue.chapterSeq"
                   class="issue-card"
                   :class="`severity-${issue.severity || 'warning'}`"
                 >
@@ -1854,6 +1994,11 @@ function copyFullBookMarkdown() {
                   <span class="ref-count-badge">引用 {{ refItem.count }} 次</span>
                 </div>
                 <div class="ref-card-title">{{ refItem.title }}</div>
+                <div v-if="refItem.url" class="ref-card-link">
+                  <a :href="refItem.url" target="_blank" rel="noopener noreferrer" class="ref-external-link">
+                    🔗 {{ refItem.url }}
+                  </a>
+                </div>
                 <div class="ref-card-raw"><code>{{ refItem.raw }}</code></div>
               </div>
             </div>
@@ -2492,31 +2637,68 @@ function copyFullBookMarkdown() {
   flex-direction: column;
   overflow: hidden;
 }
-.nav-panel-header {
-  padding: 12px 14px;
+.sidebar-header {
+  padding: 14px 16px;
   border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f8fafc;
+}
+.header-titles {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #f8fafc;
 }
-.nav-header-title {
+.header-titles h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.proj-badge {
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats-overview {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 12px;
 }
-.nav-header-title h4 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 700;
-  color: #0f172a;
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
-.nav-count {
+.stat-label {
   font-size: 11px;
   color: #64748b;
+}
+.stat-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.stat-success {
+  color: #16a34a;
+}
+.stat-divider {
+  width: 1px;
+  height: 20px;
   background: #e2e8f0;
-  padding: 1px 6px;
-  border-radius: 10px;
 }
 .outline-tree-scrollable {
   flex: 1;
@@ -3636,6 +3818,22 @@ function copyFullBookMarkdown() {
   font-size: 13px;
   font-weight: 600;
   color: #0f172a;
+}
+.ref-card-link {
+  font-size: 11px;
+  word-break: break-all;
+  margin: 2px 0;
+}
+.ref-external-link {
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ref-external-link:hover {
+  color: #1d4ed8;
 }
 .ref-card-raw code {
   font-size: 11px;

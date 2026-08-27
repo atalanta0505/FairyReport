@@ -514,6 +514,22 @@ describe("Markdown 解析与排版工具", () => {
       expect(refs.some((r) => r.type === "standard" && r.title.includes("[Z]"))).toBe(true);
       expect(refs.some((r) => r.type === "standard" && r.title.includes("[Z-02]"))).toBe(true);
     });
+
+    it("提取网络检索引用并正确关联 URL", () => {
+      const text = `
+        根据国家政策【网:国家发改委可研编制大纲】，本项目属于鼓励类产业。
+      `;
+      const ragContext = `
+        【网:国家发改委可研编制大纲】
+          https://www.ndrc.gov.cn/policy/123
+          > 建设标准规程正文。
+      `;
+      const refs = extractReferences(text, ragContext);
+      expect(refs).toHaveLength(1);
+      expect(refs[0].type).toBe("web");
+      expect(refs[0].title).toBe("国家发改委可研编制大纲");
+      expect(refs[0].url).toBe("https://www.ndrc.gov.cn/policy/123");
+    });
   });
 
   describe("审阅高亮与 HTML 反向序列化还原", () => {

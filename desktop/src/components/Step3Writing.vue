@@ -722,7 +722,7 @@ function nextStep() {
                       </div>
                       <div class="stepper-text">
                         <span class="stepper-title">三源知识检索</span>
-                        <span class="stepper-desc">底稿数据 + 行业规程 + 权威政务</span>
+                        <span class="stepper-desc">底稿数据 + 行业规程 + 百度联网 RAG</span>
                       </div>
                     </div>
 
@@ -873,6 +873,11 @@ function nextStep() {
                       <span class="ref-count-tag">引用 {{ refItem.count }} 次</span>
                     </div>
                     <div class="ref-card-title">{{ refItem.title }}</div>
+                    <div v-if="refItem.url" class="ref-card-link">
+                      <a :href="refItem.url" target="_blank" rel="noopener noreferrer" class="ref-external-link">
+                        🔗 {{ refItem.url }}
+                      </a>
+                    </div>
                     <div class="ref-card-raw"><code>{{ refItem.raw }}</code></div>
                   </div>
                 </div>
@@ -2276,6 +2281,22 @@ function nextStep() {
   font-weight: 600;
   color: #1e293b;
   word-break: break-all;
+}
+.ref-card-link {
+  font-size: 11px;
+  word-break: break-all;
+  margin: 2px 0;
+}
+.ref-external-link {
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ref-external-link:hover {
+  color: #1d4ed8;
 }
 .ref-card-raw {
   font-size: 11px;

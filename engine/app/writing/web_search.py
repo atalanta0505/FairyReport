@@ -1,88 +1,51 @@
 """
-权威政务与智库联网检索 — 免 Key 国内高可用搜索调度与 .gov.cn 权威过滤。
+权威政务与智库联网检索 — 免 Key 百度第一优先搜索调度与自媒体黑名单精准过滤。
 
-1. 免 Key 高可用聚合检索（国内搜索引擎端点 / 公用接口 / 可选 TAVILY_API_KEY 回退）；
-2. 权威信息源过滤：强制 .gov.cn / .edu.cn / .org.cn 及国家权威政务智库门户采信，严格剔除自媒体与非权威网站；
-3. 文本清洗与格式化输出：【网:标题】\\n  URL\\n  > 摘要正文；
-4. 严格 3.5s 超时与静默熔断保护（绝不抛出异常阻断写作主流程）。
+1. 国内公网第一优先级免 Key 百度检索（https://www.baidu.com/s?wd=...）；
+2. 备用兜底：保留 Bing 与 DuckDuckGo 作为第 2、3 备用通道；
+3. 废除狭隘白名单（全面采信政府、高校、行业标准平台、协会智库、企业公示等权威源）；
+4. 严格黑名单拦截：严格过滤自媒体、论坛、非权威博客（知乎、CSDN、百家号、小红书、微信公众号、微博等）；
+5. 文本清洗与格式化输出：【网:标题】\\n  URL\\n  > 摘要正文；
+6. 严格 3.5s 超时与静默熔断保护（绝不抛出异常阻断写作主流程）。
 """
 from __future__ import annotations
 
 import html
+import json
 import logging
 import os
 import re
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import httpx
 
 _logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
-# 权威域名白名单与自媒体黑名单规则
+# 自媒体、论坛与非权威黑名单规则（全网严格拦截）
 # ═══════════════════════════════════════════════════════════════
-
-WHITELIST_SUFFIXES = (
-    ".gov.cn",
-    ".edu.cn",
-    ".org.cn",
-)
-
-WHITELIST_DOMAINS = {
-    "gov.cn",
-    "www.gov.cn",
-    "news.cn",
-    "xinhuanet.com",
-    "people.com.cn",
-    "cctv.com",
-    "ce.cn",
-    "chinanews.com.cn",
-    "chinanews.com",
-    "cac.gov.cn",
-    "qstheory.cn",
-    "scio.gov.cn",
-    "std.samr.gov.cn",
-    "stats.gov.cn",
-    "ndrc.gov.cn",
-    "mof.gov.cn",
-    "mee.gov.cn",
-    "miit.gov.cn",
-    "mohurd.gov.cn",
-    "mnr.gov.cn",
-    "mot.gov.cn",
-    "nea.gov.cn",
-    "samr.gov.cn",
-    "customs.gov.cn",
-    "huanqiu.com",
-}
 
 BLACKLIST_DOMAINS = {
     "zhihu.com",
-    "sohu.com",
-    "163.com",
-    "weibo.com",
+    "csdn.net",
     "baijiahao.baidu.com",
+    "xiaohongshu.com",
+    "mp.weixin.qq.com",
+    "weixin.qq.com",
+    "weibo.com",
+    "weibo.cn",
+    "tieba.baidu.com",
+    "zhidao.baidu.com",
+    "wenku.baidu.com",
     "toutiao.com",
     "bilibili.com",
     "douban.com",
     "jianshu.com",
-    "csdn.net",
-    "xiaohongshu.com",
-    "mp.weixin.qq.com",
-    "weixin.qq.com",
-    "tieba.baidu.com",
-    "zhidao.baidu.com",
-    "wenku.baidu.com",
     "kuaishou.com",
     "douyin.com",
-    "tianya.cn",
+    "sohu.com",
+    "163.com",
     "360doc.com",
-    "baidu.com",
-    "bing.com",
-    "sogou.com",
-    "google.com",
-    "so.com",
-    "sm.cn",
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -108,33 +71,23 @@ def get_transport() -> httpx.BaseTransport | None:
 
 
 def is_authoritative_domain(netloc: str) -> bool:
-    """判定域名是否属于 .gov.cn 或权威政务/智库门户，且非黑名单自媒体。"""
+    """判定域名是否属于真实合法网站，且严格非黑名单自媒体/论坛/非权威站点。"""
     if not netloc:
         return False
     host = netloc.lower().split(":")[0].strip()
-    if not host:
+    if not host or "." not in host:
         return False
 
-    # 1. 黑名单严格拦截（含子域名）
+    # 严格黑名单拦截（含子域名）
     for bad in BLACKLIST_DOMAINS:
         if host == bad or host.endswith("." + bad):
             return False
 
-    # 2. 权威白名单顶级与二级后缀 (.gov.cn, .edu.cn, .org.cn)
-    for suf in WHITELIST_SUFFIXES:
-        if host.endswith(suf) or host == suf[1:]:
-            return True
-
-    # 3. 权威中央与行业官方门户域名
-    for good in WHITELIST_DOMAINS:
-        if host == good or host.endswith("." + good):
-            return True
-
-    return False
+    return True
 
 
 def is_authoritative_url(url: str) -> bool:
-    """判定 URL 是否为权威政务或官方信息源。"""
+    """判定 URL 是否为合法且非黑名单的网页链接。"""
     if not url or not url.startswith(("http://", "https://")):
         return False
     try:
@@ -144,7 +97,7 @@ def is_authoritative_url(url: str) -> bool:
         return False
 
 
-def clean_title(raw_title: str, max_len: int = 50) -> str:
+def clean_title(raw_title: str, max_len: int = 60) -> str:
     """清洗网页标题：去除 HTML 标签、转义括号符号、长度截断。
 
     转义规则：
@@ -152,7 +105,7 @@ def clean_title(raw_title: str, max_len: int = 50) -> str:
       【 】 ➔ 「 」
     """
     if not raw_title:
-        return "权威政务参考"
+        return "权威行业参考"
 
     text = html.unescape(raw_title)
     text = re.sub(r"<[^>]+>", "", text)
@@ -168,7 +121,7 @@ def clean_title(raw_title: str, max_len: int = 50) -> str:
     if len(text) > max_len:
         text = text[:max_len].rstrip("-_:：·| ")
 
-    return text or "权威政务参考"
+    return text or "权威行业参考"
 
 
 def clean_snippet(raw_snippet: str, max_len: int = 260) -> str:
@@ -201,19 +154,13 @@ def format_web_item(title: str, url: str, snippet: str) -> str:
 
 
 def enhance_gov_query(query: str) -> str:
-    """增强关键词倾向，自动附加国家政策规程与 gov.cn 权威倾向。"""
+    """清理搜索词前缀，保持关键词精简有效。"""
     q = (query or "").strip()
     if not q:
         return ""
     # 去除冗余的章标题前缀如 "第一章 "，获取实质性主题
-    q = re.sub(r"^第[一二三四五六七八九十百\d]+章\s*", "", q).strip()
-    if not q:
-        q = query.strip()
-
-    # 如果未包含 site: 且未包含 gov.cn，增加权威政务倾向
-    if "gov.cn" not in q and "site:" not in q:
-        return f"{q} site:gov.cn"
-    return q
+    q = re.sub(r"^#*\s*第[一二三四五六七八九十百\d]+章\s*", "", q).strip()
+    return q or query.strip()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -221,9 +168,102 @@ def enhance_gov_query(query: str) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 
+def _parse_baidu_html(html_text: str) -> list[dict]:
+    """解析百度搜索结果 HTML。"""
+    results: list[dict] = []
+    if not html_text:
+        return results
+
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_text, "html.parser")
+        containers = soup.find_all(
+            "div",
+            class_=lambda c: c and ("result" in c or "c-container" in c),
+        )
+        if not containers:
+            containers = soup.find_all("div", class_=["result", "c-container"])
+
+        for item in containers:
+            h3 = item.find("h3")
+            if not h3:
+                continue
+            a = h3.find("a") or item.find("a")
+            if not a:
+                continue
+
+            raw_title = a.get_text() or h3.get_text()
+            title = clean_title(raw_title)
+
+            # 提取 URL（支持 data-landurl、data-tools 及 href）
+            url = a.get("data-landurl", "").strip() or a.get("href", "").strip()
+            if not url and item.get("data-tools"):
+                try:
+                    dt = json.loads(item["data-tools"])
+                    url = dt.get("url", "").strip()
+                except Exception:
+                    pass
+
+            if not url or not url.startswith(("http://", "https://")):
+                continue
+
+            # 提取摘要正文
+            snippet = ""
+            snippet_el = (
+                item.find("div", class_=lambda c: c and ("content-right" in c or "c-font-normal" in c or "c-abstract" in c or "abstract" in c or "content" in c))
+                or item.find("span", class_=lambda c: c and ("content" in c or "c-font-normal" in c))
+                or item.find("div", class_="c-span18")
+                or item.find("div", class_="c-row")
+                or item.find("p")
+            )
+            if snippet_el:
+                snippet = snippet_el.get_text()
+            else:
+                full_text = item.get_text()
+                h3_text = h3.get_text()
+                if h3_text in full_text:
+                    snippet = full_text.replace(h3_text, "", 1)
+                else:
+                    snippet = full_text
+
+            snippet = clean_snippet(snippet)
+
+            if title and is_authoritative_url(url):
+                results.append({"title": title, "url": url, "snippet": snippet})
+    except Exception as e:
+        _logger.debug("Baidu HTML 解析失败: %s", e)
+
+    return results
+
+
+def _search_baidu(query: str, timeout: float, max_results: int = 5) -> list[dict]:
+    """通过百度接口发起免 Key 搜索。"""
+    results: list[dict] = []
+    if not query or not query.strip():
+        return results
+
+    clean_q = enhance_gov_query(query)
+    baidu_url = f"https://www.baidu.com/s?wd={quote(clean_q)}&ie=utf-8&rn={max_results * 2}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    try:
+        with httpx.Client(transport=_transport, timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(baidu_url, headers=headers)
+            if resp.status_code == 200:
+                results = _parse_baidu_html(resp.text)
+    except Exception as e:
+        _logger.debug("百度搜索请求异常: %s", e)
+
+    return results[:max_results]
+
+
 def _parse_bing_html(html_text: str) -> list[dict]:
     """解析 Bing 搜索结果 HTML。"""
-    results = []
+    results: list[dict] = []
     if not html_text:
         return results
 
@@ -252,16 +292,36 @@ def _parse_bing_html(html_text: str) -> list[dict]:
                     snippet = caption.get_text()
 
             if url and title and is_authoritative_url(url):
-                results.append({"title": title, "url": url, "snippet": snippet})
+                results.append({"title": clean_title(title), "url": url, "snippet": clean_snippet(snippet)})
     except Exception as e:
         _logger.debug("Bing HTML 解析失败: %s", e)
 
     return results
 
 
+def _search_bing(query: str, timeout: float, max_results: int = 5) -> list[dict]:
+    """通过 Bing 接口发起免 Key 搜索。"""
+    results: list[dict] = []
+    clean_q = enhance_gov_query(query)
+    bing_url = f"https://cn.bing.com/search?q={quote(clean_q)}&mkt=zh-CN"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        with httpx.Client(transport=_transport, timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(bing_url, headers=headers)
+            if resp.status_code == 200:
+                results = _parse_bing_html(resp.text)
+    except Exception as e:
+        _logger.debug("Bing 搜索请求异常: %s", e)
+    return results[:max_results]
+
+
 def _parse_duckduckgo_html(html_text: str) -> list[dict]:
     """解析 DuckDuckGo HTML Lite 搜索结果。"""
-    results = []
+    results: list[dict] = []
     if not html_text:
         return results
 
@@ -289,16 +349,36 @@ def _parse_duckduckgo_html(html_text: str) -> list[dict]:
             snippet = snippet_el.get_text() if snippet_el else ""
 
             if url and is_authoritative_url(url):
-                results.append({"title": title, "url": url, "snippet": snippet})
+                results.append({"title": clean_title(title), "url": url, "snippet": clean_snippet(snippet)})
     except Exception as e:
         _logger.debug("DuckDuckGo HTML 解析失败: %s", e)
 
     return results
 
 
+def _search_duckduckgo(query: str, timeout: float, max_results: int = 5) -> list[dict]:
+    """通过 DuckDuckGo 接口发起免 Key 搜索。"""
+    results: list[dict] = []
+    clean_q = enhance_gov_query(query)
+    ddg_url = f"https://html.duckduckgo.com/html/?q={quote(clean_q)}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        with httpx.Client(transport=_transport, timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(ddg_url, headers=headers)
+            if resp.status_code == 200:
+                results = _parse_duckduckgo_html(resp.text)
+    except Exception as e:
+        _logger.debug("DuckDuckGo 搜索请求异常: %s", e)
+    return results[:max_results]
+
+
 def _search_tavily(query: str, api_key: str, timeout: float, max_results: int = 5) -> list[dict]:
-    """调用 Tavily 搜索 API。"""
-    results = []
+    """调用 Tavily 搜索 API（若配置可选 Key）。"""
+    results: list[dict] = []
     headers = {
         "Content-Type": "application/json",
     }
@@ -307,7 +387,6 @@ def _search_tavily(query: str, api_key: str, timeout: float, max_results: int = 
         "query": query,
         "search_depth": "basic",
         "max_results": max_results * 2,
-        "include_domains": ["gov.cn", "edu.cn", "org.cn", "news.cn", "people.com.cn"],
     }
     with httpx.Client(transport=_transport, timeout=timeout) as client:
         resp = client.post("https://api.tavily.com/search", json=payload, headers=headers)
@@ -319,46 +398,44 @@ def _search_tavily(query: str, api_key: str, timeout: float, max_results: int = 
                 title = item.get("title") or ""
                 content = item.get("content") or ""
                 if url and is_authoritative_url(url):
-                    results.append({"title": title, "url": url, "snippet": content})
+                    results.append({"title": clean_title(title), "url": url, "snippet": clean_snippet(content)})
     return results
 
 
 def _search_zero_key(query: str, timeout: float, max_results: int = 5) -> list[dict]:
-    """执行国内免 Key 权威搜索聚合。"""
+    """执行国内免 Key 权威搜索聚合（百度第 1 优先，Bing/DuckDuckGo 备用兜底）。"""
     results: list[dict] = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    }
+    seen_urls: set[str] = set()
 
-    # 1. 尝试 Bing 靶向搜索
-    bing_query = enhance_gov_query(query)
-    bing_url = f"https://cn.bing.com/search?q={quote(bing_query)}&mkt=zh-CN"
+    def _add_items(items: list[dict]):
+        for it in items:
+            u = it.get("url", "").strip()
+            if u and u not in seen_urls and is_authoritative_url(u):
+                seen_urls.add(u)
+                results.append(it)
 
-    with httpx.Client(transport=_transport, timeout=timeout, follow_redirects=True) as client:
+    # 1. 第一优先级：百度免 Key 检索
+    try:
+        baidu_items = _search_baidu(query, timeout=timeout, max_results=max_results)
+        _add_items(baidu_items)
+    except Exception as e:
+        _logger.debug("百度检索尝试失败: %s", e)
+
+    # 2. 第二优先级：Bing 备用通道
+    if len(results) < max_results:
         try:
-            resp = client.get(bing_url, headers=headers)
-            if resp.status_code == 200:
-                bing_results = _parse_bing_html(resp.text)
-                for item in bing_results:
-                    if not any(r["url"] == item["url"] for r in results):
-                        results.append(item)
+            bing_items = _search_bing(query, timeout=timeout, max_results=max_results)
+            _add_items(bing_items)
         except Exception as e:
             _logger.debug("Bing 检索尝试失败: %s", e)
 
-        # 若结果不足，尝试 DuckDuckGo 备用端点
-        if len(results) < max_results:
-            try:
-                ddg_url = f"https://html.duckduckgo.com/html/?q={quote(bing_query)}"
-                resp = client.get(ddg_url, headers=headers)
-                if resp.status_code == 200:
-                    ddg_results = _parse_duckduckgo_html(resp.text)
-                    for item in ddg_results:
-                        if not any(r["url"] == item["url"] for r in results):
-                            results.append(item)
-            except Exception as e:
-                _logger.debug("DuckDuckGo 检索尝试失败: %s", e)
+    # 3. 第三优先级：DuckDuckGo 备用通道
+    if len(results) < max_results:
+        try:
+            ddg_items = _search_duckduckgo(query, timeout=timeout, max_results=max_results)
+            _add_items(ddg_items)
+        except Exception as e:
+            _logger.debug("DuckDuckGo 检索尝试失败: %s", e)
 
     return results[:max_results]
 
@@ -373,12 +450,13 @@ def search_gov_web(
     max_results: int = 5,
     timeout: float = 3.5,
 ) -> str:
-    """免 Key 国内高可用权威政务检索。
+    """免 Key 国内高可用权威联网检索（百度第一优先，严格黑名单拦截）。
 
-    1. 自动强化权威政务检索意图并进行 .gov.cn 靶向过滤；
-    2. 严格 3.5 秒超时控制与全异常静默熔断降级；
-    3. 网页标题与内容清洗：转义括号符号，截断长标题与摘要；
-    4. 格式化输出为：
+    1. 第一优先级百度免 Key 调度，Bing / DuckDuckGo 备用兜底；
+    2. 全面采信政府、高校智库、行业标准与企业公开信息，100% 拦截自媒体黑名单；
+    3. 严格 3.5 秒超时控制与全异常静默熔断降级；
+    4. 网页标题与内容清洗：转义括号符号，截断长标题与摘要；
+    5. 格式化输出为：
        【网:标题】
          URL
          > 摘要正文
@@ -421,5 +499,5 @@ def search_gov_web(
 
         return "\n\n".join(formatted_blocks)
     except Exception as e:
-        _logger.warning("权威政务联网检索降级: %s", e)
+        _logger.warning("权威联网检索降级: %s", e)
         return ""

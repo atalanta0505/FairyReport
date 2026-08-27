@@ -476,6 +476,7 @@ def chapter(req: ChapterRequest):
         include_web=True,
         topic=topic,
         report_name=rep_name,
+        report_type=req.report_type,
     )
     try:
         content = writer.write_chapter(
@@ -497,7 +498,7 @@ def _stream_chapter(writer, llm, req, chapter_title,
         yield _sse_event(json.dumps({
             "type": "stage",
             "stage": "rag",
-            "message": "🔍 正在三源检索：工程底稿库 + 行业规程库 + 权威政务联网信息(.gov.cn)...",
+            "message": "🔍 正在三源检索：工程底稿库 + 行业规程库 + 百度免 Key 外部联网 RAG...",
         }, ensure_ascii=False))
 
         rep_name = getattr(req, "report_name", "") or req.project
@@ -508,6 +509,7 @@ def _stream_chapter(writer, llm, req, chapter_title,
             include_web=True,
             topic=topic,
             report_name=rep_name,
+            report_type=getattr(req, "report_type", ""),
         )
 
         # 2. 骨架锁定与构建阶段
