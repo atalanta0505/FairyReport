@@ -1,8 +1,10 @@
 # 任务合同 V2-T22 v1 — 导航自适应滚动修复、中文极速审阅推演、AI 一键直接修订、正文问题持久化高亮与全书章节标题完善
 
-- 状态：READY_FOR_MAKER（待产品负责人审查批准）
+- 状态：ACCEPTED（已由 Checker 独立验收通过并锁定）
 - 依据：用户关于 Step 3 导航自适应滚动条失效与文字垂直挤压截断、审阅思考推演出现英文且耗时过长、AI 修订去除悬浮弹窗、正文问题持久化高亮、未写章节标题显式呈现的反馈
-- 精确起始 SHA：`a1ab6b1631a170990501d185f9957f0b1c726078`
+- 精确起始 SHA：`1dd22a3e9c6efc196f7c4db3fa0592e35182103f`
+- 验收锁定 SHA：`e82e32d57e96fa4641198cfe018f6c90c63437e3`
+- 验收结论：PASS（`docs/dev-flow/tasks/V2-T22/rounds/01/checker-report.md`）
 - 工作树门禁：`git status --short` 必须干净
 
 ---
