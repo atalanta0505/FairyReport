@@ -21,14 +21,12 @@ const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(nu
 const showHintSection = ref<boolean>(false);
 const showRefDrawer = ref<boolean>(false);
 const chapterHints = ref<Record<number, string>>({});
-const viewMode = ref<"rich" | "source">("rich");
 
 const collapsedChapters = ref<Record<number, boolean>>({});
 const showThoughtDetails = ref<boolean>(true);
 const thoughtContentRef = ref<HTMLDivElement | null>(null);
 
 const editorCanvasRef = ref<HTMLDivElement | null>(null);
-const editorTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -79,7 +77,7 @@ async function ensureStep3State() {
 }
 
 function syncEditorContent() {
-  if (editorCanvasRef.value && viewMode.value === "rich") {
+  if (editorCanvasRef.value) {
     editorCanvasRef.value.innerHTML = markdownToHtml(
       currentChapterText.value,
       currentChapter.value?.seq,
@@ -185,7 +183,7 @@ const isCurrentChapterWriting = computed(() => {
   );
 });
 
-// 提取当前所有章节的子标题树（过滤掉 H1 级别，因卡片头部已展示章标题）
+// 提取当前所有章节的子标题树（过滤掉 H1 级别，因章节行已展示章标题）
 const chapterSubHeadingsMap = computed<Record<number, SubHeading[]>>(() => {
   const map: Record<number, SubHeading[]> = {};
   for (const ch of projectStore.outlineChapters) {
@@ -199,6 +197,11 @@ const chapterSubHeadingsMap = computed<Record<number, SubHeading[]>>(() => {
   return map;
 });
 
+function getChapterTitle(seq: number): string {
+  const found = projectStore.outlineChapters.find((c) => c.seq === seq);
+  return found?.title || `第 ${seq} 章`;
+}
+
 // 监听章节切换，同步排版内容
 watch(
   () => projectStore.selectedChapterSeq,
@@ -209,21 +212,12 @@ watch(
   },
 );
 
-// 监听视图切换
-watch(viewMode, (mode) => {
-  if (mode === "rich") {
-    nextTick(() => {
-      syncEditorContent();
-    });
-  }
-});
-
 // 自动平滑滚动与流式排版更新
 watch(
   () => currentChapterText.value,
   (newVal) => {
     if (isCurrentChapterWriting.value) {
-      if (viewMode.value === "rich" && editorCanvasRef.value) {
+      if (editorCanvasRef.value) {
         editorCanvasRef.value.innerHTML = markdownToHtml(
           newVal,
           currentChapter.value?.seq,
@@ -232,13 +226,6 @@ watch(
         nextTick(() => {
           if (editorCanvasRef.value) {
             editorCanvasRef.value.scrollTop = editorCanvasRef.value.scrollHeight;
-          }
-        });
-      }
-      if (editorTextareaRef.value) {
-        nextTick(() => {
-          if (editorTextareaRef.value) {
-            editorTextareaRef.value.scrollTop = editorTextareaRef.value.scrollHeight;
           }
         });
       }
@@ -273,11 +260,6 @@ watch(
   },
 );
 
-function switchViewMode(mode: "rich" | "source") {
-  if (viewMode.value === mode) return;
-  viewMode.value = mode;
-}
-
 // 富文本就地输入处理：提取 HTML 转换为 Markdown 防抖落盘
 function onEditorInput(e: Event) {
   const target = e.target as HTMLElement;
@@ -302,14 +284,6 @@ async function handleSubHeadingClick(seq: number, headingId: string, event: Mous
   if (projectStore.selectedChapterSeq !== seq) {
     selectChapter(seq);
     await nextTick();
-    await new Promise((r) => setTimeout(r, 60));
-  }
-
-  // 确保在排版视图下进行精准定位
-  if (viewMode.value !== "rich") {
-    viewMode.value = "rich";
-    await nextTick();
-    syncEditorContent();
     await new Promise((r) => setTimeout(r, 60));
   }
 
@@ -377,7 +351,7 @@ async function handleWriteAllChapters() {
   }
 
   try {
-    showMsg("已启动全书章节顺序流式写作任务...");
+    showMsg("已启动全书推荐顺序断点智能续写任务...");
     await projectStore.writeAllChapters(engine.baseUrl, llmConfig);
     syncEditorContent();
     showMsg("全书所有章节流式写作完成！");
@@ -401,9 +375,11 @@ async function handleClearChapter(seq: number, event?: MouseEvent) {
   showMsg(`已清空第 ${seq} 章内容`);
 }
 
-function onChapterTextInput(e: Event) {
-  const target = e.target as HTMLTextAreaElement;
-  currentChapterText.value = target.value;
+function copyCurrentChapterMarkdown() {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(currentChapterText.value);
+    showMsg(`已复制第 ${projectStore.selectedChapterSeq} 章 Markdown 源码至剪贴板！`);
+  }
 }
 
 function prevStep() {
@@ -430,11 +406,11 @@ function nextStep() {
 
     <!-- 主流写作双栏布局 -->
     <div class="writing-layout">
-      <!-- 左侧：章节目录与控制面板 -->
+      <!-- 左侧：全书目录导航与控制面板 (Flat 平铺一体化目录树) -->
       <aside class="sidebar-panel card">
         <div class="card-header sidebar-header">
           <div class="header-titles">
-            <h3>章节目录与导航</h3>
+            <h3>📑 章节目录与导航</h3>
             <span class="proj-badge">{{ projectStore.currentProject?.name || "未选项目" }}</span>
           </div>
           <!-- 统计指示条 -->
@@ -452,6 +428,39 @@ function nextStep() {
             <div class="stat-item">
               <span class="stat-label">总字数</span>
               <span class="stat-val">{{ totalWordCount.toLocaleString() }} 字</span>
+            </div>
+          </div>
+
+          <!-- 💡 推荐写作顺序：流程胶囊提示 -->
+          <div
+            v-if="projectStore.writingOrder && projectStore.writingOrder.length > 0"
+            class="writing-order-box"
+            :title="projectStore.writingOrderReason || '推荐写作顺序'"
+          >
+            <div class="order-box-header">
+              <span class="order-icon">💡</span>
+              <span class="order-title">推荐写作顺序</span>
+            </div>
+            <div class="order-flow-chips">
+              <span
+                v-for="(seq, idx) in projectStore.writingOrder"
+                :key="seq"
+                class="order-node-wrap"
+              >
+                <span
+                  class="order-chip"
+                  :class="{
+                    active: projectStore.selectedChapterSeq === seq,
+                    completed: (projectStore.chapters[seq] || '').trim().length > 0,
+                    writing: projectStore.currentWritingSeq === seq,
+                  }"
+                  @click="selectChapter(seq)"
+                  :title="`第 ${seq} 章：${getChapterTitle(seq)}`"
+                >
+                  第 {{ seq }} 章
+                </span>
+                <span v-if="idx < projectStore.writingOrder.length - 1" class="flow-arrow">➔</span>
+              </span>
             </div>
           </div>
         </div>
@@ -475,68 +484,58 @@ function nextStep() {
           </button>
         </div>
 
-        <!-- 章节列表与多级标题导航 -->
-        <div class="chapter-list">
+        <!-- Flat 平铺一体化章节目录树 (单一定高全局平滑滚动，对齐 Step 4) -->
+        <div class="outline-tree-scrollable">
           <div
             v-for="ch in projectStore.outlineChapters"
             :key="ch.seq"
-            class="chapter-item-container"
+            class="chapter-tree-node"
+            :class="{
+              'is-active': projectStore.selectedChapterSeq === ch.seq,
+              'is-writing': projectStore.currentWritingSeq === ch.seq,
+              'is-completed': (projectStore.chapters[ch.seq] || '').trim().length > 0,
+            }"
           >
+            <!-- 章节行 -->
             <div
-              class="chapter-card"
-              :class="{
-                active: projectStore.selectedChapterSeq === ch.seq,
-                writing: projectStore.currentWritingSeq === ch.seq,
-                completed: projectStore.chapters[ch.seq] && projectStore.chapters[ch.seq].trim().length > 0,
-              }"
+              class="chapter-node-row"
               @click="selectChapter(ch.seq)"
+              :title="`第 ${ch.seq} 章：${ch.title}`"
             >
-              <div class="chapter-card-main">
-                <div class="chapter-card-top">
-                  <span class="ch-seq-circle">{{ ch.seq }}</span>
-                  <span class="ch-title" :title="ch.title">{{ ch.title }}</span>
-                  <button
-                    v-if="chapterSubHeadingsMap[ch.seq] && chapterSubHeadingsMap[ch.seq].length > 0"
-                    class="ch-collapse-toggle-btn"
-                    :class="{ collapsed: isChapterCollapsed(ch.seq) }"
-                    :title="isChapterCollapsed(ch.seq) ? '展开该章子标题目录' : '收起该章子标题目录'"
-                    @click="toggleChapterCollapse(ch.seq, $event)"
-                  >
-                    {{ isChapterCollapsed(ch.seq) ? '▶ 展开' : '▼ 收起' }}
-                  </button>
-                </div>
-                <div class="chapter-card-meta">
-                  <span class="ch-words">{{ (projectStore.chapters[ch.seq] || "").length }} 字</span>
-                  <span
-                    class="status-pill"
-                    :class="
-                      projectStore.currentWritingSeq === ch.seq
-                        ? 'writing'
-                        : (projectStore.chapters[ch.seq] || '').trim().length > 0
-                        ? 'completed'
-                        : projectStore.chapterStatuses[ch.seq] === 'error'
-                        ? 'error'
-                        : 'idle'
-                    "
-                  >
-                    <span v-if="projectStore.currentWritingSeq === ch.seq" class="spinner-inline"></span>
-                    {{
-                      projectStore.currentWritingSeq === ch.seq
-                        ? "正在撰写中…"
-                        : (projectStore.chapters[ch.seq] || "").trim().length > 0
-                        ? "已完成 ✓"
-                        : projectStore.chapterStatuses[ch.seq] === 'error'
-                        ? "生成异常"
-                        : "未生成"
-                    }}
-                  </span>
-                </div>
+              <div class="row-left">
+                <span class="ch-seq-tag">{{ ch.seq }}</span>
+                <span class="ch-title-text">{{ ch.title }}</span>
               </div>
 
-              <!-- 卡片悬停快速操作 -->
-              <div class="chapter-card-actions">
+              <div class="row-right">
+                <!-- 状态徽标 -->
+                <span
+                  class="status-pill"
+                  :class="
+                    projectStore.currentWritingSeq === ch.seq
+                      ? 'writing'
+                      : (projectStore.chapters[ch.seq] || '').trim().length > 0
+                      ? 'completed'
+                      : projectStore.chapterStatuses[ch.seq] === 'error'
+                      ? 'error'
+                      : 'idle'
+                  "
+                >
+                  <span v-if="projectStore.currentWritingSeq === ch.seq" class="spinner-inline"></span>
+                  {{
+                    projectStore.currentWritingSeq === ch.seq
+                      ? "撰写中…"
+                      : (projectStore.chapters[ch.seq] || "").trim().length > 0
+                      ? "已完成 ✓"
+                      : projectStore.chapterStatuses[ch.seq] === 'error'
+                      ? "异常"
+                      : "未生成"
+                  }}
+                </span>
+
+                <!-- 单章操作按钮 -->
                 <button
-                  class="icon-btn"
+                  class="ch-action-btn"
                   :title="projectStore.chapters[ch.seq] ? '重新生成该章' : '生成该章'"
                   :disabled="projectStore.batchWriting || projectStore.currentWritingSeq === ch.seq"
                   @click.stop="handleWriteSingleChapter(ch.seq)"
@@ -544,45 +543,56 @@ function nextStep() {
                   ✍️
                 </button>
                 <button
-                  v-if="projectStore.chapters[ch.seq]"
-                  class="icon-btn icon-btn-danger"
+                  v-if="(projectStore.chapters[ch.seq] || '').trim().length > 0"
+                  class="ch-action-btn ch-action-danger"
                   title="清空该章"
                   :disabled="projectStore.batchWriting || projectStore.currentWritingSeq === ch.seq"
                   @click="handleClearChapter(ch.seq, $event)"
                 >
                   🗑️
                 </button>
+
+                <!-- 子标题展开/折叠 -->
+                <button
+                  v-if="chapterSubHeadingsMap[ch.seq] && chapterSubHeadingsMap[ch.seq].length > 0"
+                  class="collapse-toggle-icon"
+                  :class="{ collapsed: isChapterCollapsed(ch.seq) }"
+                  :title="isChapterCollapsed(ch.seq) ? '展开子标题' : '收起子标题'"
+                  @click="toggleChapterCollapse(ch.seq, $event)"
+                >
+                  {{ isChapterCollapsed(ch.seq) ? '▶' : '▼' }}
+                </button>
               </div>
             </div>
 
-            <!-- 该章节已存在内容时的多级子标题目录列表 -->
-            <transition name="tree-collapse">
+            <!-- 多级子标题列表 (平铺目录树，由外层单一全局垂直滚动条滚动) -->
+            <transition name="tree-expand">
               <div
                 v-if="!isChapterCollapsed(ch.seq) && chapterSubHeadingsMap[ch.seq] && chapterSubHeadingsMap[ch.seq].length > 0"
-                class="subheadings-tree"
+                class="subheadings-subtree"
               >
                 <div
                   v-for="sub in chapterSubHeadingsMap[ch.seq]"
                   :key="sub.id"
-                  class="subheading-item"
+                  class="subheading-item-row"
                   :class="`level-${sub.level}`"
                   :title="sub.title"
                   @click="handleSubHeadingClick(ch.seq, sub.id, $event)"
                 >
-                  <span class="subheading-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
-                  <span class="subheading-text">{{ sub.title }}</span>
+                  <span class="sub-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
+                  <span class="sub-text">{{ sub.title }}</span>
                 </div>
               </div>
             </transition>
           </div>
 
-          <div v-if="totalChapters === 0" class="empty-list-tip">
+          <div v-if="totalChapters === 0" class="empty-outline-tip">
             暂无章节目录，请返回步骤 2「模板与大纲」生成或编写大纲。
           </div>
         </div>
       </aside>
 
-      <!-- 右侧：单栏排版就地可编辑主画布 -->
+      <!-- 右侧：10.5pt 出版级排版所见即所得主画布 -->
       <main class="editor-panel card">
         <div class="card-header editor-header">
           <div class="editor-title-area">
@@ -607,12 +617,13 @@ function nextStep() {
             </div>
           </div>
 
-          <!-- 右上角单章写作操作与视图切换 -->
+          <!-- 右上角快捷操作组 (保留 Hint, 参考资料, 复制 Markdown 与流式生成操作) -->
           <div class="editor-actions">
             <button
               class="btn btn-outline"
               @click="showHintSection = !showHintSection"
               :class="{ active: showHintSection }"
+              title="设置本章重点写作提示，注入 Prompt 进行针对性工程论述"
             >
               💡 {{ showHintSection ? "收起提示" : "写作提示 (Hint)" }}
             </button>
@@ -624,6 +635,14 @@ function nextStep() {
               title="查看本章正文中命中的底稿文件与规程标准引用清单"
             >
               📚 参考资料 ({{ currentChapterReferences.length }})
+            </button>
+
+            <button
+              class="btn btn-outline"
+              @click="copyCurrentChapterMarkdown"
+              title="复制当前章节排版 Markdown 源码至剪贴板"
+            >
+              📋 复制 Markdown
             </button>
 
             <button
@@ -639,7 +658,7 @@ function nextStep() {
               :disabled="!currentChapter || projectStore.batchWriting"
               @click="handleWriteSingleChapter()"
             >
-              {{ currentChapterWords > 0 ? "🔄 重新流式生成本章" : "✍️ 单章流式写作" }}
+              {{ currentChapterWords > 0 ? "🔄 重新生成本章" : "✍️ 单章流式写作" }}
             </button>
           </div>
         </div>
@@ -662,39 +681,11 @@ function nextStep() {
 
           <!-- 单栏排版就地可编辑画布区 -->
           <div class="writing-canvas">
-            <div class="canvas-toolbar">
-              <div class="toolbar-left">
-                <span class="toolbar-label">
-                  {{ viewMode === 'rich' ? '📖 单栏排版就地编辑器' : '📝 Markdown 源码编辑器' }}
-                </span>
-                <span class="toolbar-tip">
-                  {{
-                    viewMode === 'rich'
-                      ? '支持直接在排版文字上点击输入、改字与润色，流式打字机实时排版，300ms 自动落盘。'
-                      : '纯文本 Markdown 源码编辑模式，可直接查阅与编辑原生 Markdown 标记。'
-                  }}
-                </span>
-              </div>
-              <div class="toolbar-right">
-                <div class="view-mode-group">
-                  <button
-                    class="mode-btn"
-                    :class="{ active: viewMode === 'rich' }"
-                    @click="switchViewMode('rich')"
-                    title="切换至单栏排版就地编辑器"
-                  >
-                    👁️ 排版视图
-                  </button>
-                  <button
-                    class="mode-btn"
-                    :class="{ active: viewMode === 'source' }"
-                    @click="switchViewMode('source')"
-                    title="切换至 Markdown 源码视图"
-                  >
-                    📝 源码视图
-                  </button>
-                </div>
-              </div>
+            <div class="canvas-spec-bar">
+              <span class="spec-tag">📖 国家发改委与行业规程出版级排版 (10.5pt)</span>
+              <span class="spec-tip">
+                支持直接在排版文字上点击输入、改字与润色，流式打字机实时排版，300ms 自动落盘。
+              </span>
             </div>
 
             <!-- 动态构思等待卡片：当正在流式写作且正文字数为 0 时展示 -->
@@ -833,25 +824,15 @@ function nextStep() {
               </div>
             </transition>
 
-            <!-- 排版模式：就地 contenteditable 编辑画布 -->
+            <!-- 纯净排版模式：就地 contenteditable 编辑画布 -->
             <div
-              v-show="viewMode === 'rich' && (!isCurrentChapterWriting || currentChapterWords > 0)"
+              v-show="!isCurrentChapterWriting || currentChapterWords > 0"
               ref="editorCanvasRef"
               contenteditable="true"
               class="rich-rendered-editor"
               @input="onEditorInput"
               data-placeholder="点击上方「✍️ 单章流式写作」或「🚀 一键开始全书写作」，系统将结合工程底稿与标准规程自动打字机式流式生成章节排版正文；生成后可直接在文字上就地点击输入编辑..."
             ></div>
-
-            <!-- 源码模式：纯文本 textarea -->
-            <textarea
-              v-show="viewMode === 'source' && (!isCurrentChapterWriting || currentChapterWords > 0)"
-              ref="editorTextareaRef"
-              class="writing-textarea"
-              placeholder="点击上方「✍️ 单章流式写作」或「🚀 一键开始全书写作」，系统将结合工程底稿与标准规程自动流式生成 Markdown 章节正文..."
-              :value="currentChapterText"
-              @input="onChapterTextInput"
-            ></textarea>
           </div>
         </div>
 
@@ -955,7 +936,7 @@ function nextStep() {
 
 .writing-layout {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: 350px 1fr;
   gap: 18px;
   min-height: 680px;
 }
@@ -1047,43 +1028,74 @@ function nextStep() {
   background: #e2e8f0;
 }
 
-.sidebar-collapse-toolbar {
+/* 推荐写作顺序流程胶囊指示 */
+.writing-order-box {
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 8px 10px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 8px;
-  background: #f1f5f9;
-  border-radius: 6px;
-  border: 1px solid #e2e8f0;
-}
-.collapse-hint-label {
-  font-size: 11px;
-  color: #64748b;
-  font-weight: 500;
-}
-.collapse-btn-group {
-  display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
 }
-.btn-xs-text {
-  background: none;
-  border: none;
-  font-size: 11px;
-  color: #2563eb;
+.order-box-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.order-icon {
+  font-size: 13px;
+}
+.order-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #1e40af;
+}
+.order-flow-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.order-node-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.order-chip {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 3px;
   font-weight: 500;
   transition: all 0.15s ease;
 }
-.btn-xs-text:hover {
-  background: #dbeafe;
+.order-chip:hover {
+  border-color: #3b82f6;
   color: #1d4ed8;
 }
-.collapse-btn-divider {
-  color: #cbd5e1;
-  font-size: 10px;
+.order-chip.active {
+  background: #3b82f6;
+  color: #ffffff;
+  border-color: #2563eb;
+  font-weight: 600;
+}
+.order-chip.completed:not(.active) {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+.order-chip.writing:not(.active) {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+.flow-arrow {
+  font-size: 9px;
+  color: #94a3b8;
 }
 
 .global-actions {
@@ -1092,148 +1104,124 @@ function nextStep() {
   background: #fff;
 }
 
-.chapter-list {
+/* Flat 平铺一体化目录树 (单一定高全局滚动) */
+.outline-tree-scrollable {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.chapter-item-container {
+  overflow-x: hidden;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.outline-tree-scrollable::-webkit-scrollbar {
+  width: 5px;
+}
+.outline-tree-scrollable::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.outline-tree-scrollable::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
-.chapter-card {
+.empty-outline-tip {
+  padding: 24px 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chapter-tree-node {
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  overflow: hidden;
+  transition: all 0.15s ease;
+}
+.chapter-tree-node.is-active {
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.chapter-node-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
+  padding: 6px 8px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  user-select: none;
+  border-radius: 6px;
+  background: transparent;
+  transition: background 0.15s ease;
+  gap: 6px;
 }
-.chapter-card:hover {
-  border-color: #93c5fd;
-  background: #f8fafc;
+.chapter-node-row:hover {
+  background: #f1f5f9;
 }
-.chapter-card.active {
-  border-color: #2563eb;
+.chapter-tree-node.is-active .chapter-node-row {
   background: #eff6ff;
-  box-shadow: 0 0 0 1px #2563eb;
-}
-.chapter-card.writing {
-  border-color: #f59e0b;
-  background: #fffbeb;
 }
 
-.chapter-card-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.chapter-card-top {
+.row-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
 }
-.ch-seq-circle {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: #e2e8f0;
+.ch-seq-tag {
+  background: #f1f5f9;
   color: #475569;
   font-size: 11px;
   font-weight: 700;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
-.chapter-card.active .ch-seq-circle {
-  background: #2563eb;
+.chapter-tree-node.is-active .ch-seq-tag {
+  background: #3b82f6;
   color: #fff;
 }
-.chapter-card.completed .ch-seq-circle {
+.chapter-tree-node.is-completed:not(.is-active) .ch-seq-tag {
   background: #dcfce7;
   color: #15803d;
 }
 
-.ch-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: #1e293b;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.chapter-card.active .ch-title {
-  color: #1d4ed8;
+.ch-title-text {
+  font-size: 12.5px;
   font-weight: 600;
-}
-
-.ch-collapse-toggle-btn {
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  color: #475569;
-  font-size: 10.5px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  flex-shrink: 0;
-  margin-left: auto;
-  transition: all 0.15s ease;
-  font-weight: 500;
-}
-.ch-collapse-toggle-btn:hover {
-  background: #e2e8f0;
   color: #1e293b;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
 }
-.ch-collapse-toggle-btn.collapsed {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #2563eb;
-}
-
-.tree-collapse-enter-active,
-.tree-collapse-leave-active {
-  transition: all 0.2s ease;
-  overflow: hidden;
-}
-.tree-collapse-enter-from,
-.tree-collapse-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
-  max-height: 0;
+.chapter-tree-node.is-active .ch-title-text {
+  color: #1d4ed8;
 }
 
-.chapter-card-meta {
+.row-right {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-left: 28px;
-}
-.ch-words {
-  font-size: 11px;
-  color: #64748b;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .status-pill {
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 10px;
   font-weight: 500;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  white-space: nowrap;
 }
 .status-pill.idle {
   background: #f1f5f9;
@@ -1252,97 +1240,75 @@ function nextStep() {
   color: #b91c1c;
 }
 
-.chapter-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 8px;
-}
-
-.icon-btn {
+.ch-action-btn {
   background: none;
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
-  padding: 3px 6px;
-  font-size: 12px;
+  padding: 2px 4px;
+  font-size: 11px;
   transition: all 0.15s;
 }
-.icon-btn:hover:not(:disabled) {
+.ch-action-btn:hover:not(:disabled) {
   background: #e2e8f0;
   border-color: #cbd5e1;
 }
-.icon-btn:disabled {
+.ch-action-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
 }
-.icon-btn-danger:hover:not(:disabled) {
+.ch-action-danger:hover:not(:disabled) {
   background: #fee2e2;
   border-color: #fca5a5;
 }
 
-/* 左侧多级子标题目录树 */
-.subheadings-tree {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 6px 6px 14px;
-  margin-left: 12px;
-  border-left: 2px solid #e2e8f0;
+.collapse-toggle-icon {
+  background: transparent;
+  border: none;
+  font-size: 9px;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.collapse-toggle-icon:hover {
+  color: #475569;
 }
 
-.subheading-item {
+/* 子标题层级 */
+.subheadings-subtree {
+  padding: 2px 0 4px 0;
+  background: transparent;
+}
+.subheading-item-row {
+  padding: 3px 8px 3px 26px;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px;
-  border-radius: 4px;
   cursor: pointer;
-  transition: all 0.15s ease;
-  user-select: none;
-  overflow: hidden;
-}
-.subheading-item:hover {
-  background: #eff6ff;
-  color: #2563eb;
-}
-.subheading-item.level-2 {
-  padding-left: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #334155;
-}
-.subheading-item.level-3 {
-  padding-left: 20px;
   font-size: 11.5px;
-  font-weight: 400;
   color: #64748b;
+  border-radius: 4px;
+  transition: all 0.12s ease;
 }
-.subheading-item.level-4 {
-  padding-left: 28px;
-  font-size: 11px;
-  font-weight: 400;
-  color: #94a3b8;
+.subheading-item-row:hover {
+  background: #f1f5f9;
+  color: #0f172a;
 }
-
-.subheading-bullet {
-  font-size: 10px;
+.subheading-item-row.level-3 {
+  padding-left: 36px;
+}
+.subheading-item-row.level-4 {
+  padding-left: 46px;
+}
+.sub-bullet {
+  font-size: 9px;
   flex-shrink: 0;
-  opacity: 0.7;
+  opacity: 0.6;
 }
-
-.subheading-text {
+.sub-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.empty-list-tip {
-  padding: 30px 16px;
-  text-align: center;
-  color: #94a3b8;
-  font-size: 13px;
-  line-height: 1.5;
 }
 
 /* 右侧编辑器面板 */
@@ -1411,7 +1377,7 @@ function nextStep() {
 .editor-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -1420,7 +1386,7 @@ function nextStep() {
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 /* Hint 区域 */
@@ -1474,60 +1440,29 @@ function nextStep() {
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
-.canvas-toolbar {
+.canvas-spec-bar {
   padding: 8px 14px;
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-.toolbar-left {
-  display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 0;
 }
-.toolbar-label {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #334155;
-  white-space: nowrap;
+.spec-tag {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e40af;
+  background: #dbeafe;
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
-.toolbar-tip {
+.spec-tip {
   font-size: 11px;
   color: #64748b;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.toolbar-right {
-  flex-shrink: 0;
-}
-.view-mode-group {
-  display: inline-flex;
-  background: #e2e8f0;
-  padding: 2px;
-  border-radius: 6px;
-}
-.mode-btn {
-  background: transparent;
-  border: none;
-  padding: 4px 10px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: #64748b;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.mode-btn.active {
-  background: #fff;
-  color: #1d4ed8;
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 /* 动态构思指示卡片 */
@@ -2092,25 +2027,6 @@ function nextStep() {
   animation: headingPulse 1.5s ease-out forwards;
 }
 
-/* 源码模式 textarea */
-.writing-textarea {
-  flex: 1;
-  border: none;
-  padding: 20px 24px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 14px;
-  line-height: 1.8;
-  color: #0f172a;
-  background: #ffffff;
-  outline: none;
-  resize: none;
-  min-height: 480px;
-  max-height: calc(100vh - 250px);
-}
-.writing-textarea:focus {
-  background: #ffffff;
-}
-
 /* 按钮通用 */
 .btn {
   padding: 7px 16px;
@@ -2212,6 +2128,18 @@ function nextStep() {
 .slide-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+.tree-expand-enter-active,
+.tree-expand-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.tree-expand-enter-from,
+.tree-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+  max-height: 0;
 }
 
 /* ═════════════════════════════════════════════════════════ */

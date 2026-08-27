@@ -678,12 +678,18 @@ class ChapterWriter:
         return result if result > 0 else 0
 
     def _build_prev_context(self, predecessor_chapters: dict) -> str:
-        """构建前序章正文。"""
+        """构建前序章正文。按章节自然升序排列格式化供大模型参考。"""
         if not predecessor_chapters:
             return ""
+        def _sort_key(k):
+            try:
+                return int(k)
+            except Exception:
+                return 999
         parts = []
-        for num, content in predecessor_chapters.items():
-            parts.append(f"## 第 {num} 章\n{content}")
+        for num, content in sorted(predecessor_chapters.items(), key=lambda item: _sort_key(item[0])):
+            if content and str(content).strip():
+                parts.append(f"## 第 {num} 章\n{content}")
         return "\n\n---\n\n".join(parts)
 
     def _build_cross_chapter_lock(self, outline_md: str,
@@ -712,7 +718,7 @@ class ChapterWriter:
                 current_ch = _extract_ch_seq(line)
                 continue
 
-            if current_ch not in predecessor_chapters:
+            if current_ch not in predecessor_chapters and str(current_ch) not in predecessor_chapters:
                 continue
 
             if line.startswith('## '):

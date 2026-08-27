@@ -111,6 +111,10 @@ export function getOutlineStorageKey(projectName: string): string {
   return `frl_outline_${projectName}`;
 }
 
+export function getWritingOrderStorageKey(projectName: string): string {
+  return `frl_writing_order_${projectName}`;
+}
+
 export function getChaptersStorageKey(projectName: string): string {
   return `frl_chapters_${projectName}`;
 }
@@ -119,9 +123,66 @@ export function getReviewsStorageKey(projectName: string): string {
   return `frl_reviews_${projectName}`;
 }
 
+export function deriveDefaultWritingOrder(
+  chapters: ChapterInfo[],
+  _reportTypeStr = "",
+): number[] {
+  if (!chapters || chapters.length === 0) return [];
+  const seqs = chapters.map((c) => c.seq);
+  if (seqs.length <= 1) return seqs;
+
+  const maxSeq = Math.max(...seqs);
+  const body = seqs.filter((s) => s !== 1 && s !== maxSeq);
+  const res = [...body, 1];
+  if (maxSeq > 1) {
+    res.push(maxSeq);
+  }
+  return res;
+}
+
+export function loadWritingOrderFromLocal(
+  projectName: string,
+): { order: number[]; reason: string } | null {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(getWritingOrderStorageKey(projectName));
+      if (raw) {
+        return JSON.parse(raw);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function saveWritingOrderToLocal(
+  projectName: string,
+  order: number[],
+  reason = "",
+): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(
+        getWritingOrderStorageKey(projectName),
+        JSON.stringify({ order, reason }),
+      );
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export function loadOutlineFromLocal(
   projectName: string,
-): { report_type?: string; outline_md?: string; chapters?: ChapterInfo[]; updated_at?: string } | null {
+): {
+  report_type?: string;
+  outline_md?: string;
+  chapters?: ChapterInfo[];
+  writing_order?: number[];
+  writing_order_reason?: string;
+  updated_at?: string;
+} | null {
   try {
     if (typeof localStorage !== "undefined") {
       const raw = localStorage.getItem(getOutlineStorageKey(projectName));
@@ -141,6 +202,8 @@ export function saveOutlineToLocal(
     report_type: string;
     outline_md: string;
     chapters: ChapterInfo[];
+    writing_order?: number[];
+    writing_order_reason?: string;
     updated_at?: string;
   },
 ): void {
@@ -301,6 +364,8 @@ export const useProjectStore = defineStore("project", () => {
   const loadingTemplates = ref<boolean>(false);
   const outlineMd = ref<string>("");
   const outlineChapters = ref<ChapterInfo[]>([]);
+  const writingOrder = ref<number[]>([]);
+  const writingOrderReason = ref<string>("");
   const generatingOutline = ref<boolean>(false);
 
   // Step 3 章节流式写作状态
@@ -383,6 +448,8 @@ export const useProjectStore = defineStore("project", () => {
           materials.value = [];
           outlineMd.value = "";
           outlineChapters.value = [];
+          writingOrder.value = [];
+          writingOrderReason.value = "";
           chapters.value = {};
           chapterStatuses.value = {};
           chapterReviews.value = {};
@@ -403,6 +470,8 @@ export const useProjectStore = defineStore("project", () => {
         materials.value = [];
         outlineMd.value = "";
         outlineChapters.value = [];
+        writingOrder.value = [];
+        writingOrderReason.value = "";
         chapters.value = {};
         chapterStatuses.value = {};
         chapterReviews.value = {};
@@ -439,6 +508,7 @@ export const useProjectStore = defineStore("project", () => {
       if (typeof localStorage !== "undefined") {
         try {
           localStorage.removeItem(getOutlineStorageKey(name));
+          localStorage.removeItem(getWritingOrderStorageKey(name));
           localStorage.removeItem(getChaptersStorageKey(name));
           localStorage.removeItem(getReviewsStorageKey(name));
           localStorage.removeItem(getFullReviewStorageKey(name));
@@ -449,6 +519,8 @@ export const useProjectStore = defineStore("project", () => {
       materials.value = [];
       outlineMd.value = "";
       outlineChapters.value = [];
+      writingOrder.value = [];
+      writingOrderReason.value = "";
       chapters.value = {};
       chapterStatuses.value = {};
       chapterReviews.value = {};
@@ -474,6 +546,7 @@ export const useProjectStore = defineStore("project", () => {
       if (typeof localStorage !== "undefined") {
         try {
           localStorage.removeItem(getOutlineStorageKey(name));
+          localStorage.removeItem(getWritingOrderStorageKey(name));
           localStorage.removeItem(getChaptersStorageKey(name));
           localStorage.removeItem(getReviewsStorageKey(name));
           localStorage.removeItem(getFullReviewStorageKey(name));
@@ -487,6 +560,8 @@ export const useProjectStore = defineStore("project", () => {
         materials.value = [];
         outlineMd.value = "";
         outlineChapters.value = [];
+        writingOrder.value = [];
+        writingOrderReason.value = "";
         chapters.value = {};
         chapterStatuses.value = {};
         chapterReviews.value = {};
@@ -666,7 +741,18 @@ export const useProjectStore = defineStore("project", () => {
       });
       outlineMd.value = res.outline_md;
       outlineChapters.value = res.chapters;
+      if (res.writing_order && res.writing_order.length > 0) {
+        writingOrder.value = res.writing_order;
+        writingOrderReason.value = res.writing_order_reason || "";
+      } else {
+        writingOrder.value = deriveDefaultWritingOrder(res.chapters, targetType);
+        writingOrderReason.value =
+          writingOrder.value[0] !== 1
+            ? "先完成背景、需求、选址、工程方案及投资等主体论证章节，再汇总提炼第一章概述与综合结论，确保全书数据逻辑自洽与高效推演。"
+            : "按照报告标准章节结构依次推进编写，确保各章节逻辑严密衔接。";
+      }
       if (targetProject) {
+        saveWritingOrderToLocal(targetProject, writingOrder.value, writingOrderReason.value);
         await saveOutline(baseUrl, targetProject);
       }
       return res;
@@ -688,6 +774,8 @@ export const useProjectStore = defineStore("project", () => {
     if (!targetName) {
       outlineMd.value = "";
       outlineChapters.value = [];
+      writingOrder.value = [];
+      writingOrderReason.value = "";
       return null;
     }
 
@@ -707,16 +795,37 @@ export const useProjectStore = defineStore("project", () => {
           if (res.report_type) {
             reportType.value = res.report_type;
           }
+          if (res.writing_order && res.writing_order.length > 0) {
+            writingOrder.value = res.writing_order;
+            writingOrderReason.value = res.writing_order_reason || "";
+          } else {
+            const localWO = loadWritingOrderFromLocal(targetName);
+            if (localWO && localWO.order && localWO.order.length > 0) {
+              writingOrder.value = localWO.order;
+              writingOrderReason.value = localWO.reason || "";
+            } else {
+              writingOrder.value = deriveDefaultWritingOrder(outlineChapters.value, reportType.value);
+              writingOrderReason.value =
+                writingOrder.value[0] !== 1
+                  ? "先完成背景、需求、选址、工程方案及投资等主体论证章节，再汇总提炼第一章概述与综合结论，确保全书数据逻辑自洽与高效推演。"
+                  : "按照报告标准章节结构依次推进编写，确保各章节逻辑严密衔接。";
+            }
+          }
+          saveWritingOrderToLocal(targetName, writingOrder.value, writingOrderReason.value);
           saveOutlineToLocal(targetName, {
             report_type: reportType.value,
             outline_md: outlineMd.value,
             chapters: outlineChapters.value,
+            writing_order: writingOrder.value,
+            writing_order_reason: writingOrderReason.value,
             updated_at: res.updated_at,
           });
           loaded = true;
           return {
             outline_md: outlineMd.value,
             chapters: outlineChapters.value,
+            writing_order: writingOrder.value,
+            writing_order_reason: writingOrderReason.value,
           };
         }
       } catch (e) {
@@ -735,13 +844,34 @@ export const useProjectStore = defineStore("project", () => {
           local.chapters && local.chapters.length > 0
             ? local.chapters
             : parseChaptersFromOutline(local.outline_md || "");
+        if (local.writing_order && local.writing_order.length > 0) {
+          writingOrder.value = local.writing_order;
+          writingOrderReason.value = local.writing_order_reason || "";
+        } else {
+          const localWO = loadWritingOrderFromLocal(targetName);
+          if (localWO && localWO.order && localWO.order.length > 0) {
+            writingOrder.value = localWO.order;
+            writingOrderReason.value = localWO.reason || "";
+          } else {
+            writingOrder.value = deriveDefaultWritingOrder(outlineChapters.value, reportType.value);
+            writingOrderReason.value =
+              writingOrder.value[0] !== 1
+                ? "先完成背景、需求、选址、工程方案及投资等主体论证章节，再汇总提炼第一章概述与综合结论，确保全书数据逻辑自洽与高效推演。"
+                : "按照报告标准章节结构依次推进编写，确保各章节逻辑严密衔接。";
+          }
+        }
+        saveWritingOrderToLocal(targetName, writingOrder.value, writingOrderReason.value);
         return {
           outline_md: outlineMd.value,
           chapters: outlineChapters.value,
+          writing_order: writingOrder.value,
+          writing_order_reason: writingOrderReason.value,
         };
       } else {
         outlineMd.value = "";
         outlineChapters.value = [];
+        writingOrder.value = [];
+        writingOrderReason.value = "";
       }
     }
     return null;
@@ -757,10 +887,13 @@ export const useProjectStore = defineStore("project", () => {
       report_type: reportType.value,
       outline_md: outlineMd.value,
       chapters: outlineChapters.value,
+      writing_order: writingOrder.value,
+      writing_order_reason: writingOrderReason.value,
       updated_at: new Date().toISOString(),
     };
 
     saveOutlineToLocal(targetName, payload);
+    saveWritingOrderToLocal(targetName, writingOrder.value, writingOrderReason.value);
 
     if (targetUrl) {
       try {
@@ -779,8 +912,11 @@ export const useProjectStore = defineStore("project", () => {
       report_type: reportType.value,
       outline_md: outlineMd.value,
       chapters: outlineChapters.value,
+      writing_order: writingOrder.value,
+      writing_order_reason: writingOrderReason.value,
       updated_at: new Date().toISOString(),
     });
+    saveWritingOrderToLocal(targetName, writingOrder.value, writingOrderReason.value);
 
     if (debounceTimer) {
       clearTimeout(debounceTimer);
@@ -979,11 +1115,12 @@ export const useProjectStore = defineStore("project", () => {
       saveChaptersToLocal(targetName, chapters.value);
     }
 
-    // 汇总前序章节
+    // 汇总全量前序参考章节：遍历当前 chapters.value 中所有已有正文且非当前章的章节
     const predecessor_chapters: Record<string, string> = {};
-    for (let i = 1; i < seq; i++) {
-      if (chapters.value[i]) {
-        predecessor_chapters[String(i)] = chapters.value[i];
+    for (const [k, v] of Object.entries(chapters.value)) {
+      const chSeq = Number(k);
+      if (!isNaN(chSeq) && chSeq !== seq && v && v.trim().length > 0) {
+        predecessor_chapters[String(chSeq)] = v;
       }
     }
 
@@ -1072,6 +1209,7 @@ export const useProjectStore = defineStore("project", () => {
   async function writeAllChapters(
     baseUrl: string,
     llmConfig: LLMConfig,
+    forceAll = false,
   ): Promise<void> {
     if (batchWriting.value) return;
     const targetChapters = outlineChapters.value;
@@ -1079,14 +1217,29 @@ export const useProjectStore = defineStore("project", () => {
       throw new Error("大纲中暂无章节");
     }
 
+    // 确定执行序列：优先采用 writingOrder，若为空则采用大纲自然顺序
+    const execOrder =
+      writingOrder.value && writingOrder.value.length > 0
+        ? writingOrder.value
+        : targetChapters.map((c) => c.seq);
+
+    // 断点智能续写过滤：仅写未生成或正文为空的章节（forceAll 为 true 时重写全部）
+    const targetSeqs = execOrder.filter(
+      (seq) => forceAll || !chapters.value[seq] || chapters.value[seq].trim().length === 0,
+    );
+
+    if (targetSeqs.length === 0) {
+      return;
+    }
+
     batchWriting.value = true;
     error.value = null;
 
     try {
-      for (const ch of targetChapters) {
+      for (const seq of targetSeqs) {
         if (!batchWriting.value) break;
-        selectedChapterSeq.value = ch.seq;
-        await writeSingleChapterStream(baseUrl, ch.seq, llmConfig);
+        selectedChapterSeq.value = seq;
+        await writeSingleChapterStream(baseUrl, seq, llmConfig);
       }
     } catch (e) {
       error.value = (e as Error).message;
@@ -1683,6 +1836,9 @@ export const useProjectStore = defineStore("project", () => {
     loadingTemplates,
     outlineMd,
     outlineChapters,
+    writingOrder,
+    writingOrderReason,
+    deriveDefaultWritingOrder,
     generatingOutline,
     chapters,
     chapterStatuses,

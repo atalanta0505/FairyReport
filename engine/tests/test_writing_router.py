@@ -129,7 +129,7 @@ def test_outline_409_no_pack(client):
 
 # ── outline 章数/顺序与模板一致 ──
 def test_outline_returns_template_chapters(client, installed_pack):
-    """已安装 stub 包：outline 返回模板预定义大纲，章数/顺序与模板一致。"""
+    """已安装 stub 包：outline 返回模板预定义大纲，章数/顺序与模板一致，并返回推荐写作顺序。"""
     _set_llm(LLMStub())  # 模板有 outline_md，不走 LLM
     resp = client.post("/writing/outline", json={
         "project": "demo", "report_type": "可行性研究报告", "llm_config": LLM_CONFIG,
@@ -139,6 +139,8 @@ def test_outline_returns_template_chapters(client, installed_pack):
     seqs = [c["seq"] for c in body["chapters"]]
     assert seqs == [1, 2, 3]
     assert "第一章" in body["outline_md"]
+    assert body["writing_order"] == [2, 1, 3]
+    assert "主体论证章节" in body["writing_order_reason"]
 
 
 # ── chapter SSE ──
@@ -306,7 +308,7 @@ def test_list_templates_returns_14_types(client):
 
 
 def test_list_templates_with_installed_pack(client, installed_pack):
-    """已安装通用包时获取模板详情与 notes。"""
+    """已安装通用包时获取模板详情、notes 与推荐写作顺序。"""
     resp = client.get("/writing/templates")
     assert resp.status_code == 200
     items = resp.json()
@@ -314,6 +316,8 @@ def test_list_templates_with_installed_pack(client, installed_pack):
     fe = next(it for it in items if it["report_type"] == "可行性研究报告")
     assert fe["total_words_max"] == 50000
     assert "测试模板规范" in fe["notes"]
+    assert fe["writing_order"] == [2, 1, 3]
+    assert "主体论证章节" in fe["writing_order_reason"]
 
 
 # ── outline 持久化 ──

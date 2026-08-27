@@ -291,3 +291,78 @@ def test_query_rag_composite_query(monkeypatch):
     assert "产业政策 规程 建设方案" in q
     assert "【网:权威报告】" in res
 
+
+# ── templates_loader.get_writing_order & reason ──
+def test_get_writing_order_derivation_from_template(monkeypatch):
+    from engine.app.writing import templates_loader as tmpl
+
+    # 模拟可研报告 11 章模板（第 1 章与第 11 章为 is_summary）
+    mock_tmpl = {
+        "report_type": "可行性研究报告",
+        "chapters": [
+            {"seq": 1, "title": "第一章 概述", "is_summary": True},
+            {"seq": 2, "title": "第二章 项目建设背景和必要性", "is_summary": False},
+            {"seq": 3, "title": "第三章 需求分析", "is_summary": False},
+            {"seq": 4, "title": "第四章 选址", "is_summary": False},
+            {"seq": 5, "title": "第五章 建设方案", "is_summary": False},
+            {"seq": 6, "title": "第六章 运营方案", "is_summary": False},
+            {"seq": 7, "title": "第七章 投融资方案", "is_summary": False},
+            {"seq": 8, "title": "第八章 影响效果", "is_summary": False},
+            {"seq": 9, "title": "第九章 风险管控", "is_summary": False},
+            {"seq": 10, "title": "第十章 研究结论及建议", "is_summary": False},
+            {"seq": 11, "title": "第十一章 附表附图", "is_summary": True},
+        ]
+    }
+    monkeypatch.setattr(tmpl, "load_template", lambda rt: mock_tmpl)
+
+    order = tmpl.get_writing_order("可行性研究报告")
+    assert order == [2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 11]
+
+    reason = tmpl.get_writing_order_reason("可行性研究报告")
+    assert "先完成背景、需求、选址、工程方案及投资等主体论证章节" in reason
+
+
+def test_get_writing_order_explicit_config(monkeypatch):
+    from engine.app.writing import templates_loader as tmpl
+
+    mock_tmpl = {
+        "report_type": "自定义报告",
+        "writing_order": [3, 2, 1],
+        "writing_order_reason": "自定义推荐顺序说明",
+        "chapters": [
+            {"seq": 1, "title": "第一章"},
+            {"seq": 2, "title": "第二章"},
+            {"seq": 3, "title": "第三章"},
+        ]
+    }
+    monkeypatch.setattr(tmpl, "load_template", lambda rt: mock_tmpl)
+
+    assert tmpl.get_writing_order("自定义报告") == [3, 2, 1]
+    assert tmpl.get_writing_order_reason("自定义报告") == "自定义推荐顺序说明"
+
+
+def test_get_writing_order_natural_fallback(monkeypatch):
+    from engine.app.writing import templates_loader as tmpl
+
+    monkeypatch.setattr(tmpl, "load_template", lambda rt: None)
+    assert tmpl.get_writing_order("未知类型", total_chapters=5) == [1, 2, 3, 4, 5]
+    assert "按照报告标准章节结构依次推进编写" in tmpl.get_writing_order_reason("未知类型")
+
+
+def test_writer_build_prev_context_natural_order_and_lock():
+    from engine.app.writing.writer import ChapterWriter
+
+    writer = ChapterWriter(llm=None, report_type="可行性研究报告")
+    predecessors = {
+        "3": "第三章内容",
+        "2": "第二章内容",
+        "10": "第十章内容",
+    }
+    context = writer._build_prev_context(predecessors)
+    # 应按 2, 3, 10 升序排列
+    idx_2 = context.find("## 第 2 章")
+    idx_3 = context.find("## 第 3 章")
+    idx_10 = context.find("## 第 10 章")
+    assert idx_2 != -1 and idx_3 != -1 and idx_10 != -1
+    assert idx_2 < idx_3 < idx_10
+

@@ -45,6 +45,8 @@ class OutlineData(BaseModel):
     report_type: str = "可行性研究报告"
     outline_md: str = ""
     chapters: list[dict] = Field(default_factory=list)
+    writing_order: list[int] = Field(default_factory=list)
+    writing_order_reason: str = ""
     updated_at: str = ""
 
 
@@ -82,6 +84,8 @@ class TemplateItemOut(BaseModel):
     report_type: str
     total_words_max: int
     notes: str = ""
+    writing_order: list[int] = Field(default_factory=list)
+    writing_order_reason: str = ""
 
 
 class LLMConfig(BaseModel):
@@ -162,7 +166,13 @@ def _read_outline_file(name: str) -> OutlineData:
         try:
             with open(p, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return OutlineData(**data)
+            outline_data = OutlineData(**data)
+            if not outline_data.writing_order and outline_data.report_type:
+                outline_data.writing_order = tmpl.get_writing_order(
+                    outline_data.report_type, total_chapters=len(outline_data.chapters)
+                )
+                outline_data.writing_order_reason = tmpl.get_writing_order_reason(outline_data.report_type)
+            return outline_data
         except Exception:
             pass
     return OutlineData()
@@ -381,10 +391,14 @@ def list_templates():
     for rt in REPORT_TYPES:
         limit = tmpl.get_word_limit(rt)
         notes = tmpl.get_template_notes(rt)
+        writing_order = tmpl.get_writing_order(rt)
+        writing_order_reason = tmpl.get_writing_order_reason(rt)
         items.append(TemplateItemOut(
             report_type=rt,
             total_words_max=limit,
             notes=notes,
+            writing_order=writing_order,
+            writing_order_reason=writing_order_reason,
         ))
     return items
 
@@ -402,6 +416,8 @@ def outline(req: OutlineRequest):
 
     titles = _extract_chapter_titles(outline_md)
     chapters = [{"seq": seq, "title": t} for seq, t in sorted(titles.items())]
+    writing_order = tmpl.get_writing_order(req.report_type, total_chapters=len(chapters))
+    writing_order_reason = tmpl.get_writing_order_reason(req.report_type)
 
     if req.project:
         try:
@@ -411,13 +427,20 @@ def outline(req: OutlineRequest):
                     report_type=req.report_type,
                     outline_md=outline_md,
                     chapters=chapters,
+                    writing_order=writing_order,
+                    writing_order_reason=writing_order_reason,
                     updated_at=datetime.now(timezone.utc).isoformat(),
                 ),
             )
         except Exception:
             pass
 
-    return {"outline_md": outline_md, "chapters": chapters}
+    return {
+        "outline_md": outline_md,
+        "chapters": chapters,
+        "writing_order": writing_order,
+        "writing_order_reason": writing_order_reason,
+    }
 
 
 @router.post("/writing/chapter")

@@ -790,6 +790,8 @@ describe("Pinia useProjectStore", () => {
               { seq: 1, title: "第一章 概述" },
               { seq: 2, title: "第二章 结论" },
             ],
+            writing_order: [2, 1],
+            writing_order_reason: "主体章节优先",
             updated_at: "2026-08-25T10:00:00Z",
           });
         }
@@ -801,12 +803,18 @@ describe("Pinia useProjectStore", () => {
       expect(store.outlineMd).toContain("第一章 概述");
       expect(store.outlineChapters).toHaveLength(2);
       expect(store.reportType).toBe("可行性研究报告");
+      expect(store.writingOrder).toEqual([2, 1]);
 
       // 验证 localStorage 备份写入
       const localRaw = mockLocalStorage.getItem("frl_outline_持久化项目");
       expect(localRaw).not.toBeNull();
       const localData = JSON.parse(localRaw!);
       expect(localData.outline_md).toContain("第一章 概述");
+      expect(localData.writing_order).toEqual([2, 1]);
+
+      const localWORaw = mockLocalStorage.getItem("frl_writing_order_持久化项目");
+      expect(localWORaw).not.toBeNull();
+      expect(JSON.parse(localWORaw!).order).toEqual([2, 1]);
     });
 
     it("loadOutline: 引擎接口异常时自动降级从 localStorage 恢复", async () => {
@@ -1128,21 +1136,42 @@ describe("Pinia useProjectStore", () => {
       expect(store.currentWritingSeq).toBeNull();
     });
 
-    it("writeAllChapters: 批量顺序流式写作所有章节", async () => {
+    it("deriveDefaultWritingOrder: 拓扑推导非第1章非尾章优先，第1章综述居后，尾章居末", () => {
+      const { deriveDefaultWritingOrder } = useProjectStore();
+      const chapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 需求分析" },
+        { seq: 3, title: "第三章 工程方案" },
+        { seq: 4, title: "第四章 投资估算" },
+        { seq: 5, title: "第五章 结论建议" },
+      ];
+      const order = deriveDefaultWritingOrder(chapters);
+      expect(order).toEqual([2, 3, 4, 1, 5]);
+    });
+
+    it("writeAllChapters: 按照 writingOrder 推荐顺序执行与断点智能续写", async () => {
       const store = useProjectStore();
       store.currentProject = { id: 1, name: "全书写作项目", created_at: "2026-08-25T00:00:00Z" };
-      store.outlineMd = "# 第一章 概述\n# 第二章 建设背景";
+      store.outlineMd = "# 第一章 概述\n# 第二章 建设背景\n# 第三章 方案设计";
       store.outlineChapters = [
         { seq: 1, title: "第一章 概述" },
         { seq: 2, title: "第二章 建设背景" },
+        { seq: 3, title: "第三章 方案设计" },
       ];
+      store.writingOrder = [2, 3, 1]; // 推荐拓扑顺序
+      // 预先将第 2 章标记为已有正文
+      store.chapters = { 2: "已有第二章内容" };
+      store.chapterStatuses = { 2: "completed" };
+
+      const executedSeqs: number[] = [];
 
       mockFetch.mockImplementation(async (url, opts) => {
         const u = String(url);
         const method = opts?.method || "GET";
         if (u.includes("/writing/chapter") && method === "POST") {
           const body = JSON.parse(String(opts?.body || "{}"));
-          return mockSSEResponse([`第${body.chapter_seq}章生成内容`]);
+          executedSeqs.push(body.chapter_seq);
+          return mockSSEResponse([`第${body.chapter_seq}章流式正文`]);
         }
         if (u.includes("/chapters/") && method === "POST") {
           return jsonResponse({ ok: true });
@@ -1150,17 +1179,32 @@ describe("Pinia useProjectStore", () => {
         return jsonResponse({});
       });
 
+      // 默认 forceAll = false: 应跳过第 2 章，只按 [3, 1] 顺序执行
       await store.writeAllChapters(BASE_URL, {
         api_key: "sk-test",
         base_url: "http://api",
         model: "m",
       });
 
-      expect(store.chapters[1]).toBe("第1章生成内容");
-      expect(store.chapters[2]).toBe("第2章生成内容");
-      expect(store.chapterStatuses[1]).toBe("completed");
-      expect(store.chapterStatuses[2]).toBe("completed");
+      expect(executedSeqs).toEqual([3, 1]);
+      expect(store.chapters[2]).toBe("已有第二章内容"); // 保持不变
+      expect(store.chapters[3]).toBe("第3章流式正文");
+      expect(store.chapters[1]).toBe("第1章流式正文");
       expect(store.batchWriting).toBe(false);
+
+      // 当 forceAll = true 时，全部章节按 [2, 3, 1] 执行
+      executedSeqs.length = 0;
+      await store.writeAllChapters(
+        BASE_URL,
+        {
+          api_key: "sk-test",
+          base_url: "http://api",
+          model: "m",
+        },
+        true,
+      );
+
+      expect(executedSeqs).toEqual([2, 3, 1]);
     });
 
     it("streamChapterWriting: 正确解析阶段指示事件与思考片段并通过 onProgress 派发", async () => {

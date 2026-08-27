@@ -172,6 +172,47 @@ def get_chapter_word_budget(report_type: str, chapter_seq: int) -> int:
     return get_chapter_word_limit(report_type)
 
 
+def get_writing_order(report_type: str, total_chapters: int = 0) -> list[int]:
+    """返回推荐章节写作顺序。优先取模板显式配置，其次按 is_summary 拓扑推导。"""
+    tmpl = load_template(report_type)
+    if tmpl and tmpl.get("writing_order"):
+        return list(tmpl["writing_order"])
+
+    if tmpl and "chapters" in tmpl and tmpl["chapters"]:
+        chs = tmpl["chapters"]
+        max_s = max(c.get("seq", 0) for c in chs)
+
+        # 1. 提取首部综述章（如 seq == 1 且 is_summary）
+        first_summary = [c["seq"] for c in chs if c.get("seq") == 1 and c.get("is_summary", False)]
+        non_first = [c["seq"] for c in chs if c.get("seq") == 1 and not c.get("is_summary", False)]
+
+        # 2. 提取尾部综述章（如 seq == max_s 且 is_summary）
+        last_summary = [c["seq"] for c in chs if c.get("seq") == max_s and c.get("is_summary", False)]
+        non_last = [c["seq"] for c in chs if c.get("seq") == max_s and not c.get("is_summary", False)]
+
+        # 3. 中间主体章节（2 <= seq < max_s）
+        body = [c["seq"] for c in chs if 1 < c.get("seq", 0) < max_s]
+
+        order = non_first + body + non_last + first_summary + last_summary
+        if order:
+            return order
+
+    if total_chapters > 0:
+        return list(range(1, total_chapters + 1))
+    return []
+
+
+def get_writing_order_reason(report_type: str) -> str:
+    """返回推荐写作顺序的逻辑说明。"""
+    tmpl = load_template(report_type)
+    if tmpl and tmpl.get("writing_order_reason"):
+        return tmpl["writing_order_reason"]
+    order = get_writing_order(report_type)
+    if order and len(order) > 1 and order[0] != 1:
+        return "先完成背景、需求、选址、工程方案及投资等主体论证章节，再汇总提炼第一章概述与综合结论，确保全书数据逻辑自洽与高效推演。"
+    return "按照报告标准章节结构依次推进编写，确保各章节逻辑严密衔接。"
+
+
 def require_installed() -> None:
     """显式要求通用包已安装；未装抛 TemplatesNotInstalled（路由映射 409）。"""
     state = GenericStore._read_state()

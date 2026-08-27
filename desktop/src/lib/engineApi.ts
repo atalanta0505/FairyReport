@@ -56,6 +56,8 @@ export interface TemplateItem {
   report_type: string;
   total_words_max: number;
   notes?: string;
+  writing_order?: number[];
+  writing_order_reason?: string;
 }
 
 export interface LLMConfig {
@@ -78,6 +80,8 @@ export interface ChapterInfo {
 export interface OutlineResult {
   outline_md: string;
   chapters: ChapterInfo[];
+  writing_order?: number[];
+  writing_order_reason?: string;
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -240,6 +244,8 @@ export interface OutlineData {
   report_type: string;
   outline_md: string;
   chapters: ChapterInfo[];
+  writing_order?: number[];
+  writing_order_reason?: string;
   updated_at?: string;
 }
 
@@ -282,6 +288,8 @@ export async function saveProjectOutline(
     report_type: string;
     outline_md: string;
     chapters?: ChapterInfo[];
+    writing_order?: number[];
+    writing_order_reason?: string;
     updated_at?: string;
   },
 ): Promise<OutlineResult & { report_type?: string; updated_at?: string }> {
