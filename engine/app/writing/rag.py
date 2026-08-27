@@ -26,6 +26,8 @@ def query_rag(
     n_results: int = None,
     include_generic: bool = True,
     include_web: bool = True,
+    topic: str = "",
+    report_name: str = "",
 ) -> str:
     """三源 RAG 检索，返回格式化字符串。
 
@@ -40,6 +42,18 @@ def query_rag(
     results: list[str] = []
     emb = None
 
+    rep_name = report_name or project_name or ""
+    # 构造项目/通用向量库精确检索词
+    search_parts = []
+    if rep_name:
+        search_parts.append(rep_name)
+    if topic and topic != rep_name:
+        search_parts.append(topic)
+    if query_text and query_text not in (rep_name, topic):
+        search_parts.append(query_text)
+
+    vector_query = " ".join(search_parts) if search_parts else query_text
+
     # ── 1. 项目库 ──
     try:
         if project_name and settings.vector_dir(project_name).exists():
@@ -47,7 +61,7 @@ def query_rag(
                 project_name, settings.vector_dir(project_name)
             )
             if store.count() > 0:
-                emb = get_embedder().encode([query_text])[0]
+                emb = get_embedder().encode([vector_query])[0]
                 res = store.collection.query(query_embeddings=[emb], n_results=n_results)
                 docs = (res.get("documents") or [[]])[0]
                 metas = (res.get("metadatas") or [[]])[0]
@@ -64,7 +78,7 @@ def query_rag(
             gen_col = GenericStore._get_collection()
             if gen_col and gen_col.count() > 0:
                 if emb is None:
-                    emb = get_embedder().encode([query_text])[0]
+                    emb = get_embedder().encode([vector_query])[0]
                 res = gen_col.query(query_embeddings=[emb], n_results=n_results)
                 docs = (res.get("documents") or [[]])[0]
                 for doc in docs:
@@ -73,12 +87,22 @@ def query_rag(
             _logger.warning("通用库检索失败: %s", e)
 
     # ── 3. 权威政务联网检索库（免 Key / .gov.cn 过滤）──
-    if include_web and query_text:
-        try:
-            web_content = web_search.search_gov_web(query_text, max_results=n_results)
-            if web_content and web_content.strip():
-                results.append(web_content.strip())
-        except Exception as e:
-            _logger.warning("权威政务联网检索失败: %s", e)
+    if include_web:
+        web_query_parts = []
+        if rep_name:
+            web_query_parts.append(rep_name)
+        if topic and topic != rep_name:
+            web_query_parts.append(topic)
+        if query_text and query_text not in (rep_name, topic):
+            web_query_parts.append(query_text)
+        web_query_parts.extend(["产业政策", "规程", "建设方案"])
+        web_query = " ".join([p for p in web_query_parts if p]).strip()
+        if web_query:
+            try:
+                web_content = web_search.search_gov_web(web_query, max_results=n_results)
+                if web_content and web_content.strip():
+                    results.append(web_content.strip())
+            except Exception as e:
+                _logger.warning("权威政务联网检索失败: %s", e)
 
     return "\n\n---\n\n".join(results) if results else "（无相关参考资料）"

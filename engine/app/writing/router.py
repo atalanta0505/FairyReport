@@ -31,6 +31,7 @@ from .refs import strip_fabricated_labels
 from .templates_loader import TemplatesNotInstalled
 from .writer import (
     ChapterWriter,
+    normalize_chapter_markdown,
     parse_expert_review_result,
     parse_tech_review_result,
     _build_writing_system_prompt,
@@ -103,6 +104,7 @@ class ChapterRequest(BaseModel):
     stream: bool = False
     llm_config: LLMConfig
     topic: str = ""
+    report_name: str = ""
     predecessor_chapters: dict = Field(default_factory=dict)
     writing_hint: str = ""
 
@@ -227,8 +229,9 @@ def get_project_chapters(name: str):
 @router.post("/writing/projects/{name}/chapters/{seq}", response_model=ChaptersData)
 def save_project_chapter(name: str, seq: int, req: ChapterSaveRequest):
     """保存单章 markdown 内容到 chapters.json 并落盘 chapters/chapter_{seq}.md。"""
+    cleaned_text = normalize_chapter_markdown(req.text)
     data = _read_chapters_file(name)
-    data.chapters[str(seq)] = req.text
+    data.chapters[str(seq)] = cleaned_text
     data.updated_at = datetime.now(timezone.utc).isoformat()
     _write_chapters_file(name, data)
 
@@ -237,7 +240,7 @@ def save_project_chapter(name: str, seq: int, req: ChapterSaveRequest):
     md_file = ch_dir / f"chapter_{seq}.md"
     try:
         with open(md_file, "w", encoding="utf-8") as f:
-            f.write(req.text)
+            f.write(cleaned_text)
     except Exception:
         pass
 
@@ -442,12 +445,20 @@ def chapter(req: ChapterRequest):
         )
 
     # 非流式 JSON
-    rag_context = query_rag(req.project, chapter_title, include_generic=True, include_web=True)
+    rep_name = req.report_name or req.project
+    rag_context = query_rag(
+        req.project,
+        chapter_title,
+        include_generic=True,
+        include_web=True,
+        topic=topic,
+        report_name=rep_name,
+    )
     try:
         content = writer.write_chapter(
             chapter_title, req.outline_md, req.predecessor_chapters,
             rag_context, topic, writing_hint=req.writing_hint,
-            report_name=req.project, chapter_budget=chapter_budget,
+            report_name=rep_name, chapter_budget=chapter_budget,
             is_summary=is_summary,
         )
     except LLMError as e:
@@ -466,7 +477,15 @@ def _stream_chapter(writer, llm, req, chapter_title,
             "message": "🔍 正在三源检索：工程底稿库 + 行业规程库 + 权威政务联网信息(.gov.cn)...",
         }, ensure_ascii=False))
 
-        rag_context = query_rag(req.project, chapter_title, include_generic=True, include_web=True)
+        rep_name = getattr(req, "report_name", "") or req.project
+        rag_context = query_rag(
+            req.project,
+            chapter_title,
+            include_generic=True,
+            include_web=True,
+            topic=topic,
+            report_name=rep_name,
+        )
 
         # 2. 骨架锁定与构建阶段
         yield _sse_event(json.dumps({

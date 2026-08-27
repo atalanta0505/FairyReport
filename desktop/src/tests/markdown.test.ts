@@ -349,6 +349,25 @@ describe("Markdown 解析与排版工具", () => {
       expect(normWithOnlyTitle).toBe("### 1.4.1 主要研究结论\n\n经深入评估...");
     });
 
+    it("支持已知大纲标题库与中文正文无标点直接紧连时精确断行（彻底根除粘连）", () => {
+      // 场景 1：已知标题后无任何标点，直接紧连中文正文
+      const directGlued = "### 1.4.1 主要研究结论经系统论证，本项目符合国家基础设施规划。";
+      const known = ["1.4.1 主要研究结论", "主要研究结论"];
+      const res1 = normalizeMarkdown(directGlued, known);
+      expect(res1).toBe("### 1.4.1 主要研究结论\n\n经系统论证，本项目符合国家基础设施规划。");
+
+      // 场景 2：带空格但无标点紧连
+      const spaceGlued = "### 1.1.2 建设目标与任务 本工程主要目标为防洪与灌溉。";
+      const res2 = normalizeMarkdown(spaceGlued, ["建设目标与任务"]);
+      expect(res2).toBe("### 1.1.2 建设目标与任务\n\n本工程主要目标为防洪与灌溉。");
+
+      // 场景 3：extractSubHeadings 提取出的子标题在无标点粘连下依然纯净
+      const subHeadings = extractSubHeadings(directGlued, 1, known);
+      expect(subHeadings).toHaveLength(1);
+      expect(subHeadings[0].title).toBe("1.4.1 主要研究结论");
+      expect(subHeadings[0].title).not.toContain("经系统论证");
+    });
+
     it("空值或非字符串防御", () => {
       expect(normalizeMarkdown("")).toBe("");
       expect(normalizeMarkdown(null as unknown as string)).toBe("");

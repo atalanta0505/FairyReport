@@ -393,26 +393,26 @@ def test_chapters_persistence_save_and_get(client):
     from engine.app.config import settings
     client.post("/projects", json={"name": "persist_ch_proj"})
 
-    r1 = client.post("/projects/persist_ch_proj/chapters/1", json={"text": "# 第一章 概述\n项目总体概述正文。"})
+    r1 = client.post("/projects/persist_ch_proj/chapters/1", json={"text": "# 第一章 概述\n\n项目总体概述正文。"})
     assert r1.status_code == 200
-    assert r1.json()["chapters"]["1"] == "# 第一章 概述\n项目总体概述正文。"
+    assert r1.json()["chapters"]["1"] == "# 第一章 概述\n\n项目总体概述正文。"
 
-    r2 = client.post("/projects/persist_ch_proj/chapters/2", json={"text": "# 第二章 建设背景\n建设必要性分析。"})
+    r2 = client.post("/projects/persist_ch_proj/chapters/2", json={"text": "# 第二章 建设背景\n\n建设必要性分析。"})
     assert r2.status_code == 200
-    assert r2.json()["chapters"]["2"] == "# 第二章 建设背景\n建设必要性分析。"
+    assert r2.json()["chapters"]["2"] == "# 第二章 建设背景\n\n建设必要性分析。"
 
     # 验证 GET 获取全部章节
     get_resp = client.get("/projects/persist_ch_proj/chapters")
     assert get_resp.status_code == 200
     all_chapters = get_resp.json()
     assert len(all_chapters["chapters"]) == 2
-    assert all_chapters["chapters"]["1"] == "# 第一章 概述\n项目总体概述正文。"
-    assert all_chapters["chapters"]["2"] == "# 第二章 建设背景\n建设必要性分析。"
+    assert all_chapters["chapters"]["1"] == "# 第一章 概述\n\n项目总体概述正文。"
+    assert all_chapters["chapters"]["2"] == "# 第二章 建设背景\n\n建设必要性分析。"
 
     # 验证 markdown 单文件存在
     ch1_file = settings.project_dir("persist_ch_proj") / "chapters" / "chapter_1.md"
     assert ch1_file.exists()
-    assert ch1_file.read_text(encoding="utf-8") == "# 第一章 概述\n项目总体概述正文。"
+    assert ch1_file.read_text(encoding="utf-8") == "# 第一章 概述\n\n项目总体概述正文。"
 
 
 def test_chapters_persistence_delete(client):
@@ -576,8 +576,7 @@ def test_build_chapter_write_args_skeleton_infilling():
     # 验证骨架靶向填充写作要求
     assert "## 写作要求（骨架靶向填充模式）" in prompt
     assert "骨架锁定（最高优先级）" in prompt
-    assert "必须严格保留上方【待填充的本章结构骨架】中的所有标题行（#、##、###、####）及其完整文字与层级" in prompt
-    assert "末级小节精准填充：在每一个最低级别标题（### / ####）下方空一行" in prompt
+    assert "末级小节精准填充：在每一个最低级别标题（### / ####）下方强制空一行（\\n\\n）" in prompt
     assert "非末级标题禁止堆砌正文：一级章（#）和二级节（##）作为分类与结构导引" in prompt
     assert "格式规范（极重要）" in prompt
 

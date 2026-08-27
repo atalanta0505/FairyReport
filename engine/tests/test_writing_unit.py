@@ -232,3 +232,62 @@ def test_llm_missing_config_raises_422():
     with pytest.raises(LLMError) as ei:
         LLMClient({"api_key": "", "base_url": "http://x", "model": "m"})
     assert ei.value.status_code == 422
+
+
+# ── writer.normalize_chapter_markdown ──
+def test_normalize_chapter_markdown_heading_separation_and_skeleton():
+    from engine.app.writing.writer import normalize_chapter_markdown
+
+    # 1. 骨架匹配与无标点粘连中文断行
+    raw = "### 1.4.1 主要研究结论经系统论证，本项目符合国家重大基础设施建设规划。"
+    sk = "# 第一章 概述\n### 1.4.1 主要研究结论"
+    res = normalize_chapter_markdown(raw, skeleton=sk)
+    assert res == "### 1.4.1 主要研究结论\n\n经系统论证，本项目符合国家重大基础设施建设规划。"
+
+    # 2. 标点紧随拆分
+    raw2 = "### 1.1.1 建设地点：本项目位于武汉市。"
+    assert normalize_chapter_markdown(raw2) == "### 1.1.1 建设地点\n\n本项目位于武汉市。"
+
+    # 3. 标题与加粗/表格粘连拆解
+    raw3 = "### 1.1.2 编制依据**发改委文件**"
+    assert normalize_chapter_markdown(raw3) == "### 1.1.2 编制依据\n\n**发改委文件**"
+
+    # 4. 表格单行 || 拆分
+    raw4 = "| 指标 | 数值 || --- | --- || 投资 | 5000 |"
+    norm4 = normalize_chapter_markdown(raw4)
+    assert "|\n|" in norm4
+
+    # 5. 标题与正文单换行补空行
+    raw5 = "### 1.1.3 建设内容\n本项目建设内容包含泵站与涵闸。"
+    assert normalize_chapter_markdown(raw5) == "### 1.1.3 建设内容\n\n本项目建设内容包含泵站与涵闸。"
+
+
+# ── rag.query_rag 复合检索 ──
+def test_query_rag_composite_query(monkeypatch):
+    from engine.app.writing.rag import query_rag
+    from engine.app.writing import web_search
+
+    captured_web_query = []
+
+    def stub_search(q, max_results=5):
+        captured_web_query.append(q)
+        return "【网:权威报告】\n  http://gov.cn\n  > 摘要"
+
+    monkeypatch.setattr(web_search, "search_gov_web", stub_search)
+
+    res = query_rag(
+        project_name="汉江水利枢纽",
+        query_text="第一章 概述",
+        include_generic=False,
+        include_web=True,
+        topic="生态防洪工程",
+        report_name="汉江水利枢纽",
+    )
+    assert len(captured_web_query) == 1
+    q = captured_web_query[0]
+    assert "汉江水利枢纽" in q
+    assert "生态防洪工程" in q
+    assert "第一章 概述" in q
+    assert "产业政策 规程 建设方案" in q
+    assert "【网:权威报告】" in res
+

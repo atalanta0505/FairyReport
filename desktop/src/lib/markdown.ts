@@ -152,17 +152,17 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
   // 4. 标题与加粗/引用/表格粘连拆解（如 ### 1.1.1 建设地点**项目名称**）
   text = text.replace(/(#{1,6}\s+[^\n*|【]*?)\s*(\*\*|【源|\|)/g, "$1\n\n$2");
 
-  // 5. 若传入已知大纲标题库，仅在标题后紧跟标点符号时才执行断行拆分（第一道防线）
+  // 5. 若传入已知大纲标题库，不论后面跟随的是标点、空格还是直接是中文正文字符，无条件在已知标题边界处截断并插入双换行符 \n\n
   if (knownHeadings && Array.isArray(knownHeadings)) {
     for (const h of knownHeadings) {
       if (!h || typeof h !== "string") continue;
       const cleanH = h.replace(/^#+\s*/, "").trim();
       if (!cleanH) continue;
       const escaped = cleanH.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      // 匹配形如 ### 1.4.1 主要研究结论：经研究论证， -> ### 1.4.1 主要研究结论\n\n经研究论证，
-      const reg = new RegExp(`^(#{1,6}\\s+(?:\\d+(?:\\.\\d+)*\\s+)?${escaped})\\s*([，。：:—\\-\\u2014\\u2013]+[^\\n]*)$`, "gm");
-      text = text.replace(reg, (_match, hPart, restPart) => {
-        const cleanRest = restPart.replace(/^[:：—\-\u2014\u2013,，。\s]+/, "").trim();
+      // 匹配形如 ### 1.4.1 主要研究结论：经研究论证， 或 ### 1.4.1 主要研究结论经研究论证， -> ### 1.4.1 主要研究结论\n\n经研究论证，
+      const reg = new RegExp(`^(#{1,6}\\s+(?:\\d+(?:\\.\\d+)*\\s+)?${escaped})\\s*([:：，。—\\-\\u2014\\u2013\\s]*)([^\\n]+)$`, "gm");
+      text = text.replace(reg, (_match, hPart, _punct, restPart) => {
+        const cleanRest = restPart.replace(/^[:：—\\-\\u2014\\u2013,，。\\s]+/, "").trim();
         return cleanRest ? `${hPart}\n\n${cleanRest}` : hPart;
       });
     }

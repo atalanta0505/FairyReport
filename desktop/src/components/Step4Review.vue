@@ -1209,60 +1209,6 @@ function copyFullBookMarkdown() {
               :id="`full-chapter-anchor-${ch.seq}`"
               class="full-book-chapter-block"
             >
-              <!-- 优雅章节分节头部 -->
-              <div class="chapter-block-header">
-                <div class="ch-header-left">
-                  <span class="chapter-seq-circle">第 {{ ch.seq }} 章</span>
-                  <h3 class="chapter-block-title">{{ ch.title }}</h3>
-                  <span class="chapter-word-count">
-                    {{ (projectStore.chapters[ch.seq] || '').length.toLocaleString() }} 字
-                  </span>
-
-                  <!-- 诊断状态 Badge -->
-                  <span
-                    v-if="projectStore.chapterReviews[ch.seq]"
-                    class="chapter-review-badge"
-                    :class="`status-${projectStore.chapterReviews[ch.seq].status}`"
-                  >
-                    {{
-                      projectStore.chapterReviews[ch.seq].status === '通过'
-                        ? '✅ 达标'
-                        : projectStore.chapterReviews[ch.seq].status
-                    }}
-                  </span>
-                  <span v-else class="chapter-review-badge status-idle">
-                    未审阅
-                  </span>
-
-                  <!-- 预警提示 -->
-                  <span
-                    v-if="(chapterIssuesCount[ch.seq] || 0) > 0"
-                    class="chapter-issues-tag"
-                    title="点击可前往右侧抽屉查阅具体问题与建议"
-                    @click="showDiagnosticDrawer = true"
-                  >
-                    ⚠️ {{ chapterIssuesCount[ch.seq] }} 处待核
-                  </span>
-                </div>
-
-                <div class="ch-header-right">
-                  <button
-                    class="btn btn-outline btn-xs"
-                    @click="openRevisionModal(ch.seq)"
-                    title="针对本章设置修改指令进行 AI 修订"
-                  >
-                    ✍️ 本章AI修订
-                  </button>
-                  <button
-                    class="btn btn-outline btn-xs"
-                    @click="handleRunSingleReview(ch.seq)"
-                    title="针对本章单独运行专家体检"
-                  >
-                    🔍 重新审阅
-                  </button>
-                </div>
-              </div>
-
               <!-- 就地排版编辑器画布 (contenteditable) -->
               <div
                 :id="`chapter-canvas-${ch.seq}`"
@@ -1272,13 +1218,6 @@ function copyFullBookMarkdown() {
                 @input="onChapterInput(ch.seq, $event)"
                 data-placeholder="本章节暂未生成内容。可在此处直接输入排版文字，或返回步骤 3 自动写作..."
               ></div>
-
-              <!-- 优雅章节分界线 -->
-              <div class="chapter-divider-rule">
-                <span class="rule-line"></span>
-                <span class="rule-label">第 {{ ch.seq }} 章 完</span>
-                <span class="rule-line"></span>
-              </div>
             </div>
 
             <div v-if="totalChapters === 0" class="canvas-empty-state">
@@ -1672,6 +1611,13 @@ function copyFullBookMarkdown() {
                   <div class="eval-card-footer">
                     <span>字数：{{ (projectStore.chapters[ch.seq] || '').length }}</span>
                     <span>问题：{{ chapterIssuesCount[ch.seq] || 0 }} 处</span>
+                    <button
+                      class="btn btn-outline btn-xs"
+                      @click.stop="handleRunSingleReview(ch.seq)"
+                      title="针对本章单独运行专家体检"
+                    >
+                      🔍 重新审阅
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2474,34 +2420,37 @@ function copyFullBookMarkdown() {
   color: #94a3b8;
 }
 
-/* 章节树节点 */
+/* 章节树节点：平铺一体化目录树（Flat Unified Tree），无独立卡片盒子 */
 .chapter-tree-node {
-  border: 1px solid #e2e8f0;
+  border: none;
   border-radius: 6px;
-  background: #fff;
+  background: transparent;
   overflow: hidden;
   transition: all 0.15s ease;
 }
 .chapter-tree-node.is-active {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 1px #3b82f6;
+  background: rgba(59, 130, 246, 0.06);
 }
 .chapter-tree-node.has-warning {
-  border-left: 3px solid #f59e0b;
+  /* 平铺树下保持轻量提示 */
 }
 
 .chapter-node-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: 7px 8px;
   cursor: pointer;
   user-select: none;
-  background: #fff;
+  border-radius: 6px;
+  background: transparent;
   transition: background 0.15s ease;
 }
 .chapter-node-row:hover {
-  background: #f8fafc;
+  background: #f1f5f9;
+}
+.chapter-tree-node.is-active .chapter-node-row {
+  background: #eff6ff;
 }
 .row-left {
   display: flex;
@@ -2571,20 +2520,21 @@ function copyFullBookMarkdown() {
   color: #475569;
 }
 
-/* 子标题层级：完全展开由外层单一定高滚动条滚动，杜绝次级滚动条 */
+/* 子标题层级：平铺多级目录，由外层单一全局垂直滚动条滚动 */
 .subheadings-subtree {
-  padding: 2px 0 6px 0;
-  background: #fafafa;
-  border-top: 1px solid #f1f5f9;
+  padding: 2px 0 4px 0;
+  background: transparent;
+  border-top: none;
 }
 .subheading-item-row {
-  padding: 4px 10px 4px 28px;
+  padding: 4px 8px 4px 26px;
   display: flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 11.5px;
   color: #64748b;
+  border-radius: 4px;
   transition: all 0.12s ease;
 }
 .subheading-item-row:hover {
@@ -2592,10 +2542,10 @@ function copyFullBookMarkdown() {
   color: #0f172a;
 }
 .subheading-item-row.level-3 {
-  padding-left: 40px;
+  padding-left: 36px;
 }
 .subheading-item-row.level-4 {
-  padding-left: 52px;
+  padding-left: 48px;
 }
 .subheading-item-row.is-active-heading {
   color: #2563eb;
@@ -2676,82 +2626,8 @@ function copyFullBookMarkdown() {
 }
 
 .full-book-chapter-block {
-  margin-bottom: 36px;
+  margin-bottom: 24px;
   scroll-margin-top: 16px;
-}
-
-.chapter-block-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  margin-bottom: 16px;
-}
-.ch-header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.chapter-seq-circle {
-  background: #2563eb;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.chapter-block-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  color: #0f172a;
-}
-.chapter-word-count {
-  font-size: 12px;
-  color: #64748b;
-}
-.chapter-review-badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-.chapter-review-badge.status-通过 {
-  background: #dcfce7;
-  color: #15803d;
-}
-.chapter-review-badge.status-需补充 {
-  background: #fef3c7;
-  color: #b45309;
-}
-.chapter-review-badge.status-风险警告 {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-.chapter-review-badge.status-idle {
-  background: #f1f5f9;
-  color: #64748b;
-}
-.chapter-issues-tag {
-  background: #fef2f2;
-  color: #b91c1c;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.chapter-issues-tag:hover {
-  text-decoration: underline;
-}
-
-.ch-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 /* 10.5pt 工程咨询出版级排版规范 */
@@ -2860,22 +2736,7 @@ function copyFullBookMarkdown() {
   }
 }
 
-.chapter-divider-rule {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 28px 0 16px 0;
-}
-.rule-line {
-  flex: 1;
-  height: 1px;
-  background: #e2e8f0;
-}
-.rule-label {
-  font-size: 11px;
-  color: #94a3b8;
-  font-weight: 500;
-}
+
 
 /* 模式 2: Diff 全宽单栏内联视图 */
 .canvas-diff-view {

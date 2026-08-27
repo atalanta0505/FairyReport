@@ -90,7 +90,7 @@ def _build_writing_system_prompt(report_type: str = "",
 3. **逻辑连贯**：如果前文已有相关数据或结论，请在基础上自然衔接
 4. **专业表达**：使用工程咨询行业的标准术语和表述方式
 5. **内容充实**：每节/小节都要有实质性内容，不要空洞
-8. **Markdown 格式规范（极重要）**：每个标题（#、##、###）必须独占一行并空一行再写正文，严禁标题与正文连在同一行！表格每行末尾必须输出标准换行符 \\n，严禁使用 || 连写在同一行！"""
+8. **Markdown 格式规范（极重要）**：每个标题（#、##、###、####）必须独占一行且强制空一行（输出 \\n\\n）后再写正文，严禁标题与正文连在同一行，严禁同名同句同排！表格每行末尾必须输出标准换行符 \\n，严禁使用 || 连写在同一行！"""
 
     if total_words > 0 and total_chapters > 0:
         rules += f"\n6. **篇幅建议**：全篇目标{total_words:,}字，共{total_chapters}章。每章有建议字数（见规则7），请尽量控制在预算范围内。"
@@ -349,6 +349,69 @@ def check_chapter_word_limit(content: str, report_type: str, chapter_title: str,
     return False, wc, budget, ""
 
 
+def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
+    """章节 Markdown 规范化清洗：
+    1. 还原 CRLF 为 LF
+    2. 在所有非换行符/非#紧邻的 #{1,6} 前强制补双换行符
+    3. 表格单行 || 还原为多行
+    4. 标题与加粗/引用/表格粘连拆解
+    5. 若传入骨架，提取骨架中的各级标题，无条件在已知标题边界处截断并插入双换行
+    6. 通用单行标题紧连中文/标点断行保护
+    7. 确保每个标题行下方强制空一行（若紧跟非空正文行且未空行，补空行）
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    cleaned = text.replace("\r\n", "\n")
+
+    # 1. 在所有非换行符/非#紧邻的 #{1,6} 前强制补双换行符
+    cleaned = re.sub(r'([^#\n])\s*(#{1,6}\s+)', r'\1\n\n\2', cleaned)
+
+    # 2. 表格单行 || 还原
+    cleaned = re.sub(r'\|\s*\|', '|\n|', cleaned)
+    cleaned = re.sub(r'^([^|\n].*?)(\|.+?\|\s*\n\s*\|[-: ]+?\|)', r'\1\n\n\2', cleaned, flags=re.MULTILINE)
+
+    # 3. 标题与加粗/引用/表格粘连拆解
+    cleaned = re.sub(r'(#{1,6}\s+[^\n*|【]*?)\s*(\*\*|【源|\|)', r'\1\n\n\2', cleaned)
+
+    # 4. 骨架已知标题匹配断行
+    if skeleton:
+        known_headings = []
+        for line in skeleton.split("\n"):
+            line = line.strip()
+            m = re.match(r'^#{1,6}\s+(.+)$', line)
+            if m:
+                h = m.group(1).strip()
+                if h:
+                    known_headings.append(h)
+                    no_prefix = re.sub(r'^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*', '', h).strip()
+                    if no_prefix:
+                        known_headings.append(no_prefix)
+        known_headings.sort(key=len, reverse=True)
+        for h in known_headings:
+            escaped = re.escape(h)
+            pattern = rf'^(#{{1,6}}\s+(?:\d+(?:\.\d+)*\s+)?{escaped})\s*([:：，。—\-\u2014\u2013\s]*)([^\n]+)$'
+            def _repl(m):
+                h_part = m.group(1)
+                rest = m.group(3)
+                clean_rest = re.sub(r'^[:：—\-\u2014\u2013,，。\s]+', '', rest).strip()
+                return f"{h_part}\n\n{clean_rest}" if clean_rest else h_part
+            cleaned = re.sub(pattern, _repl, cleaned, flags=re.MULTILINE)
+
+    # 5. 单行标题后紧跟冒号/句号/破折号等拆分
+    pattern_punct = r'^(#{1,6}\s+[^\n:：。—\-\u2014\u2013]{2,50}?)\s*([:：。—\-\u2014\u2013]+)\s*([^\n]+)$'
+    def _repl_punct(m):
+        title_part = m.group(1)
+        rest = m.group(3)
+        clean_rest = re.sub(r'^[:：。—\-\u2014\u2013\s]+', '', rest).strip()
+        return f"{title_part}\n\n{clean_rest}" if clean_rest else title_part
+    cleaned = re.sub(pattern_punct, _repl_punct, cleaned, flags=re.MULTILINE)
+
+    # 6. 确保标题与正文之间有空行（如 ### 1.1 标题\n正文 -> ### 1.1 标题\n\n正文）
+    cleaned = re.sub(r'^(#{1,6}\s+[^\n]+)\n(?!\n|#{1,6}\s)', r'\1\n\n', cleaned, flags=re.MULTILINE)
+
+    return cleaned
+
+
 class ChapterWriter:
     def __init__(self, llm, report_type: str = "", total_words: int = 0):
         self.llm = llm
@@ -413,10 +476,13 @@ class ChapterWriter:
             chapter_title, outline_md, predecessor_chapters, rag_context, topic, writing_hint,
             report_name=report_name, chapter_budget=chapter_budget, is_summary=is_summary,
         )
-        return self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_WRITING,
-                            frequency_penalty=FREQUENCY_PENALTY,
-                            presence_penalty=PRESENCE_PENALTY,
-                            top_p=TOP_P)
+        ch_seq = self._parse_chapter_seq(chapter_title)
+        skeleton = _extract_chapter_skeleton(outline_md, ch_seq) if ch_seq > 0 else ""
+        raw_res = self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_WRITING,
+                                frequency_penalty=FREQUENCY_PENALTY,
+                                presence_penalty=PRESENCE_PENALTY,
+                                top_p=TOP_P)
+        return normalize_chapter_markdown(raw_res, skeleton=skeleton)
 
     # ── 章节写作（流式）──
     def write_chapter_stream(self, chapter_title: str, outline_md: str,
@@ -468,10 +534,10 @@ class ChapterWriter:
         prompt += (
             f"## 写作要求（骨架靶向填充模式）\n"
             f"- **骨架锁定（最高优先级）：必须严格保留上方【待填充的本章结构骨架】中的所有标题行（#、##、###、####）及其完整文字与层级，严禁增删、修改或调换任何标题顺序！**\n"
-            f"- **末级小节精准填充：在每一个最低级别标题（### / ####）下方空一行，直接开始深入填充详实、专业、严谨的正文分析、工程参数、合规论证与数据表格！**\n"
+            f"- **末级小节精准填充：在每一个最低级别标题（### / ####）下方强制空一行（\\n\\n），直接开始深入填充详实、专业、严谨的正文分析、工程参数、合规论证与数据表格！**\n"
             f"- **非末级标题禁止堆砌正文：一级章（#）和二级节（##）作为分类与结构导引，正文必须具体归属到对应的末级小节下方！**\n"
             f"- **句数与篇幅硬控制（极重要）：严格遵守各小节的句数上限与字数预算约束，以中文句号『。』为准计；达到句数上限即行收尾，用最凝练、严谨、专业的工程语言表达，严禁长篇大套罗列空泛套话，不得超纲膨胀！**\n"
-            f"- **格式规范（极重要）：每个标题（#、##、###）必须独占一行且空一行后再写正文，严禁标题与正文连在同一行；表格每行末尾必须输出标准换行符 \\n，严禁使用 || 连写在同一行**\n"
+            f"- **格式规范（极重要）：每个标题（#、##、###、####）必须独占一行且强制空一行（\\n\\n）后再写正文，严禁标题与正文连在同一行，严禁标题与正文首句同名同句同排连写（例如严禁输出'### 1.1.1 建设地点：本项目位于...'，正确格式为'### 1.1.1 建设地点\\n\\n本项目位于...'）；表格每行末尾必须输出标准换行符 \\n，严禁使用 || 连写在同一行！**\n"
             f"- 对事实性陈述插入引用标记：只能使用上方「参考资料」中实际出现的标签【源:文件名】、【网:标题】或 [Z]\n"
             f"- 请输出完整的章节正文（Markdown 格式），直接从标题和正文开始，禁止任何开场白或字数统计元数据标注\n"
         )
@@ -511,14 +577,16 @@ class ChapterWriter:
             topic=topic,
         )
         if auto_compress:
-            return self.llm.chat(prompt, system_prompt=system, temperature=0.15,
-                                 frequency_penalty=0.5,
-                                 presence_penalty=0.25,
-                                 top_p=0.8)
-        return self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_MODIFY,
-                             frequency_penalty=FREQUENCY_PENALTY,
-                             presence_penalty=PRESENCE_PENALTY,
-                             top_p=TOP_P)
+            res = self.llm.chat(prompt, system_prompt=system, temperature=0.15,
+                                frequency_penalty=0.5,
+                                presence_penalty=0.25,
+                                top_p=0.8)
+        else:
+            res = self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_MODIFY,
+                                frequency_penalty=FREQUENCY_PENALTY,
+                                presence_penalty=PRESENCE_PENALTY,
+                                top_p=TOP_P)
+        return normalize_chapter_markdown(res)
 
     def _build_modify_args(self, original_content: str, instruction: str,
                            chapter_budget: int,
