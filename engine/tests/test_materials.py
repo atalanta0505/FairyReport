@@ -175,3 +175,49 @@ def test_scan_unknown_project_returns_404(client):
     resp = client.post("/projects/missing_proj/materials/scan")
     assert resp.status_code == 404
 
+
+def test_ingest_exception_returns_error_result_and_rolls_back(client, monkeypatch):
+    """当转换或向量化入库过程中发生异常时，接口返回 status='error' 并回滚，而不是 500。"""
+    name = _make_project(client)
+    path = fixture_path("sample.md")
+
+    # 模拟 embedder.encode 抛出异常
+    from engine.app.embedding import DeterministicStubEmbedder
+
+    def mock_encode(self, texts):
+        raise RuntimeError("ONNX runtime error: model corrupted")
+
+    monkeypatch.setattr(DeterministicStubEmbedder, "encode", mock_encode)
+
+    resp = client.post(
+        f"/projects/{name}/materials/ingest",
+        json={"file_paths": [path]},
+    )
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 1
+    assert results[0]["status"] == "error"
+    assert "摄取失败: ONNX runtime error: model corrupted" in results[0]["error"]
+
+    # 验证 DB 中没有残留脏记录
+    mats = client.get(f"/projects/{name}/materials").json()
+    assert len(mats) == 0
+
+
+def test_ingest_empty_file_returns_error_result(client, tmp_path):
+    """空文件摄取返回 status='error' 且 chunk_count=0。"""
+    name = _make_project(client)
+    empty_f = tmp_path / "empty.txt"
+    empty_f.write_text("   \n\t  ", encoding="utf-8")
+
+    resp = client.post(
+        f"/projects/{name}/materials/ingest",
+        json={"file_paths": [str(empty_f)]},
+    )
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 1
+    assert results[0]["status"] == "error"
+    assert "内容为空" in results[0]["error"]
+
+

@@ -78,81 +78,93 @@ def _process_file(
     """解析、分块、向量化并入库单个文件。"""
     filename = os.path.basename(fpath)
     ext = os.path.splitext(filename)[1].lower()
-    size_bytes = os.path.getsize(fpath)
+    size_bytes = os.path.getsize(fpath) if os.path.exists(fpath) else 0
 
-    # 解析 → Markdown
-    md_text = to_markdown(fpath)
-    if not md_text or not md_text.strip():
-        return IngestResult(
-            source_id=filename,
-            filename=filename,
-            ext=ext,
-            chunk_count=0,
-            size_bytes=size_bytes,
-            status="error",
-            error="转换后内容为空",
-        )
-
-    # 分块
-    chunks = chunk_text(md_text, source_name=filename, source_id=filename)
-    if not chunks:
-        return IngestResult(
-            source_id=filename,
-            filename=filename,
-            ext=ext,
-            chunk_count=0,
-            size_bytes=size_bytes,
-            status="error",
-            error="切片后无内容",
-        )
-
-    # 向量化
-    embeddings = embedder.encode([c["text"] for c in chunks])
-
-    # 幂等：先删旧同源向量再 upsert，保证不累积
-    store.delete_by_source(filename)
-    store.upsert(chunks, embeddings)
-
-    # 拷贝文件到 files 目录（若需要且路径不同）
-    if copy_dest_dir:
-        dest_path = os.path.join(copy_dest_dir, filename)
-        if os.path.abspath(fpath) != os.path.abspath(dest_path):
-            shutil.copy2(fpath, dest_path)
-
-    # upsert 资料记录
-    existing = session.execute(
-        select(models.Material).where(
-            models.Material.project_id == proj.id,
-            models.Material.source_id == filename,
-        )
-    ).scalars().first()
-    if existing:
-        existing.filename = filename
-        existing.ext = ext
-        existing.chunk_count = len(chunks)
-        existing.size_bytes = size_bytes
-    else:
-        session.add(
-            models.Material(
-                project_id=proj.id,
+    try:
+        # 解析 → Markdown
+        md_text = to_markdown(fpath)
+        if not md_text or not md_text.strip():
+            return IngestResult(
                 source_id=filename,
                 filename=filename,
                 ext=ext,
-                chunk_count=len(chunks),
+                chunk_count=0,
                 size_bytes=size_bytes,
+                status="error",
+                error="转换后内容为空",
             )
-        )
-    session.commit()
 
-    return IngestResult(
-        source_id=filename,
-        filename=filename,
-        ext=ext,
-        chunk_count=len(chunks),
-        size_bytes=size_bytes,
-        status="ok",
-        error=None,
-    )
+        # 分块
+        chunks = chunk_text(md_text, source_name=filename, source_id=filename)
+        if not chunks:
+            return IngestResult(
+                source_id=filename,
+                filename=filename,
+                ext=ext,
+                chunk_count=0,
+                size_bytes=size_bytes,
+                status="error",
+                error="切片后无内容",
+            )
+
+        # 向量化
+        embeddings = embedder.encode([c["text"] for c in chunks])
+
+        # 幂等：先删旧同源向量再 upsert，保证不累积
+        store.delete_by_source(filename)
+        store.upsert(chunks, embeddings)
+
+        # 拷贝文件到 files 目录（若需要且路径不同）
+        if copy_dest_dir:
+            dest_path = os.path.join(copy_dest_dir, filename)
+            if os.path.abspath(fpath) != os.path.abspath(dest_path):
+                shutil.copy2(fpath, dest_path)
+
+        # upsert 资料记录
+        existing = session.execute(
+            select(models.Material).where(
+                models.Material.project_id == proj.id,
+                models.Material.source_id == filename,
+            )
+        ).scalars().first()
+        if existing:
+            existing.filename = filename
+            existing.ext = ext
+            existing.chunk_count = len(chunks)
+            existing.size_bytes = size_bytes
+        else:
+            session.add(
+                models.Material(
+                    project_id=proj.id,
+                    source_id=filename,
+                    filename=filename,
+                    ext=ext,
+                    chunk_count=len(chunks),
+                    size_bytes=size_bytes,
+                )
+            )
+        session.commit()
+
+        return IngestResult(
+            source_id=filename,
+            filename=filename,
+            ext=ext,
+            chunk_count=len(chunks),
+            size_bytes=size_bytes,
+            status="ok",
+            error=None,
+        )
+    except Exception as e:
+        session.rollback()
+        return IngestResult(
+            source_id=filename,
+            filename=filename,
+            ext=ext,
+            chunk_count=0,
+            size_bytes=size_bytes,
+            status="error",
+            error=f"摄取失败: {str(e)}",
+        )
 
 
 @router.post("/ingest", response_model=list[IngestResult])

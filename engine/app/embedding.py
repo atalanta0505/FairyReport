@@ -34,9 +34,25 @@ class FastEmbedEmbedder:
 
     def _ensure_model(self):
         if self._model is None:
+            from pathlib import Path
             from fastembed import TextEmbedding
+            from .config import settings
 
-            self._model = TextEmbedding(model_name=self._model_name)
+            # 1. 优先使用仓库内预置或下载好的模型（100% 离线，毫秒级就绪）
+            repo_model_dir = Path(__file__).resolve().parent.parent.parent / "data" / "fastembed_models"
+            data_model_dir = Path(settings.engine_data_dir) / "models" / "fastembed"
+
+            specific_path = None
+            if repo_model_dir.exists() and (repo_model_dir / "model_optimized.onnx").exists():
+                specific_path = str(repo_model_dir)
+            elif data_model_dir.exists() and (data_model_dir / "model_optimized.onnx").exists():
+                specific_path = str(data_model_dir)
+
+            if specific_path:
+                self._model = TextEmbedding(model_name=self._model_name, specific_model_path=specific_path)
+            else:
+                cache_dir = str(Path(settings.engine_data_dir) / "models")
+                self._model = TextEmbedding(model_name=self._model_name, cache_dir=cache_dir)
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         self._ensure_model()
