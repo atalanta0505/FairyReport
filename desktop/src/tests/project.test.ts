@@ -1897,5 +1897,46 @@ describe("Pinia useProjectStore", () => {
       );
       expect(capturedMode).toBe("all");
     });
+
+    it("runChapterRevision 与 applyRevision 完整就地修订闭环", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "修订测试项目", created_at: "2026-08-26T00:00:00Z" };
+      store.chapters = { 1: "# 第一章 概述\n原文未修改内容..." };
+
+      mockFetch.mockImplementation(async (url: string | URL | Request) => {
+        const u = url.toString();
+        if (u.includes("/writing/revise")) {
+          return jsonResponse({
+            revised_text: "# 第一章 概述\n修订后包含深化合规与投资估算的内容...",
+          });
+        }
+        if (u.includes("/chapters/1")) {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      expect(store.revisingSeq).toBeNull();
+      expect(store.activeRevision).toBeNull();
+
+      // 执行修订
+      await store.runChapterRevision(
+        BASE_URL,
+        1,
+        "核对投资估算与合规要件",
+        { api_key: "sk-test", base_url: "http://api", model: "m" },
+      );
+
+      expect(store.revisingSeq).toBeNull();
+      expect(store.activeRevision).not.toBeNull();
+      expect(store.activeRevision?.seq).toBe(1);
+      expect(store.activeRevision?.instruction).toBe("核对投资估算与合规要件");
+      expect(store.activeRevision?.revisedText).toContain("修订后包含深化合规");
+
+      // 采纳修订
+      await store.applyRevision(BASE_URL, 1);
+      expect(store.chapters[1]).toContain("修订后包含深化合规与投资估算的内容...");
+      expect(store.activeRevision).toBeNull();
+    });
   });
 });

@@ -111,6 +111,8 @@ def test_pure_chinese_reasoning_constraint_in_prompts():
     assert "⚡ 常规审查" in FAST_REVIEW_SYSTEM_PROMPT
     assert "专有名词一致性" in FAST_REVIEW_SYSTEM_PROMPT
     assert "核心数值指标前后自洽性" in FAST_REVIEW_SYSTEM_PROMPT
+    assert "极速常规审查约束" in FAST_REVIEW_SYSTEM_PROMPT
+    assert "300~500 字符" in FAST_REVIEW_SYSTEM_PROMPT
 
 
 # ── writer.parse_tech_review_result ──

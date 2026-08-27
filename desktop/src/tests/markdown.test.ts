@@ -515,4 +515,13 @@ describe("Markdown 解析与排版工具", () => {
       expect(refs.some((r) => r.type === "standard" && r.title.includes("[Z-02]"))).toBe(true);
     });
   });
+
+  describe("审阅高亮与 HTML 反向序列化还原", () => {
+    it("htmlToMarkdown 能够正确剥离 review-issue-highlight 标签并保留纯文本", () => {
+      const html = '<p>本项目总投资为 <mark class="review-issue-highlight severity-warning" data-issue-id="ISS-1" title="数值自洽: 投资不一致">3500 万元</mark>，工期为 18 个月。</p>';
+      const md = htmlToMarkdown(html);
+      expect(md).toBe("本项目总投资为 3500 万元，工期为 18 个月。");
+      expect(md).not.toContain("<mark");
+    });
+  });
 });

@@ -961,7 +961,9 @@ function nextStep() {
 .sidebar-panel {
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 160px);
+  height: calc(100vh - 165px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -1107,6 +1109,7 @@ function nextStep() {
 /* Flat 平铺一体化目录树 (单一定高全局滚动) */
 .outline-tree-scrollable {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px 10px;
@@ -1141,6 +1144,8 @@ function nextStep() {
   background: transparent;
   overflow: hidden;
   transition: all 0.15s ease;
+  flex-shrink: 0;
+  min-height: 38px;
 }
 .chapter-tree-node.is-active {
   background: rgba(59, 130, 246, 0.06);
@@ -1150,7 +1155,7 @@ function nextStep() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 8px;
+  padding: 8px 8px;
   cursor: pointer;
   user-select: none;
   border-radius: 6px;

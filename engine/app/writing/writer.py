@@ -627,6 +627,7 @@ class ChapterWriter:
         prompt = (
             f"## 待审阅章节标题\n{chapter_title or '当前章节'}\n\n"
             f"## 待审阅正文内容\n{chapter_text}\n\n"
+            f"【思考链语言与长度约束】：内部推演过程必须 100% 使用纯中文，严禁英文！常规审查思考过程保持极速精炼（300-500字），快速输出 JSON 诊断结果。\n\n"
             f"请按要求进行专业诊断并严格输出规定的 JSON 结果。"
         )
         if mode == "fast":

@@ -8,6 +8,7 @@ import {
 } from "../lib/diff";
 import type * as engineApi from "../lib/engineApi";
 import {
+  escapeHtml,
   extractOutlineHeadings,
   extractReferences,
   extractSubHeadings,
@@ -48,11 +49,6 @@ function openReviewEstimateModal(forceAll = false) {
   estimateForceAll.value = forceAll;
   showEstimateModal.value = true;
 }
-
-// ── AI 智能修订弹窗 / 浮层 ──
-const showRevisionModal = ref<boolean>(false);
-const revisionInstruction = ref<string>("");
-const targetRevisionSeq = ref<number>(1);
 
 // ── 章节与小节目录展开 / 定位状态 ──
 const activeChapterSeq = ref<number>(1);
@@ -129,15 +125,93 @@ async function ensureStep4State() {
   }
 }
 
+// ── Step 4 正文审阅问题持久化高亮与批注标记 ──
+function applyIssueHighlightsToHtml(html: string, seq: number): string {
+  const chapterReview = projectStore.chapterReviews[seq];
+  const issues = chapterReview?.issues || [];
+  if (!issues.length || !html) return html;
+
+  let currentHtml = html;
+  for (const issue of issues) {
+    let quote = (issue.quote || "").trim();
+    if (!quote || quote.length < 2) {
+      const m = (issue.message || "").match(/[“"「]([^”"」]+)[”"」]/);
+      if (m && m[1].trim().length >= 2) {
+        quote = m[1].trim();
+      }
+    }
+    if (!quote || quote.length < 2) continue;
+
+    const escapedQuote = escapeHtml(quote);
+    const severity = issue.severity || "warning";
+    const cat = escapeHtml(issue.category || "审查问题");
+    const msg = escapeHtml(issue.message || "");
+    const issueId = escapeHtml(issue.id || "");
+
+    const parts = currentHtml.split(/(<[^>]+>)/g);
+    let replaced = false;
+    for (let i = 0; i < parts.length; i += 2) {
+      if (!parts[i]) continue;
+      if (parts[i].includes(escapedQuote)) {
+        const markTag = `<mark class="review-issue-highlight severity-${severity}" data-issue-id="${issueId}" data-chapter-seq="${seq}" title="${cat}: ${msg}">${escapedQuote}</mark>`;
+        parts[i] = parts[i].replace(escapedQuote, markTag);
+        replaced = true;
+        break;
+      }
+    }
+    if (replaced) {
+      currentHtml = parts.join("");
+    }
+  }
+  return currentHtml;
+}
+
 // ── 同步排版正文到各章节 contenteditable DOM ──
 function syncAllChaptersHtml() {
   for (const ch of projectStore.outlineChapters) {
     const el = document.getElementById(`chapter-canvas-${ch.seq}`);
     if (el) {
       const text = projectStore.chapters[ch.seq] || "";
-      el.innerHTML = markdownToHtml(text, ch.seq, outlineHeadings.value);
+      const rawHtml = markdownToHtml(text, ch.seq, outlineHeadings.value);
+      el.innerHTML = applyIssueHighlightsToHtml(rawHtml, ch.seq);
     }
   }
+}
+
+// ── 审阅高亮标记点击联动定位至诊断报告卡片 ──
+function handleCanvasClick(e: MouseEvent) {
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  const mark = target.closest(".review-issue-highlight") as HTMLElement | null;
+  if (mark) {
+    const issueId = mark.getAttribute("data-issue-id");
+    const chapterSeq = Number(mark.getAttribute("data-chapter-seq")) || activeChapterSeq.value || 1;
+    if (issueId) {
+      openDiagnosticDrawerAndFocusIssue(issueId, chapterSeq);
+    }
+  }
+}
+
+function openDiagnosticDrawerAndFocusIssue(issueId: string, chapterSeq?: number) {
+  if (chapterSeq) {
+    activeChapterSeq.value = chapterSeq;
+  }
+  showDiagnosticDrawer.value = true;
+  diagnosticTab.value = "issues";
+  nextTick(() => {
+    const card =
+      document.getElementById(`issue-card-${issueId}`) ||
+      document.querySelector(`[data-issue-card-id="${issueId}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      card.classList.remove("issue-card-focused");
+      void (card as HTMLElement).offsetWidth;
+      card.classList.add("issue-card-focused");
+      setTimeout(() => {
+        card.classList.remove("issue-card-focused");
+      }, 2500);
+    }
+  });
 }
 
 onMounted(async () => {
@@ -169,6 +243,16 @@ watch(
 
 watch(
   () => projectStore.outlineChapters,
+  () => {
+    nextTick(() => {
+      syncAllChaptersHtml();
+    });
+  },
+  { deep: true },
+);
+
+watch(
+  () => projectStore.chapterReviews,
   () => {
     nextTick(() => {
       syncAllChaptersHtml();
@@ -629,26 +713,8 @@ async function handleRunSingleReview(
   }
 }
 
-// ── AI 定向修订 ──
-function openRevisionModal(seq?: number, defaultInstruction?: string) {
-  targetRevisionSeq.value = seq || activeChapterSeq.value || 1;
-  revisionInstruction.value = defaultInstruction || "";
-  showRevisionModal.value = true;
-}
-
-const presetInstructions = [
-  "对照国家发改委与行业工程编制规程要求，补齐章节合规论证与前置要件说明",
-  "核对并对齐前后章节投资估算、规模参数与关键工程技术指标",
-  "补充节能减排、环境保护与社会稳定风险分析专项论述",
-  "压制套话与空洞修辞，规范 10.5pt 工程咨询出版级专业术语与数据表格",
-  "补充附表、附图与前置审批支撑性依据，规范数据引证格式",
-];
-
-function applyPresetInstruction(preset: string) {
-  revisionInstruction.value = preset;
-}
-
-async function handleExecuteRevision() {
+// ── AI 一键智能修订 (就地直接执行并切至 Diff 模式) ──
+async function handleDirectRevision(seq?: number, customInstruction?: string) {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -661,11 +727,27 @@ async function handleExecuteRevision() {
     return;
   }
 
-  const seq = targetRevisionSeq.value;
-  const instruction = revisionInstruction.value.trim();
+  const targetSeq = seq || activeChapterSeq.value || 1;
+  let instruction = (customInstruction || "").trim();
+
+  // 若未指定自定义指令，则优先聚合当前章节的专家审阅建议与问题清单
   if (!instruction) {
-    showMsg("请输入修订指令或点击预设建议", "error");
-    return;
+    const chapterReview = projectStore.chapterReviews[targetSeq];
+    const issues = chapterReview?.issues || [];
+    const suggestions = chapterReview?.suggestions || "";
+    if (issues.length > 0 || suggestions) {
+      const issueDetails = issues
+        .map(
+          (iss, i) =>
+            `${i + 1}. [${iss.category || "合规与自洽"}] ${iss.message}${iss.suggestion ? `（改进建议：${iss.suggestion}）` : ""}`,
+        )
+        .join("\n");
+      instruction = `请依据本章专家诊断报告执行定向修订：\n${issueDetails}\n${suggestions ? `综合指引：${suggestions}` : ""}`.trim();
+    } else if (projectStore.fullBookReview?.general_suggestions?.length) {
+      instruction = `对照国家发改委与行业工程编制规程要求，结合全书诊断建议深化论述：\n${projectStore.fullBookReview.general_suggestions.join("\n")}`.trim();
+    } else {
+      instruction = "对照国家发改委与行业工程编制规程要求，核对本章数据自洽性、深化合规论证并润色工程专业术语。";
+    }
   }
 
   revisionElapsedSeconds.value = 0;
@@ -677,11 +759,10 @@ async function handleExecuteRevision() {
   }, 1000);
 
   try {
-    showMsg(`正在对第 ${seq} 章执行 AI 智能修订并生成 Diff...`, "info");
-    await projectStore.runChapterRevision(engine.baseUrl, seq, instruction, llmConfig);
-    showRevisionModal.value = false;
+    showMsg(`正在对第 ${targetSeq} 章执行 AI 智能就地修订并生成 Diff...`, "info");
+    await projectStore.runChapterRevision(engine.baseUrl, targetSeq, instruction, llmConfig);
     viewMode.value = "diff";
-    showMsg(`第 ${seq} 章 AI 修订已就绪！已进入全宽单栏内联 Diff 差异对比视图。`);
+    showMsg(`第 ${targetSeq} 章 AI 修订已就绪！已进入全宽单栏内联 Diff 差异对比视图。`);
   } catch (err) {
     showMsg(`修订失败：${(err as Error).message}`, "error");
   } finally {
@@ -995,11 +1076,11 @@ function copyFullBookMarkdown() {
 
         <button
           class="btn btn-outline"
-          :disabled="completedChaptersCount === 0"
-          @click="openRevisionModal()"
-          title="设定工程修改指令，由大模型针对全书或指定章节执行智能定向重构与润色"
+          :disabled="completedChaptersCount === 0 || projectStore.revisingSeq !== null"
+          @click="handleDirectRevision()"
+          title="代入本章当前诊断建议或全维综合建议，一键由大模型执行智能就地重构并生成 Diff 对比"
         >
-          ✍️ AI智能修订
+          ⚡ AI 一键智能修订
         </button>
 
         <div class="drawer-trigger-group">
@@ -1076,6 +1157,46 @@ function copyFullBookMarkdown() {
               <div v-else class="review-thought-placeholder">
                 <span class="placeholder-spinner">🔍</span>
                 <span>AI 专家正在对照国家发改委与行业编制规程深度核查章节参数指标与数据自洽性...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- 修订心跳与进度条 (正在执行就地修订时展示) -->
+    <transition name="fade">
+      <div v-if="projectStore.revisingSeq !== null" class="revision-heartbeat-bar card">
+        <div class="heartbeat-inner">
+          <div class="hb-left">
+            <span class="radar-pulse"></span>
+            <div class="hb-title-box">
+              <div class="hb-main-title">
+                <strong>⚡ AI 智能修订重构中：第 {{ projectStore.revisingSeq }} 章（{{ revisionStages[revisionStageIndex]?.title || '重构方案论述' }}）· 已耗时 {{ revisionElapsedSeconds }}s</strong>
+              </div>
+              <div class="hb-desc">
+                {{ revisionStages[revisionStageIndex]?.desc || '统筹上下文逻辑与专家诊断建议，执行段落级出版重构' }}
+              </div>
+            </div>
+          </div>
+          <div class="hb-right">
+            <div class="hb-stepper-compact">
+              <div
+                v-for="(st, stIdx) in revisionStages"
+                :key="st.id"
+                class="stepper-item"
+                :class="{
+                  completed: revisionStageIndex > stIdx,
+                  active: revisionStageIndex === stIdx,
+                  pending: revisionStageIndex < stIdx,
+                }"
+              >
+                <div class="stepper-circle">
+                  <span v-if="revisionStageIndex > stIdx">✓</span>
+                  <span v-else-if="revisionStageIndex === stIdx" class="spinner-mini"></span>
+                  <span v-else>{{ stIdx + 1 }}</span>
+                </div>
+                <span class="stepper-label">{{ st.title }}</span>
               </div>
             </div>
           </div>
@@ -1202,17 +1323,29 @@ function copyFullBookMarkdown() {
             </div>
           </div>
 
-          <div class="full-book-scroll-canvas">
+          <div class="full-book-scroll-canvas" @click="handleCanvasClick">
             <div
               v-for="ch in projectStore.outlineChapters"
               :key="ch.seq"
               :id="`full-chapter-anchor-${ch.seq}`"
               class="full-book-chapter-block"
             >
+              <!-- 标准化章标题栏 (全书连贯预览标准化呈现章标题与字数标签) -->
+              <div class="chapter-block-header">
+                <div class="header-left">
+                  <span class="ch-badge">第 {{ ch.seq }} 章</span>
+                  <h3 class="ch-title">{{ ch.title }}</h3>
+                </div>
+                <div class="header-right">
+                  <span class="ch-word-tag">{{ (projectStore.chapters[ch.seq] || '').length }} 字</span>
+                </div>
+              </div>
+
               <!-- 就地排版编辑器画布 (contenteditable) -->
               <div
                 :id="`chapter-canvas-${ch.seq}`"
                 class="rich-rendered-editor spec-typography"
+                :class="{ 'is-empty-chapter': !(projectStore.chapters[ch.seq] || '').trim() }"
                 contenteditable="true"
                 :data-seq="ch.seq"
                 @input="onChapterInput(ch.seq, $event)"
@@ -1254,23 +1387,23 @@ function copyFullBookMarkdown() {
             <div class="diff-header-actions">
               <button
                 class="btn btn-success"
-                :disabled="!hasActiveRevision"
+                :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
                 @click="handleApplyRevision"
                 title="采纳本次 AI 修订结果并保存覆盖为最新正文"
               >
-                ✅ 采纳全部修订并保存
+                ✅ 采纳全部修订并保存为正文
               </button>
               <button
                 class="btn btn-outline"
-                :disabled="!hasActiveRevision"
-                @click="openRevisionModal(projectStore.activeRevision?.seq || 1, projectStore.activeRevision?.instruction)"
-                title="调整修改指令重新生成"
+                :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
+                @click="handleDirectRevision(projectStore.activeRevision?.seq || activeChapterSeq || 1, projectStore.activeRevision?.instruction)"
+                title="代入修改指令重新生成修订"
               >
                 🔄 重新生成
               </button>
               <button
                 class="btn btn-outline btn-danger-text"
-                :disabled="!hasActiveRevision"
+                :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
                 @click="handleDiscardRevision"
                 title="放弃本次修订，恢复原有正文"
               >
@@ -1307,9 +1440,9 @@ function copyFullBookMarkdown() {
             <div v-else class="diff-empty-placeholder card">
               <div class="empty-icon">💡</div>
               <h4>当前暂无正在比对的修订版本</h4>
-              <p>您可以点击顶栏「✍️ AI智能修订」或在各章节头部点击「✍️ 本章AI修订」，系统将自动生成段落级 Diff 对比。</p>
-              <button class="btn btn-primary" @click="openRevisionModal(activeChapterSeq || 1)">
-                立即发起 AI 智能修订
+              <p>您可以点击顶栏「⚡ AI 一键智能修订」或在诊断抽屉中点击「⚡ 代入建议并一键修订」，系统将自动生成段落级 Diff 对比。</p>
+              <button class="btn btn-primary" :disabled="projectStore.revisingSeq !== null" @click="handleDirectRevision(activeChapterSeq || 1)">
+                ⚡ 立即发起 AI 智能修订
               </button>
             </div>
           </div>
@@ -1421,6 +1554,14 @@ function copyFullBookMarkdown() {
               >
                 🚀 重新运行全书审阅
               </button>
+              <button
+                class="btn btn-warning btn-sm btn-block"
+                :disabled="projectStore.revisingSeq !== null || completedChaptersCount === 0"
+                @click="handleDirectRevision(activeChapterSeq || 1)"
+                title="代入当前选定章节的专家诊断建议直接触发就地修订"
+              >
+                ⚡ 代入本章建议并一键修订
+              </button>
             </div>
           </div>
 
@@ -1471,6 +1612,8 @@ function copyFullBookMarkdown() {
                 <div
                   v-for="(issue, idx) in allIssues"
                   :key="idx"
+                  :id="`issue-card-${issue.id || ('idx-' + idx)}`"
+                  :data-issue-card-id="issue.id"
                   class="issue-card"
                   :class="`severity-${issue.severity || 'warning'}`"
                 >
@@ -1503,9 +1646,10 @@ function copyFullBookMarkdown() {
                     </button>
                     <button
                       class="btn-text-link link-primary"
-                      @click="openRevisionModal(issue.chapterSeq || 1, issue.suggestion || issue.message)"
+                      :disabled="projectStore.revisingSeq !== null"
+                      @click="handleDirectRevision(issue.chapterSeq || activeChapterSeq || 1, issue.suggestion || issue.message)"
                     >
-                      ✍️ 填入AI修订指令
+                      ⚡ 代入建议并一键修订
                     </button>
                   </div>
                 </div>
@@ -1569,9 +1713,10 @@ function copyFullBookMarkdown() {
                   <div class="gap-action">
                     <button
                       class="btn btn-outline btn-xs"
-                      @click="openRevisionModal(gap.chapterSeq || 1, `依据规程要求，在正文中补充说明【${gap.gap}】的前置审批与支撑依据。`)"
+                      :disabled="projectStore.revisingSeq !== null"
+                      @click="handleDirectRevision(gap.chapterSeq || activeChapterSeq || 1, `依据规程要求，在正文中补充说明【${gap.gap}】的前置审批与支撑依据。`)"
                     >
-                      ✍️ 填入AI修订指令
+                      ⚡ 代入建议并一键修订
                     </button>
                   </div>
                 </div>
@@ -1835,102 +1980,6 @@ function copyFullBookMarkdown() {
       </div>
     </transition>
 
-    <!-- ═════════════════════════════════════════════════════════ -->
-    <!-- AI 智能修订弹窗 (Revision Modal) -->
-    <!-- ═════════════════════════════════════════════════════════ -->
-    <transition name="fade">
-      <div v-if="showRevisionModal" class="modal-overlay" @click="showRevisionModal = false">
-        <div class="revision-modal-card" @click.stop>
-          <div class="modal-header">
-            <div class="modal-title-box">
-              <h3>✍️ AI 智能定向修订</h3>
-              <span class="modal-sub">依据国家发改委与行业编制规程，对正文进行方案深化、数据校核与专业润色</span>
-            </div>
-            <button class="modal-close-btn" @click="showRevisionModal = false">✕</button>
-          </div>
-
-          <div class="modal-body">
-            <!-- 修订目标章节选择 -->
-            <div class="form-group">
-              <label class="form-label">🎯 修订目标章节：</label>
-              <select v-model="targetRevisionSeq" class="form-select">
-                <option
-                  v-for="ch in projectStore.outlineChapters"
-                  :key="ch.seq"
-                  :value="ch.seq"
-                >
-                  第 {{ ch.seq }} 章：{{ ch.title }}
-                </option>
-              </select>
-            </div>
-
-            <!-- 快捷预设指令 Chips -->
-            <div class="form-group">
-              <label class="form-label">💡 常用工程咨询修改预设：</label>
-              <div class="preset-chips-list">
-                <button
-                  v-for="(preset, pIdx) in presetInstructions"
-                  :key="pIdx"
-                  class="preset-chip"
-                  @click="applyPresetInstruction(preset)"
-                >
-                  {{ preset }}
-                </button>
-              </div>
-            </div>
-
-            <!-- 自定义修订指令输入框 -->
-            <div class="form-group">
-              <label class="form-label">📝 定向修改指令 (Instruction)：</label>
-              <textarea
-                v-model="revisionInstruction"
-                class="revision-textarea"
-                rows="4"
-                placeholder="例如：依据国家发改委投资估算编制要求，统一第 2 章与第 7 章的投资估算数据口径，并补充节能环保合规论述..."
-              ></textarea>
-            </div>
-
-            <!-- 修订执行中阶段动态心跳 -->
-            <div v-if="projectStore.revisingSeq !== null" class="modal-heartbeat-box">
-              <div class="hb-title-row">
-                <span class="radar-pulse"></span>
-                <strong>AI 智能修订重构中... (已耗时 {{ revisionElapsedSeconds }} 秒)</strong>
-              </div>
-              <div class="hb-stepper">
-                <div
-                  v-for="(st, stIdx) in revisionStages"
-                  :key="st.id"
-                  class="stepper-item"
-                  :class="{
-                    completed: revisionStageIndex > stIdx,
-                    active: revisionStageIndex === stIdx,
-                    pending: revisionStageIndex < stIdx,
-                  }"
-                >
-                  <div class="stepper-circle">
-                    <span v-if="revisionStageIndex > stIdx">✓</span>
-                    <span v-else-if="revisionStageIndex === stIdx" class="spinner-mini"></span>
-                    <span v-else>{{ stIdx + 1 }}</span>
-                  </div>
-                  <span class="stepper-label">{{ st.title }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="modal-footer">
-            <button class="btn btn-secondary" @click="showRevisionModal = false">取消</button>
-            <button
-              class="btn btn-primary"
-              :disabled="!revisionInstruction.trim() || projectStore.revisingSeq !== null"
-              @click="handleExecuteRevision"
-            >
-              {{ projectStore.revisingSeq !== null ? '⚡ 正在智能修订中...' : '🚀 开始执行 AI 修订' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
   </div>
 </template>
 
@@ -2346,6 +2395,84 @@ function copyFullBookMarkdown() {
   50% { opacity: 1; transform: scale(1.05); }
 }
 
+/* 修订心跳与进度条 (轻量内联) */
+.revision-heartbeat-bar {
+  padding: 10px 16px;
+  background: linear-gradient(90deg, #fffbeb 0%, #fef3c7 100%);
+  border: 1px solid #fde68a;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.revision-heartbeat-bar .radar-pulse {
+  background: #d97706;
+  box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.7);
+  animation: pulse-ring-amber 1.5s infinite;
+}
+@keyframes pulse-ring-amber {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(217, 119, 6, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0);
+  }
+}
+.revision-heartbeat-bar .hb-main-title strong {
+  font-size: 13px;
+  color: #92400e;
+  line-height: 1.4;
+}
+.revision-heartbeat-bar .hb-desc {
+  font-size: 11px;
+  color: #b45309;
+}
+.hb-stepper-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hb-stepper-compact .stepper-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.hb-stepper-compact .stepper-item.active {
+  color: #d97706;
+  font-weight: 600;
+}
+.hb-stepper-compact .stepper-item.completed {
+  color: #15803d;
+}
+.hb-stepper-compact .stepper-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: #e2e8f0;
+  color: #64748b;
+}
+.hb-stepper-compact .stepper-item.active .stepper-circle {
+  background: #f59e0b;
+  color: #fff;
+}
+.hb-stepper-compact .stepper-item.completed .stepper-circle {
+  background: #22c55e;
+  color: #fff;
+}
+
 /* ═════════════════════════════════════════════════════════ */
 /* 主体工作台：双栏满屏布局 */
 /* ═════════════════════════════════════════════════════════ */
@@ -2626,8 +2753,49 @@ function copyFullBookMarkdown() {
 }
 
 .full-book-chapter-block {
-  margin-bottom: 24px;
+  margin-bottom: 28px;
   scroll-margin-top: 16px;
+}
+
+/* 全书连贯预览标准化章标题栏 */
+.chapter-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+.chapter-block-header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.chapter-block-header .ch-badge {
+  background: #3b82f6;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.chapter-block-header .ch-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.chapter-block-header .ch-word-tag {
+  font-size: 11.5px;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 /* 10.5pt 工程咨询出版级排版规范 */
@@ -2695,6 +2863,58 @@ function copyFullBookMarkdown() {
   content: attr(data-placeholder);
   color: #94a3b8;
   font-style: italic;
+  font-size: 13px;
+  display: block;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+}
+
+/* Step 4 正文审阅问题持久化高亮与批注标记 */
+.review-issue-highlight {
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+  font-weight: 500;
+  display: inline;
+}
+.review-issue-highlight.severity-warning {
+  background: #fef08a;
+  border-bottom: 2px wavy #eab308;
+  color: #713f12;
+}
+.review-issue-highlight.severity-warning:hover {
+  background: #fde047;
+}
+.review-issue-highlight.severity-error,
+.review-issue-highlight.severity-danger,
+.review-issue-highlight.severity-high {
+  background: #fecaca;
+  border-bottom: 2px wavy #ef4444;
+  color: #991b1b;
+}
+.review-issue-highlight.severity-error:hover,
+.review-issue-highlight.severity-danger:hover,
+.review-issue-highlight.severity-high:hover {
+  background: #fca5a5;
+}
+.review-issue-highlight.severity-suggestion,
+.review-issue-highlight.severity-info {
+  background: #e0e7ff;
+  border-bottom: 2px wavy #6366f1;
+  color: #3730a3;
+}
+.review-issue-highlight.severity-suggestion:hover,
+.review-issue-highlight.severity-info:hover {
+  background: #c7d2fe;
+}
+.issue-card.issue-card-focused {
+  outline: 2px solid #3b82f6;
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.45);
+  transform: scale(1.01);
+  transition: all 0.2s ease;
 }
 
 /* 呼吸高亮动画 */
