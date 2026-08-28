@@ -41,7 +41,7 @@ const refFilterType = ref<"all" | "material" | "standard" | "web">("all");
 
 // ── 章节与小节目录展开 / 定位状态 ──
 const activeHeadingId = ref<string | null>(null);
-const chapterCollapsedMap = ref<Record<number, boolean>>({});
+const collapsedChapters = ref<Record<number, boolean>>({});
 
 // ── 全局操作通知 ──
 const actionMessage = ref<{ type: "success" | "error" | "info"; text: string } | null>(null);
@@ -188,15 +188,6 @@ const totalWordCount = computed(() => {
   return total;
 });
 
-const chapterIssuesCount = computed<Record<number, number>>(() => {
-  const map: Record<number, number> = {};
-  for (const ch of projectStore.outlineChapters) {
-    const r = projectStore.chapterReviews[ch.seq];
-    map[ch.seq] = r?.issues ? r.issues.length : 0;
-  }
-  return map;
-});
-
 const chapterSubheadings = computed<Record<number, SubHeading[]>>(() => {
   const map: Record<number, SubHeading[]> = {};
   for (const ch of projectStore.outlineChapters) {
@@ -261,39 +252,6 @@ const allDataGaps = computed<any[]>(() => {
   return list;
 });
 
-const allReferences = computed<ReferenceItem[]>(() => {
-  const map: Record<string, ReferenceItem> = {};
-  for (const ch of projectStore.outlineChapters) {
-    const text = projectStore.chapters[ch.seq] || "";
-    const refs = extractReferences(text);
-    for (const r of refs) {
-      if (!map[r.title]) {
-        map[r.title] = r;
-      } else {
-        map[r.title].count += r.count;
-      }
-    }
-  }
-  return Object.values(map);
-});
-
-const complianceRate = computed(() => {
-  if (totalChapters.value === 0) return 100;
-  if (reviewedChaptersCount.value === 0) return 0;
-  const issues = allIssues.value.length;
-  const penalty = Math.min(100, issues * 4);
-  return Math.max(0, 100 - penalty);
-});
-
-const healthStatus = computed<"达标" | "待完善" | "存在重大缺陷" | "待审阅">(() => {
-  if (reviewedChaptersCount.value === 0) return "待审阅";
-  if (allIssues.value.length === 0) return "达标";
-  if (allIssues.value.some((i) => i.severity === "high" || i.severity === "critical" || i.severity === "error")) {
-    return "存在重大缺陷";
-  }
-  return "待完善";
-});
-
 function getChapterTitle(seq: number): string {
   const found = projectStore.outlineChapters.find((c) => c.seq === seq);
   return found?.title || `第 ${seq} 章`;
@@ -301,8 +259,8 @@ function getChapterTitle(seq: number): string {
 
 // ── 章节展开折叠状态 ──
 function isChapterCollapsed(seq: number): boolean {
-  if (chapterCollapsedMap.value[seq] !== undefined) {
-    return chapterCollapsedMap.value[seq];
+  if (collapsedChapters.value[seq] !== undefined) {
+    return collapsedChapters.value[seq];
   }
   // 默认规则：当前选中章节展开，其他章节折叠收起
   return seq !== projectStore.selectedChapterSeq;
@@ -310,16 +268,18 @@ function isChapterCollapsed(seq: number): boolean {
 
 function toggleChapterCollapse(seq: number, e?: Event) {
   if (e) e.stopPropagation();
-  chapterCollapsedMap.value[seq] = !isChapterCollapsed(seq);
+  collapsedChapters.value[seq] = !isChapterCollapsed(seq);
 }
 
 function selectChapter(seq: number) {
   if (projectStore.selectedChapterSeq !== seq) {
     projectStore.selectedChapterSeq = seq;
-    chapterCollapsedMap.value[seq] = false;
+    collapsedChapters.value[seq] = false;
     nextTick(() => {
       syncEditorContent();
     });
+  } else {
+    collapsedChapters.value[seq] = false;
   }
 }
 
@@ -364,6 +324,18 @@ watch(
     nextTick(() => {
       syncEditorContent();
     });
+  },
+);
+
+watch(
+  () => projectStore.currentStep,
+  (step) => {
+    if (step === 4) {
+      ensureStep4State();
+      nextTick(() => {
+        syncEditorContent();
+      });
+    }
   },
 );
 
@@ -476,37 +448,146 @@ function openDiagnosticDrawerAndFocusIssue(issueId: string) {
   });
 }
 
-function locateIssueInCanvas(issue: engineApi.ReviewIssue) {
+/**
+ * 彻底升级：问题清单段落/句子级多级穿透绝对精准定位与呼吸高亮脉冲联动
+ */
+async function locateIssueInCanvas(issue: engineApi.ReviewIssue) {
+  if (viewMode.value !== "rich") {
+    viewMode.value = "rich";
+    await nextTick();
+  }
+
   if (issue.chapterSeq && issue.chapterSeq !== projectStore.selectedChapterSeq) {
     selectChapter(issue.chapterSeq);
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 60));
   }
-  nextTick(() => {
-    if (!editorCanvasRef.value) return;
-    const marks = editorCanvasRef.value.querySelectorAll(".issue-highlight-mark");
-    let targetMark: HTMLElement | null = null;
-    const matchText = issue.snippet || issue.quote || "";
-    for (const mark of marks) {
-      if (
-        (issue.id && mark.getAttribute("data-issue-id") === issue.id) ||
-        (matchText && mark.textContent?.includes(matchText))
-      ) {
-        targetMark = mark as HTMLElement;
+
+  await nextTick();
+  if (!editorCanvasRef.value) return;
+
+  const canvas = editorCanvasRef.value;
+  let targetEl: HTMLElement | null = null;
+
+  // ── 第 1 级：精确查找带 issue-id 的 mark 标签 ──
+  if (issue.id) {
+    const mark = canvas.querySelector(
+      `.issue-highlight-mark[data-issue-id="${issue.id}"], mark[data-issue-id="${issue.id}"]`
+    );
+    if (mark) {
+      targetEl = mark as HTMLElement;
+    }
+  }
+
+  // ── 第 2 级：遍历正文所有块级元素 (p, td, tr, li, h2..h6, blockquote)，多算法模糊匹配 quote / snippet ──
+  const quote = (issue.quote || issue.snippet || "").trim();
+  if (!targetEl && quote) {
+    const blocks = Array.from(
+      canvas.querySelectorAll<HTMLElement>("p, td, tr, li, h2, h3, h4, h5, h6, blockquote")
+    );
+
+    // 2.1 精确包含
+    for (const b of blocks) {
+      if (b.textContent && b.textContent.includes(quote)) {
+        targetEl = b;
         break;
       }
     }
-    if (targetMark) {
-      targetMark.scrollIntoView({ behavior: "smooth", block: "center" });
-      targetMark.classList.remove("issue-canvas-pulse");
-      void targetMark.offsetWidth;
-      targetMark.classList.add("issue-canvas-pulse");
-      setTimeout(() => {
-        targetMark?.classList.remove("issue-canvas-pulse");
-      }, 2000);
-      showMsg("已在正文中高亮定位问题位置", "success");
-    } else {
-      showMsg("未在当前正文中直接定位到该问题片段（建议查看小节上下文）", "info");
+
+    // 2.2 泛化正则匹配（去除所有中英文标点与空白）
+    if (!targetEl) {
+      const cleanQuote = quote.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+      if (cleanQuote.length >= 4) {
+        for (const b of blocks) {
+          const cleanBlock = (b.textContent || "").replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+          if (
+            cleanBlock.includes(cleanQuote) ||
+            (cleanQuote.length >= 10 && cleanBlock.includes(cleanQuote.slice(0, 10)))
+          ) {
+            targetEl = b;
+            break;
+          }
+        }
+      }
     }
-  });
+
+    // 2.3 前缀滑动窗口（8~16 字符）
+    if (!targetEl && quote.length >= 8) {
+      const cleanQuote = quote.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+      const windowSizes = [16, 12, 8];
+      for (const wSize of windowSizes) {
+        if (cleanQuote.length >= wSize) {
+          for (let i = 0; i <= cleanQuote.length - wSize; i += 4) {
+            const sub = cleanQuote.slice(i, i + wSize);
+            for (const b of blocks) {
+              const cleanBlock = (b.textContent || "").replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+              if (cleanBlock.includes(sub)) {
+                targetEl = b;
+                break;
+              }
+            }
+            if (targetEl) break;
+          }
+        }
+        if (targetEl) break;
+      }
+    }
+  }
+
+  // ── 第 3 级：若无 quote，在正文块级元素中匹配核心数值或 location 子标题名 ──
+  if (!targetEl) {
+    const blocks = Array.from(
+      canvas.querySelectorAll<HTMLElement>("p, td, tr, li, h2, h3, h4, h5, h6, blockquote")
+    );
+    const msg = issue.description || issue.message || "";
+
+    // 3.1 提取核心数值（如 3500万元、18.5% 等）
+    const numMatches = msg.match(
+      /\d+(?:\.\d+)?(?:%|万元|亿元|万|亿|m³|m²|km|kW|MW|GW|吨|人|年|h|t)?/g
+    );
+    if (numMatches && numMatches.length > 0) {
+      const validNums = numMatches.filter((n) => n.length >= 2 && !/^202\d$/.test(n));
+      const numsToSearch = validNums.length > 0 ? validNums : numMatches;
+      for (const num of numsToSearch) {
+        for (const b of blocks) {
+          if (b.textContent && b.textContent.includes(num)) {
+            targetEl = b;
+            break;
+          }
+        }
+        if (targetEl) break;
+      }
+    }
+
+    // 3.2 匹配 location 关键词或标题
+    if (!targetEl && issue.location) {
+      const locKey = issue.location
+        .replace(/^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*/, "")
+        .trim();
+      if (locKey.length >= 2) {
+        for (const b of blocks) {
+          if (b.textContent && b.textContent.includes(locKey)) {
+            targetEl = b;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (targetEl) {
+    targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    targetEl.classList.remove("issue-canvas-pulse");
+    void targetEl.offsetWidth;
+    targetEl.classList.add("issue-canvas-pulse");
+    setTimeout(() => {
+      targetEl?.classList.remove("issue-canvas-pulse");
+    }, 2500);
+    showMsg(`已定位到正文诊断位置：「${issue.location || targetEl.tagName.toLowerCase()}」`, "success");
+  } else {
+    canvas.scrollTo({ top: 0, behavior: "smooth" });
+    showMsg(`已切换至第 ${issue.chapterSeq || projectStore.selectedChapterSeq} 章正文视口`, "info");
+  }
 }
 
 function openRefDrawerAndFocusCard(refTitle: string, refType?: "material" | "standard" | "web" | "all") {
@@ -566,18 +647,12 @@ function locateRefInCanvas(title: string) {
   }
 }
 
-function openChapterIssuesDrawer(seq: number, e?: Event) {
-  if (e) e.stopPropagation();
-  selectChapter(seq);
-  diagnosticFilterScope.value = "current";
-  diagnosticTab.value = "issues";
-  showDiagnosticDrawer.value = true;
-}
-
-function scrollToSubheading(seq: number, headingId: string, sub: SubHeading, e?: Event) {
+async function scrollToSubheading(seq: number, headingId: string, sub: SubHeading, e?: Event) {
   if (e) e.stopPropagation();
   if (projectStore.selectedChapterSeq !== seq) {
     selectChapter(seq);
+    await nextTick();
+    await new Promise((r) => setTimeout(r, 60));
   }
   activeHeadingId.value = headingId;
   nextTick(() => {
@@ -598,20 +673,7 @@ function scrollToSubheading(seq: number, headingId: string, sub: SubHeading, e?:
   });
 }
 
-function getSubheadingIssueCount(seq: number, sub: SubHeading): number {
-  const issues = projectStore.chapterReviews[seq]?.issues || [];
-  return issues.filter((i) => i.location && i.location.includes(sub.title)).length;
-}
-
-function openSubheadingIssuesDrawer(seq: number, _sub: SubHeading, e?: Event) {
-  if (e) e.stopPropagation();
-  selectChapter(seq);
-  diagnosticFilterScope.value = "current";
-  diagnosticTab.value = "issues";
-  showDiagnosticDrawer.value = true;
-}
-
-// ── 全书审阅与单章审阅核心逻辑（国家发改委投资项目最高水准单一质检）──
+// ── 全书审阅与单章审阅核心逻辑 ──
 async function handleRunFullBookReview(forceAll = false) {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
@@ -732,10 +794,16 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
     const issues = projectStore.chapterReviews[targetSeq]?.issues || [];
     if (issues.length > 0) {
       instruction = `请依据国家发改委投资项目编制规程重点修复以下问题：\n${issues
-        .map((i, idx) => `${idx + 1}. [${i.dimension || i.category || "规范"}] ${i.description || i.message} (建议: ${i.suggestion || "完善论述"})`)
+        .map(
+          (i, idx) =>
+            `${idx + 1}. [${i.dimension || i.category || "规范"}] ${i.description || i.message} (建议: ${
+              i.suggestion || "完善论述"
+            })`
+        )
         .join("\n")}`;
     } else {
-      instruction = "请依据国家发改委投资项目高质量编制标准，进一步深化工程参数论述与规范表格排版。";
+      instruction =
+        "请依据国家发改委投资项目高质量编制标准，进一步深化工程参数论述与规范表格排版。";
     }
   }
 
@@ -792,22 +860,6 @@ function copyCurrentChapterMarkdown() {
   }
 }
 
-function copyFullBookMarkdown() {
-  let fullMd = "";
-  for (const ch of projectStore.outlineChapters) {
-    const text = projectStore.chapters[ch.seq] || "";
-    if (text.trim()) {
-      fullMd += `${text}\n\n`;
-    }
-  }
-  if (navigator.clipboard && fullMd) {
-    navigator.clipboard.writeText(fullMd);
-    showMsg("已复制全书 Markdown 源码至剪贴板！", "success");
-  } else {
-    showMsg("全书暂无已生成正文", "error");
-  }
-}
-
 onMounted(async () => {
   await ensureStep4State();
   nextTick(() => {
@@ -833,222 +885,11 @@ onUnmounted(() => {
       </div>
     </transition>
 
-    <!-- 顶部状态栏与核心信息概览 -->
-    <header class="step4-header card">
-      <div class="header-left-info">
-        <div class="title-with-badge">
-          <h2>4. 报告审阅与专家诊断</h2>
-          <span class="proj-name-badge">
-            {{ projectStore.currentProject?.name || "未选择项目" }}
-          </span>
-          <span class="report-type-badge">
-            {{ projectStore.reportType }}
-          </span>
-        </div>
-
-        <div class="health-meta-row">
-          <div
-            class="health-badge"
-            :class="{
-              'health-passed': healthStatus === '达标',
-              'health-warning': healthStatus === '待完善',
-              'health-danger': healthStatus === '存在重大缺陷',
-              'health-pending': healthStatus === '待审阅',
-            }"
-            :title="`全书达标度：${complianceRate}%`"
-          >
-            <span class="health-dot"></span>
-            <span class="health-label">
-              {{
-                healthStatus === "达标"
-                  ? "🟢 达标（优良）"
-                  : healthStatus === "待完善"
-                  ? `🟡 待完善 (${allIssues.length} 处待核)`
-                  : healthStatus === "存在重大缺陷"
-                  ? `🔴 存在重大缺陷 (${allIssues.length} 处待改)`
-                  : "⏳ 待专家审阅"
-              }}
-            </span>
-            <span class="compliance-pct">达标度 {{ complianceRate }}%</span>
-          </div>
-
-          <div class="meta-stat-pills">
-            <span class="meta-pill" title="全书总字数（已排除表格与标题）">
-              <strong>{{ totalWordCount.toLocaleString() }}</strong> 字 (正文)
-            </span>
-            <span class="meta-pill" title="已完成编写章节数">
-              <strong>{{ completedChaptersCount }} / {{ totalChapters }}</strong> 章已撰写
-            </span>
-            <span class="meta-pill" title="已审阅章节数">
-              <strong>{{ reviewedChaptersCount }} / {{ totalChapters }}</strong> 章已体检
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div class="header-right-actions">
-        <!-- 核心行动按钮 -->
-        <button
-          v-if="!projectStore.batchReviewing"
-          class="btn btn-primary btn-review-hero"
-          :disabled="completedChaptersCount === 0 || projectStore.reviewingSeq !== null"
-          @click="handleRunFullBookReview(false)"
-          title="按照国家发改委投资项目编制规程运行全书深度专家审阅"
-        >
-          🚀 一键全书审阅
-        </button>
-        <button
-          v-else
-          class="btn btn-danger btn-review-hero"
-          @click="handleStopReview"
-          title="中止当前正在执行的批量全书审阅任务"
-        >
-          ⏹ 停止审阅
-        </button>
-
-        <button
-          class="btn btn-outline"
-          :disabled="completedChaptersCount === 0 || projectStore.revisingSeq !== null"
-          @click="handleDirectRevision()"
-          title="代入本章专家诊断建议，一键由大模型执行智能就地重构并生成 Diff 对比"
-        >
-          ⚡ AI 一键智能修订
-        </button>
-
-        <div class="drawer-trigger-group">
-          <button
-            class="btn btn-outline drawer-btn"
-            :class="{ active: showDiagnosticDrawer }"
-            @click="showDiagnosticDrawer = !showDiagnosticDrawer"
-            title="打开全高右侧专家诊断总台账抽屉"
-          >
-            📋 专家诊断报告
-            <span class="count-badge" :class="{ 'has-issues': allIssues.length > 0 }">
-              {{ allIssues.length }}
-            </span>
-          </button>
-
-          <button
-            class="btn btn-outline drawer-btn"
-            :class="{ active: showRefDrawer }"
-            @click="showRefDrawer = !showRefDrawer"
-            title="打开全高右侧全书参考资料与行业规程来源抽屉"
-          >
-            📚 参考资料
-            <span class="count-badge">
-              {{ allReferences.length }}
-            </span>
-          </button>
-
-          <button
-            class="btn btn-outline drawer-btn"
-            @click="copyFullBookMarkdown"
-            title="复制全书 Markdown 源码"
-          >
-            📋 全书源码
-          </button>
-        </div>
-      </div>
-    </header>
-
-    <!-- 审阅心跳与进度条 (正在执行全书审阅时展示) -->
-    <transition name="fade">
-      <div v-if="projectStore.batchReviewing" class="review-heartbeat-bar card">
-        <div class="heartbeat-inner">
-          <div class="hb-left">
-            <span class="radar-pulse"></span>
-            <div class="hb-title-box">
-              <div class="hb-main-title">
-                <strong>⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
-              </div>
-              <div class="hb-desc">
-                已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照国家发改委投资项目编制规程进行系统体检
-              </div>
-            </div>
-          </div>
-          <div class="hb-right">
-            <button
-              class="btn btn-danger btn-sm btn-stop-review"
-              @click="handleStopReview"
-              title="中止当前正在执行的批量全书审阅任务"
-            >
-              ⏹ 停止审阅
-            </button>
-          </div>
-        </div>
-
-        <!-- 实时 AI 专家审阅思考推演窗 -->
-        <div class="review-thought-stream-wrapper">
-          <div class="review-thought-card">
-            <div class="review-thought-header" @click="showReviewThoughtDetails = !showReviewThoughtDetails">
-              <div class="review-thought-title">
-                <span class="review-thought-icon">🧠</span>
-                <span>🧠 深度技术推演与专家质检过程 (纯中文) <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
-                <span class="thinking-wave">
-                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-                </span>
-              </div>
-              <button class="review-thought-toggle-btn" type="button">
-                {{ showReviewThoughtDetails ? '收起 ▲' : '展开 ▼' }}
-              </button>
-            </div>
-            <div v-show="showReviewThoughtDetails" class="review-thought-body">
-              <pre v-if="projectStore.reviewProgress?.thoughtText">{{ projectStore.reviewProgress.thoughtText }}</pre>
-              <div v-else class="review-thought-placeholder">
-                <span class="placeholder-spinner">🔍</span>
-                <span>思维推演中 (纯中文)... AI 专家正在对照国家发改委与行业编制规程深度核查章节参数指标与数据自洽性...</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- 修订心跳与进度条 (正在执行就地修订时展示) -->
-    <transition name="fade">
-      <div v-if="projectStore.revisingSeq !== null" class="revision-heartbeat-bar card">
-        <div class="heartbeat-inner">
-          <div class="hb-left">
-            <span class="radar-pulse"></span>
-            <div class="hb-title-box">
-              <div class="hb-main-title">
-                <strong>⚡ AI 智能修订重构中：第 {{ projectStore.revisingSeq }} 章（{{ revisionStages[revisionStageIndex]?.title || '重构方案论述' }}）· 已耗时 {{ revisionElapsedSeconds }}s</strong>
-              </div>
-              <div class="hb-desc">
-                {{ revisionStages[revisionStageIndex]?.desc || '统筹上下文逻辑与专家诊断建议，执行段落级出版重构' }}
-              </div>
-            </div>
-          </div>
-          <div class="hb-right">
-            <div class="hb-stepper-compact">
-              <div
-                v-for="(st, stIdx) in revisionStages"
-                :key="st.id"
-                class="stepper-item"
-                :class="{
-                  completed: revisionStageIndex > stIdx,
-                  active: revisionStageIndex === stIdx,
-                  pending: revisionStageIndex < stIdx,
-                }"
-              >
-                <div class="stepper-circle">
-                  <span v-if="revisionStageIndex > stIdx">✓</span>
-                  <span v-else-if="revisionStageIndex === stIdx" class="spinner-mini"></span>
-                  <span v-else>{{ stIdx + 1 }}</span>
-                </div>
-                <span class="stepper-label">{{ st.title }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
     <!-- ═════════════════════════════════════════════════════════ -->
-    <!-- 主体工作台：左右架构与 Step 3 100% 对等同构 -->
+    <!-- 主体工作台：左右架构像素级对齐 Step 3 -->
     <!-- ═════════════════════════════════════════════════════════ -->
     <div class="writing-layout">
-      <!-- 左侧：全书目录导航与控制面板 (与 Step 3 结构、类名、展开逻辑 100% 对等) -->
+      <!-- 左侧：全书目录导航与控制面板 (Flat 平铺一体化目录树) -->
       <aside class="sidebar-panel card">
         <div class="card-header sidebar-header">
           <div class="header-titles">
@@ -1094,7 +935,7 @@ onUnmounted(() => {
                   :class="{
                     active: projectStore.selectedChapterSeq === seq,
                     completed: isChapterWritten(seq),
-                    warning: (chapterIssuesCount[seq] || 0) > 0,
+                    reviewing: projectStore.reviewingSeq === seq,
                   }"
                   @click="selectChapter(seq)"
                   :title="`第 ${seq} 章：${getChapterTitle(seq)}`"
@@ -1126,7 +967,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <!-- Flat 平铺一体化章节目录树 (与 Step 3 结构和样式 100% 对齐) -->
+        <!-- Flat 平铺一体化章节目录树 (无边框平铺列表，去除预警角标) -->
         <div class="outline-tree-scrollable">
           <div
             v-for="ch in projectStore.outlineChapters"
@@ -1136,7 +977,6 @@ onUnmounted(() => {
               'is-active': projectStore.selectedChapterSeq === ch.seq,
               'is-reviewing': projectStore.reviewingSeq === ch.seq,
               'is-completed': isChapterWritten(ch.seq),
-              'has-warning': (chapterIssuesCount[ch.seq] || 0) > 0,
             }"
           >
             <!-- 章节行 -->
@@ -1172,20 +1012,10 @@ onUnmounted(() => {
                   }}
                 </span>
 
-                <!-- 预警角标 (若有审阅问题在右侧叠加 ⚠️ N) -->
-                <span
-                  v-if="(chapterIssuesCount[ch.seq] || 0) > 0"
-                  class="warning-badge-pill"
-                  :title="`第 ${ch.seq} 章存在 ${chapterIssuesCount[ch.seq]} 处待优化诊断，点击定位问题`"
-                  @click.stop="openChapterIssuesDrawer(ch.seq, $event)"
-                >
-                  ⚠️ {{ chapterIssuesCount[ch.seq] }}
-                </span>
-
                 <!-- 单章操作按钮 -->
                 <button
                   class="ch-action-btn"
-                  :title="'审阅该章'"
+                  title="审阅该章"
                   :disabled="projectStore.batchReviewing || projectStore.reviewingSeq === ch.seq || !isChapterWritten(ch.seq)"
                   @click.stop="handleReviewSingleChapter(ch.seq)"
                 >
@@ -1224,14 +1054,6 @@ onUnmounted(() => {
                 >
                   <span class="sub-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
                   <span class="sub-text">{{ sub.title }}</span>
-                  <span
-                    v-if="getSubheadingIssueCount(ch.seq, sub) > 0"
-                    class="sub-issue-badge"
-                    :title="`该小节存在 ${getSubheadingIssueCount(ch.seq, sub)} 处审阅问题，点击直达诊断卡片`"
-                    @click.stop="openSubheadingIssuesDrawer(ch.seq, sub, $event)"
-                  >
-                    ⚠️ {{ getSubheadingIssueCount(ch.seq, sub) }}
-                  </span>
                 </div>
               </div>
             </transition>
@@ -1243,7 +1065,7 @@ onUnmounted(() => {
         </div>
       </aside>
 
-      <!-- 右侧：单章聚焦出版级排版与审阅主画布 -->
+      <!-- 右侧：单章聚焦出版级排版与审阅主画布 (结构对齐 Step 3) -->
       <main class="editor-panel card">
         <div class="card-header editor-header">
           <div class="editor-title-area">
@@ -1270,7 +1092,7 @@ onUnmounted(() => {
                     : currentChapterReview
                     ? currentChapterIssuesCount === 0
                       ? "🟢 发改委标准达标 ✓"
-                      : `🟡 存在 ${currentChapterIssuesCount} 处待优化建议`
+                      : `🟡 存在 ${currentChapterIssuesCount} 处待核建议`
                     : isChapterWritten(currentChapter?.seq || 1)
                     ? "⏳ 待专家审阅"
                     : "待在步骤 3 撰写生成"
@@ -1279,7 +1101,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 右上角核心操作组 (排版正文 / Diff 对比就地切换，单章审阅，AI智能修订) -->
+          <!-- 右上角核心操作组 (视图模式切换、单章审阅、AI智能修订、抽屉与复制) -->
           <div class="editor-actions">
             <!-- 视图模式切换 Tab -->
             <div class="view-mode-tabs">
@@ -1321,17 +1143,128 @@ onUnmounted(() => {
             </button>
 
             <button
+              class="btn btn-outline drawer-btn"
+              :class="{ active: showDiagnosticDrawer }"
+              @click="showDiagnosticDrawer = !showDiagnosticDrawer"
+              title="打开全高右侧专家诊断总台账抽屉"
+            >
+              📋 专家诊断报告 ({{ allIssues.length }})
+            </button>
+
+            <button
+              class="btn btn-outline drawer-btn"
+              :class="{ active: showRefDrawer }"
+              @click="showRefDrawer = !showRefDrawer"
+              title="打开全高右侧参考资料来源抽屉"
+            >
+              📚 参考资料 ({{ currentChapterReferences.length }})
+            </button>
+
+            <button
               class="btn btn-outline"
               @click="copyCurrentChapterMarkdown"
-              title="复制本章 Markdown 源码"
+              title="复制当前章节排版 Markdown 源码至剪贴板"
             >
-              📋 复制源码
+              📄 复制 Markdown
             </button>
           </div>
         </div>
 
+        <!-- 审阅心跳与进度条 (正在执行全书审阅时内联展示) -->
+        <transition name="fade">
+          <div v-if="projectStore.batchReviewing" class="review-heartbeat-bar">
+            <div class="heartbeat-inner">
+              <div class="hb-left">
+                <span class="radar-pulse"></span>
+                <div class="hb-title-box">
+                  <div class="hb-main-title">
+                    <strong>⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
+                  </div>
+                  <div class="hb-desc">
+                    已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照国家发改委投资项目编制规程进行系统体检
+                  </div>
+                </div>
+              </div>
+              <div class="hb-right">
+                <button
+                  class="btn btn-danger btn-sm btn-stop-review"
+                  @click="handleStopReview"
+                  title="中止当前正在执行的批量全书审阅任务"
+                >
+                  ⏹ 停止审阅
+                </button>
+              </div>
+            </div>
+
+            <!-- 实时 AI 专家审阅思考推演窗 -->
+            <div class="review-thought-stream-wrapper">
+              <div class="review-thought-card">
+                <div class="review-thought-header" @click="showReviewThoughtDetails = !showReviewThoughtDetails">
+                  <div class="review-thought-title">
+                    <span class="review-thought-icon">🧠</span>
+                    <span>🧠 深度技术推演与专家质检过程 (纯中文) <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
+                    <span class="thinking-wave">
+                      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                    </span>
+                  </div>
+                  <button class="review-thought-toggle-btn" type="button">
+                    {{ showReviewThoughtDetails ? '收起 ▲' : '展开 ▼' }}
+                  </button>
+                </div>
+                <div v-show="showReviewThoughtDetails" class="review-thought-body">
+                  <pre v-if="projectStore.reviewProgress?.thoughtText">{{ projectStore.reviewProgress.thoughtText }}</pre>
+                  <div v-else class="review-thought-placeholder">
+                    <span class="placeholder-spinner">🔍</span>
+                    <span>思维推演中 (纯中文)... AI 专家正在对照国家发改委与行业编制规程深度核查章节参数指标与数据自洽性...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
+
+        <!-- 修订心跳与进度条 (正在执行就地修订时内联展示) -->
+        <transition name="fade">
+          <div v-if="projectStore.revisingSeq !== null" class="revision-heartbeat-bar">
+            <div class="heartbeat-inner">
+              <div class="hb-left">
+                <span class="radar-pulse"></span>
+                <div class="hb-title-box">
+                  <div class="hb-main-title">
+                    <strong>⚡ AI 智能修订重构中：第 {{ projectStore.revisingSeq }} 章（{{ revisionStages[revisionStageIndex]?.title || '重构方案论述' }}）· 已耗时 {{ revisionElapsedSeconds }}s</strong>
+                  </div>
+                  <div class="hb-desc">
+                    {{ revisionStages[revisionStageIndex]?.desc || '统筹上下文逻辑与专家诊断建议，执行段落级出版重构' }}
+                  </div>
+                </div>
+              </div>
+              <div class="hb-right">
+                <div class="hb-stepper-compact">
+                  <div
+                    v-for="(st, stIdx) in revisionStages"
+                    :key="st.id"
+                    class="stepper-item"
+                    :class="{
+                      completed: revisionStageIndex > stIdx,
+                      active: revisionStageIndex === stIdx,
+                      pending: revisionStageIndex < stIdx,
+                    }"
+                  >
+                    <div class="stepper-circle">
+                      <span v-if="revisionStageIndex > stIdx">✓</span>
+                      <span v-else-if="revisionStageIndex === stIdx" class="spinner-mini"></span>
+                      <span v-else>{{ stIdx + 1 }}</span>
+                    </div>
+                    <span class="stepper-label">{{ st.title }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
+
         <!-- 主工作画布容器 -->
-        <div class="editor-body">
+        <div class="card-body editor-body">
           <!-- ═════════════════════════════════════════════════════════ -->
           <!-- 模式 1: 最终排版正文 (rich) — 单章聚焦 + contenteditable 就地编辑 -->
           <!-- ═════════════════════════════════════════════════════════ -->
@@ -1339,7 +1272,7 @@ onUnmounted(() => {
             <div class="canvas-spec-bar">
               <span class="spec-tag">📖 国家发改委与行业规程出版级排版 (10.5pt)</span>
               <span class="spec-tip">
-                支持直接在排版文字上点击输入修改，300ms 自动落盘。双击或点击黄色高亮诊断标记可直接联动右侧修改建议。
+                支持直接在排版文字上点击输入修改，300ms 自动落盘。点击黄色高亮诊断标记可直接联动右侧修改建议。
               </span>
             </div>
 
@@ -1409,7 +1342,7 @@ onUnmounted(() => {
                 <div class="empty-icon">⚖️</div>
                 <div class="empty-title">当前章节暂无修订对比数据</div>
                 <div class="empty-desc">
-                  点击上方「⚡ AI 智能修订」或「审阅诊断」中的「采纳建议并修订」，系统将根据发改委规范自动生成高质量修订方案与 Diff 对比。
+                  点击上方「⚡ AI 智能修订」或「专家诊断」中的「采纳修订」，系统将根据发改委规范自动生成高质量修订方案与 Diff 对比。
                 </div>
               </div>
 
@@ -1776,307 +1709,8 @@ onUnmounted(() => {
   border: 1px solid #bae6fd;
 }
 
-/* 顶部状态栏 */
-.step4-header {
-  padding: 16px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-.header-left-info {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.title-with-badge {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.title-with-badge h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  color: #0f172a;
-}
-.proj-name-badge {
-  background: #e0e7ff;
-  color: #4338ca;
-  font-size: 12px;
-  padding: 2px 10px;
-  border-radius: 12px;
-  font-weight: 600;
-}
-.report-type-badge {
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 12px;
-  padding: 2px 10px;
-  border-radius: 12px;
-  font-weight: 500;
-}
-
-.health-meta-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.health-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 16px;
-  font-size: 12px;
-  font-weight: 600;
-  border: 1px solid transparent;
-}
-.health-badge.health-passed {
-  background: #dcfce7;
-  color: #166534;
-  border-color: #bbf7d0;
-}
-.health-badge.health-warning {
-  background: #fef9c3;
-  color: #854d0e;
-  border-color: #fef08a;
-}
-.health-badge.health-danger {
-  background: #fee2e2;
-  color: #991b1b;
-  border-color: #fecaca;
-}
-.health-badge.health-pending {
-  background: #f1f5f9;
-  color: #64748b;
-  border-color: #e2e8f0;
-}
-.health-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-.compliance-pct {
-  font-size: 11px;
-  opacity: 0.85;
-}
-
-.meta-stat-pills {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.meta-pill {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #475569;
-}
-.meta-pill strong {
-  color: #0f172a;
-}
-
-.header-right-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.btn-review-hero {
-  padding: 8px 18px;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.drawer-trigger-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.drawer-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  padding: 6px 12px;
-}
-.drawer-btn.active {
-  background: #eff6ff;
-  border-color: #3b82f6;
-  color: #1d4ed8;
-}
-.count-badge {
-  background: #e2e8f0;
-  color: #475569;
-  font-size: 10.5px;
-  padding: 1px 6px;
-  border-radius: 10px;
-  font-weight: 600;
-}
-.count-badge.has-issues {
-  background: #ef4444;
-  color: #fff;
-}
-
-/* 审阅心跳指示条 */
-.review-heartbeat-bar,
-.revision-heartbeat-bar {
-  padding: 12px 18px;
-  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-  border: 1px solid #bfdbfe;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.heartbeat-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.hb-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.radar-pulse {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #3b82f6;
-  box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
-  animation: pulse-ring 1.5s infinite;
-}
-@keyframes pulse-ring {
-  0% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
-  }
-  70% {
-    transform: scale(1);
-    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
-  }
-  100% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
-  }
-}
-.hb-main-title {
-  font-size: 13.5px;
-  color: #1e3a8a;
-}
-.hb-desc {
-  font-size: 11.5px;
-  color: #475569;
-  margin-top: 2px;
-}
-.review-thought-stream-wrapper {
-  margin-top: 4px;
-}
-.review-thought-card {
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.review-thought-header {
-  padding: 8px 12px;
-  background: #f8fafc;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-}
-.review-thought-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #334155;
-}
-.review-thought-toggle-btn {
-  background: transparent;
-  border: none;
-  font-size: 11px;
-  color: #3b82f6;
-  cursor: pointer;
-}
-.review-thought-body {
-  padding: 10px 14px;
-  max-height: 180px;
-  overflow-y: auto;
-  font-size: 12px;
-  line-height: 1.5;
-  background: #fdfdfd;
-}
-.review-thought-body pre {
-  margin: 0;
-  white-space: pre-wrap;
-  font-family: inherit;
-  color: #334155;
-}
-.review-thought-placeholder {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #64748b;
-}
-
-/* 修订步进器 */
-.hb-stepper-compact {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.stepper-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  color: #64748b;
-}
-.stepper-item.completed {
-  color: #16a34a;
-  font-weight: 600;
-}
-.stepper-item.active {
-  color: #2563eb;
-  font-weight: 600;
-}
-.stepper-circle {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-}
-.stepper-item.completed .stepper-circle {
-  background: #dcfce7;
-  color: #15803d;
-}
-.stepper-item.active .stepper-circle {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
 /* ═════════════════════════════════════════════════════════ */
-/* 主体左右工作台布局 (100% 对齐 Step 3) */
+/* 主体左右工作台布局 (像素级对齐 Step 3) */
 /* ═════════════════════════════════════════════════════════ */
 .writing-layout {
   display: grid;
@@ -2229,9 +1863,15 @@ onUnmounted(() => {
   color: #ffffff;
   font-weight: 600;
 }
-.order-chip.warning {
-  border-color: #f59e0b;
+.order-chip.completed:not(.active) {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+.order-chip.reviewing:not(.active) {
+  background: #fef3c7;
   color: #b45309;
+  border-color: #fde68a;
 }
 .flow-arrow {
   font-size: 9px;
@@ -2239,7 +1879,7 @@ onUnmounted(() => {
 }
 
 .global-actions {
-  padding: 10px 18px;
+  padding: 12px 16px;
   border-bottom: 1px solid #f1f5f9;
   background: #ffffff;
 }
@@ -2247,41 +1887,68 @@ onUnmounted(() => {
   width: 100%;
 }
 
-/* 目录滚动树 */
+/* Flat 平铺一体化目录树 (单一定高全局滚动，对齐 Step 3) */
 .outline-tree-scrollable {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 12px 14px;
+  overflow-x: hidden;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.outline-tree-scrollable::-webkit-scrollbar {
+  width: 5px;
+}
+.outline-tree-scrollable::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.outline-tree-scrollable::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.empty-outline-tip {
+  padding: 24px 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .chapter-tree-node {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #ffffff;
-  transition: all 0.15s ease;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
   overflow: hidden;
-}
-.chapter-tree-node:hover {
-  border-color: #cbd5e1;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  min-height: 38px;
 }
 .chapter-tree-node.is-active {
-  border-color: #3b82f6;
-  background: #f8faff;
-  box-shadow: 0 0 0 1px #3b82f6;
+  background: rgba(59, 130, 246, 0.06);
 }
 
 .chapter-node-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 12px;
+  padding: 8px 8px;
   cursor: pointer;
   user-select: none;
-  gap: 8px;
+  border-radius: 6px;
+  background: transparent;
+  transition: background 0.15s ease;
+  gap: 6px;
+}
+.chapter-node-row:hover {
+  background: #f1f5f9;
+}
+.chapter-tree-node.is-active .chapter-node-row {
+  background: #eff6ff;
 }
 
 .row-left {
@@ -2292,196 +1959,155 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-/* 序号徽标：选中为蓝底圆圈，未选为中性浅灰矩形 */
 .ch-seq-tag {
-  display: inline-flex;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  background: #f1f5f9;
-  color: #64748b;
-  font-size: 11.5px;
-  font-weight: 700;
-  padding: 0 4px;
   flex-shrink: 0;
-  transition: all 0.15s ease;
 }
 .chapter-tree-node.is-active .ch-seq-tag {
   background: #3b82f6;
-  color: #ffffff;
-  border-radius: 50%;
-  width: 22px;
-  height: 22px;
+  color: #fff;
+}
+.chapter-tree-node.is-completed:not(.is-active) .ch-seq-tag {
+  background: #dcfce7;
+  color: #15803d;
 }
 
 .ch-title-text {
-  font-size: 13px;
-  font-weight: 500;
-  color: #334155;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1e293b;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
 }
 .chapter-tree-node.is-active .ch-title-text {
-  font-weight: 600;
   color: #1d4ed8;
 }
 
 .row-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
-/* 状态药丸 */
 .status-pill {
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 12px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 10px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-.status-pill.completed {
-  background: #dcfce7;
-  color: #15803d;
+  gap: 3px;
+  white-space: nowrap;
 }
 .status-pill.idle {
   background: #f1f5f9;
-  color: #94a3b8;
+  color: #64748b;
 }
 .status-pill.reviewing {
   background: #fef3c7;
   color: #b45309;
 }
-
-/* 预警药丸 */
-.warning-badge-pill {
-  background: #fef3c7;
-  color: #b45309;
-  border: 1px solid #fde68a;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.15s ease;
+.status-pill.completed {
+  background: #dcfce7;
+  color: #15803d;
 }
-.warning-badge-pill:hover {
-  background: #fde68a;
-  transform: scale(1.05);
+.status-pill.error {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .ch-action-btn {
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
+  background: none;
+  border: 1px solid transparent;
   border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  padding: 2px 4px;
+  font-size: 11px;
+  transition: all 0.15s;
 }
 .ch-action-btn:hover:not(:disabled) {
   background: #e2e8f0;
-  border-color: #94a3b8;
+  border-color: #cbd5e1;
 }
 .ch-action-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
 .collapse-toggle-icon {
   background: transparent;
   border: none;
-  font-size: 10px;
+  font-size: 9px;
   color: #94a3b8;
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 3px;
-  transition: all 0.15s ease;
 }
 .collapse-toggle-icon:hover {
-  background: #e2e8f0;
   color: #475569;
 }
 
-/* 多级子标题列表 */
+/* 子标题层级 */
 .subheadings-subtree {
-  background: #f8fafc;
-  border-top: 1px solid #f1f5f9;
-  padding: 6px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  padding: 2px 0 4px 0;
+  background: transparent;
 }
 .subheading-item-row {
+  padding: 3px 8px 3px 26px;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  border-radius: 4px;
   cursor: pointer;
   font-size: 11.5px;
-  color: #475569;
+  color: #64748b;
+  border-radius: 4px;
   transition: all 0.12s ease;
 }
 .subheading-item-row:hover {
-  background: #e2e8f0;
+  background: #f1f5f9;
   color: #0f172a;
 }
-.subheading-item-row.is-active-heading {
-  background: #dbeafe;
-  color: #1e40af;
-  font-weight: 600;
-}
-.subheading-item-row.level-2 {
-  padding-left: 8px;
-}
 .subheading-item-row.level-3 {
-  padding-left: 18px;
+  padding-left: 36px;
 }
 .subheading-item-row.level-4 {
-  padding-left: 28px;
+  padding-left: 46px;
+}
+.subheading-item-row.is-active-heading {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
 }
 .sub-bullet {
-  font-size: 10px;
+  font-size: 9px;
   flex-shrink: 0;
-  opacity: 0.7;
+  opacity: 0.6;
 }
 .sub-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
-}
-.sub-issue-badge {
-  background: #fee2e2;
-  color: #b91c1c;
-  font-size: 10px;
-  padding: 0 4px;
-  border-radius: 8px;
-  font-weight: 700;
-}
-
-.empty-outline-tip {
-  text-align: center;
-  padding: 30px 10px;
-  color: #94a3b8;
-  font-size: 13px;
 }
 
 /* ═════════════════════════════════════════════════════════ */
-/* 右侧主工作画布 (与 Step 3 100% 对等) */
+/* 右侧主工作画布 (与 Step 3 结构和样式对齐) */
 /* ═════════════════════════════════════════════════════════ */
 .editor-panel {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 165px);
   min-height: 0;
+  position: relative;
   overflow: hidden;
 }
 
@@ -2505,17 +2131,17 @@ onUnmounted(() => {
   gap: 8px;
 }
 .seq-tag {
-  background: #3b82f6;
-  color: #fff;
+  background: #eff6ff;
+  color: #2563eb;
   font-size: 11px;
-  font-weight: 600;
-  padding: 2px 7px;
+  font-weight: 700;
+  padding: 2px 6px;
   border-radius: 4px;
   flex-shrink: 0;
 }
 .active-ch-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: #0f172a;
   overflow: hidden;
@@ -2590,6 +2216,155 @@ onUnmounted(() => {
   min-height: 0;
   overflow: hidden;
   position: relative;
+}
+
+/* 审阅与修订心跳条 (内联在主画布顶部) */
+.review-heartbeat-bar,
+.revision-heartbeat-bar {
+  margin: 12px 18px 0;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.heartbeat-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.hb-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.radar-pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  animation: pulse-ring 1.5s infinite;
+}
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+.hb-main-title {
+  font-size: 13px;
+  color: #1e3a8a;
+}
+.hb-desc {
+  font-size: 11.5px;
+  color: #475569;
+  margin-top: 2px;
+}
+.review-thought-stream-wrapper {
+  margin-top: 4px;
+}
+.review-thought-card {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.review-thought-header {
+  padding: 6px 10px;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.review-thought-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #334155;
+}
+.review-thought-toggle-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  color: #3b82f6;
+  cursor: pointer;
+}
+.review-thought-body {
+  padding: 8px 12px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: #fdfdfd;
+}
+.review-thought-body pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  color: #334155;
+}
+.review-thought-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+}
+
+/* 修订步进器 */
+.hb-stepper-compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.stepper-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #64748b;
+}
+.stepper-item.completed {
+  color: #16a34a;
+  font-weight: 600;
+}
+.stepper-item.active {
+  color: #2563eb;
+  font-weight: 600;
+}
+.stepper-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
+.stepper-item.completed .stepper-circle {
+  background: #dcfce7;
+  color: #15803d;
+}
+.stepper-item.active .stepper-circle {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 /* 排版正文画布 */
@@ -3139,7 +2914,9 @@ onUnmounted(() => {
   color: #94a3b8;
 }
 
-/* 定位脉冲高亮特效 */
+/* ═════════════════════════════════════════════════════════ */
+/* 定位脉冲高亮特效 (2.5 秒金黄色呼吸脉冲波纹) */
+/* ═════════════════════════════════════════════════════════ */
 :deep(.issue-card-pulse) {
   animation: card-pulse-anim 2s ease;
 }
@@ -3158,20 +2935,27 @@ onUnmounted(() => {
 }
 
 :deep(.issue-canvas-pulse) {
-  animation: canvas-issue-anim 2s ease !important;
+  animation: canvas-issue-pulse 2.5s ease !important;
+  border-radius: 4px;
 }
-@keyframes canvas-issue-anim {
+@keyframes canvas-issue-pulse {
   0% {
-    background-color: #fef08a !important;
-    outline: 3px solid #eab308 !important;
+    background-color: rgba(250, 204, 21, 0.55) !important;
+    box-shadow: 0 0 0 5px rgba(234, 179, 8, 0.65) !important;
+    transform: scale(1.01);
   }
-  50% {
-    background-color: #fef9c3 !important;
-    outline: 1px solid #facc15 !important;
+  30% {
+    background-color: rgba(254, 240, 138, 0.75) !important;
+    box-shadow: 0 0 0 10px rgba(234, 179, 8, 0.3) !important;
+    transform: scale(1);
+  }
+  60% {
+    background-color: rgba(254, 240, 138, 0.4) !important;
+    box-shadow: 0 0 0 5px rgba(234, 179, 8, 0.15) !important;
   }
   100% {
-    background-color: #fef08a !important;
-    outline: none !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
   }
 }
 

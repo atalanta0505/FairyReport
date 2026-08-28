@@ -805,4 +805,68 @@ describe("Markdown 解析与排版工具", () => {
       expect(roundTripMd).not.toContain("data-ref");
     });
   });
+
+  describe("V2-T35: 段落级精准定位特征提取与泛化匹配", () => {
+    it("extractIssueCandidateKeys: 优先提取 quote，无 quote 时从 message 与 location 提取引号与数值", () => {
+      // 1. 带 quote
+      const issue1 = {
+        id: "ISSUE-1",
+        severity: "warning" as const,
+        quote: "总投资 3500 万元，年运行成本 120 万元",
+        message: "投资估算缺少明细",
+      };
+      expect(extractIssueCandidateKeys(issue1)).toEqual(["总投资 3500 万元，年运行成本 120 万元"]);
+
+      // 2. 无 quote，message 带引号
+      const issue2 = {
+        id: "ISSUE-2",
+        severity: "warning" as const,
+        message: "段落中提到的「拟建水库总库容1200万m³」与底稿不一致",
+      };
+      expect(extractIssueCandidateKeys(issue2)).toContain("拟建水库总库容1200万m³");
+
+      // 3. 无 quote，从 message 提取工程数值
+      const issue3 = {
+        id: "ISSUE-3",
+        severity: "warning" as const,
+        message: "建设投资估算为 58000万元，与资金筹措表不符",
+      };
+      const keys3 = extractIssueCandidateKeys(issue3);
+      expect(keys3).toContain("58000万元");
+
+      // 4. 无 quote 和数值，从 location 提取标题名
+      const issue4 = {
+        id: "ISSUE-4",
+        severity: "warning" as const,
+        message: "论证不充分",
+        location: "5.2.1 关键设备比选方案",
+      };
+      const keys4 = extractIssueCandidateKeys(issue4);
+      expect(keys4).toContain("关键设备比选方案");
+    });
+
+    it("buildGeneralizedRegex: 兼容全半角标点符号与空白", () => {
+      const reg = buildGeneralizedRegex("投资估算：总额为3500万元，含基本预备费。");
+      expect(reg.test("投资估算:总额为3500万元,含基本预备费.")).toBe(true);
+      expect(reg.test("投资估算：总额为3500万元，含基本预备费。")).toBe(true);
+      expect(reg.test("投资估算 : 总额为3500万元 , 含基本预备费 .")).toBe(true);
+    });
+
+    it("highlightIssuesInHtml: 多级穿透匹配并注入 data-issue-id 与 review-issue-highlight 标记", () => {
+      const html = "<p>本项目建设投资估算为 5800万元，资金来源全部为政府专项债。</p>";
+      const issues = [
+        {
+          id: "ISSUE-VAL-1",
+          severity: "high" as const,
+          message: "数值自洽问题",
+          quote: "5800万元",
+        },
+      ];
+      const highlighted = highlightIssuesInHtml(html, issues, 7);
+      expect(highlighted).toContain('data-issue-id="ISSUE-VAL-1"');
+      expect(highlighted).toContain("review-issue-highlight");
+      expect(highlighted).toContain("5800万元");
+    });
+  });
 });
+

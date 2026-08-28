@@ -866,25 +866,25 @@ export function buildGeneralizedRegex(cand: string): RegExp {
   for (let i = 0; i < cand.length; i++) {
     const ch = cand[i];
     if (ch === "，" || ch === ",") {
-      pattern += "[，,]";
+      pattern += "\\s*[，,]\\s*";
     } else if (ch === "：" || ch === ":") {
-      pattern += "[：:]";
+      pattern += "\\s*[：:]\\s*";
     } else if (ch === "（" || ch === "(") {
-      pattern += "[（\\(]";
+      pattern += "\\s*[（\\(]\\s*";
     } else if (ch === "）" || ch === ")") {
-      pattern += "[）\\)]";
+      pattern += "\\s*[）\\)]\\s*";
     } else if (ch === "。" || ch === ".") {
-      pattern += "[。\\.]";
+      pattern += "\\s*[。\\.]\\s*";
     } else if (ch === "；" || ch === ";") {
-      pattern += "[；;]";
+      pattern += "\\s*[；;]\\s*";
     } else if (ch === "“" || ch === "”" || ch === '"') {
-      pattern += '(?:[“”"]|&quot;)';
+      pattern += '\\s*(?:[“”"]|&quot;)\\s*';
     } else if (ch === "‘" || ch === "’" || ch === "'") {
-      pattern += "(?:[‘’']|&#39;)";
+      pattern += "\\s*(?:[‘’']|&#39;)\\s*";
     } else if (ch === "「" || ch === "」") {
-      pattern += "[「」]";
+      pattern += "\\s*[「」]\\s*";
     } else if (ch === "『" || ch === "』") {
-      pattern += "[『』]";
+      pattern += "\\s*[『』]\\s*";
     } else if (/\s/.test(ch)) {
       pattern += "(?:\\s|&nbsp;)+";
     } else {
@@ -927,7 +927,7 @@ export function highlightIssuesInHtml(
       for (let i = 0; i < parts.length; i++) {
         if (i % 2 === 1) {
           const tag = parts[i];
-          if (/^<mark\b[^>]*class=["'][^"']*review-issue-highlight/i.test(tag)) {
+          if (/^<mark\b[^>]*class=["'][^"']*(?:review-issue-highlight|issue-highlight-mark)/i.test(tag)) {
             inExistingMark = true;
           } else if (/^<\/mark>/i.test(tag)) {
             inExistingMark = false;

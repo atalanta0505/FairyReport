@@ -445,8 +445,8 @@ def test_standard_three_line_table_rules_in_prompts_and_writer():
     assert "关键设备比选表" in _BASE_WRITING_PROMPT
     assert "主要设备清单表" in _BASE_WRITING_PROMPT
     assert "工程方案比选表" in _BASE_WRITING_PROMPT
-    assert "建设投资估算表 / 总投资与分年度资金计划表" in _BASE_WRITING_PROMPT
-    assert "财务评价指标汇总表" in _BASE_WRITING_PROMPT
+    assert "项目总投资与建设投资全要素估算表" in _BASE_WRITING_PROMPT
+    assert "主要财务指标汇总表" in _BASE_WRITING_PROMPT
     assert "融资方案比选表" in _BASE_WRITING_PROMPT
     assert "债务清偿能力指标表" in _BASE_WRITING_PROMPT
     assert "风险评价与管控矩阵表" in _BASE_WRITING_PROMPT
@@ -500,5 +500,29 @@ def test_strip_markdown_tables_and_count_content_chars():
     # 共 15 + 24 = 39 字符
     wc = _count_content_chars(md)
     assert wc == 39
+
+
+def test_ndrc_financial_table_prompt_full_elements():
+    """验证发改委教材标准全要素财务报表强化提示词规范。"""
+    from engine.app.writing.prompts import _BASE_WRITING_PROMPT
+    from engine.app.writing.writer import _build_writing_system_prompt
+
+    # 1. 验证基础提示词中的全要素财务报表要求
+    assert "项目总投资与建设投资全要素估算表" in _BASE_WRITING_PROMPT
+    assert "建筑工程费、设备及工器具购置费、安装工程费" in _BASE_WRITING_PROMPT
+    assert "基本预备费、涨价预备费、建设期利息、流动资金" in _BASE_WRITING_PROMPT
+    assert "主要财务指标汇总表" in _BASE_WRITING_PROMPT
+    assert "FIRR" in _BASE_WRITING_PROMPT
+    assert "FNPV" in _BASE_WRITING_PROMPT
+    assert "ROI" in _BASE_WRITING_PROMPT
+    assert "ROE" in _BASE_WRITING_PROMPT
+    assert "利息备付率（ICR）" in _BASE_WRITING_PROMPT
+    assert "偿债备付率（DSCR）" in _BASE_WRITING_PROMPT
+
+    # 2. 验证写入系统提示词中的全要素规则
+    sys_prompt = _build_writing_system_prompt(report_type="可行性研究报告", chapter_title="第七章 投资估算与财务分析")
+    assert "项目总投资与建设投资估算表/分年度资金计划" in sys_prompt
+    assert "主要财务指标汇总" in sys_prompt
+    assert "债务清偿能力指标" in sys_prompt
 
 
