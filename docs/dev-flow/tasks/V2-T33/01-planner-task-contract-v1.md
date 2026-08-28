@@ -1,8 +1,9 @@
 # 任务合同 V2-T33 v1 — Mermaid 专业工程流程图与拓扑图渲染优化
 
-- 状态：READY_FOR_MAKER（待产品负责人批准）
+- 状态：ACCEPTED（验收通过并锁定）
 - 依据：用户关于“Mermaid 图显示不 OK、按列表逐个攻克”的明确指示
-- 精确起始 SHA：`5fbbe7a7bf7fcba1fa5749f7baaa7e6e5898d9e2`
+- 精确起始 SHA：`e9935c12fc3a15be6520e6f30b103bc458ee8ca4`
+- 锁定验收 SHA：`d7d55889ab0898cbcf1a07665e24f38b09a8f844`
 - 工作树门禁：`git status --short` 必须干净
 
 ---
@@ -70,11 +71,11 @@
 
 ## 4. 验收标准
 
-- [ ] 前端能无依赖完整解析并渲染 `graph TD` / `graph LR` / `flowchart` 等工程流程图为出版级矢量 SVG；
-- [ ] 流程图卡片具备视图切换、复制代码、全屏缩放与容错降级；
-- [ ] 编辑正文时 `htmlToMarkdown` 能 100% 无损还原 Mermaid 代码块；
-- [ ] Word 导出时 Mermaid 流程图被规范转换为工程流程对照表或流程框；
-- [ ] 5 项全量门禁（Pytest 128+、Vitest 151+、vue-tsc、build、cargo check）全部绿灯通过。
+- [x] 前端能无依赖完整解析并渲染 `graph TD` / `graph LR` / `flowchart` 等工程流程图为出版级矢量 SVG；
+- [x] 流程图卡片具备视图切换、复制代码、全屏缩放与容错降级；
+- [x] 编辑正文时 `htmlToMarkdown` 能 100% 无损还原 Mermaid 代码块；
+- [x] Word 导出时 Mermaid 流程图被规范转换为工程流程对照表或流程框；
+- [x] 5 项全量门禁（Pytest 129、Vitest 167、vue-tsc、build、cargo check）全部绿灯通过。
 
 ---
 
