@@ -29,22 +29,17 @@ const engine = useEngineStore();
 const settings = useSettingsStore();
 const projectStore = useProjectStore();
 
-// ── 视图模式切换 ──
-// rich: 最终排版正文 (就地可编辑) | diff: 修订差异对比 (全宽单栏内联) | source: Markdown 源码
-const viewMode = ref<"rich" | "diff" | "source">("rich");
+// ── 视图模式切换：rich 最终排版正文 (就地可编辑) | diff 修订差异对比 (全宽单栏内联) ──
+const viewMode = ref<"rich" | "diff">("rich");
 
 // ── 右侧全高抽屉 (Slide-over Drawer, 540px) ──
 const showDiagnosticDrawer = ref<boolean>(false);
 const showRefDrawer = ref<boolean>(false);
-const diagnosticTab = ref<"issues" | "numerical" | "gaps" | "evals" | "suggestions">("issues");
+const diagnosticTab = ref<"issues" | "numerical" | "gaps">("issues");
+const diagnosticFilterScope = ref<"current" | "all">("current");
 const refFilterType = ref<"all" | "material" | "standard" | "web">("all");
 
-// ── 审查双模式 ──
-// fast: ⚡ 常规审查 (推荐) | all: 🔍 全维精审
-const reviewMode = ref<"fast" | "all">("fast");
-
 // ── 章节与小节目录展开 / 定位状态 ──
-const activeChapterSeq = ref<number>(1);
 const activeHeadingId = ref<string | null>(null);
 const chapterCollapsedMap = ref<Record<number, boolean>>({});
 
@@ -69,6 +64,7 @@ const revisionStages = [
 ];
 
 const saveDebounceTimers: Record<number, ReturnType<typeof setTimeout>> = {};
+const editorCanvasRef = ref<HTMLElement | null>(null);
 
 const outlineHeadings = computed(() => extractOutlineHeadings(projectStore.outlineMd));
 
@@ -81,7 +77,7 @@ function showMsg(text: string, type: "success" | "error" | "info" = "success") {
   }, 4000);
 }
 
-function getLLMConfig() {
+function getLLMConfig(): engineApi.LLMConfig {
   if (!settings.llmKey) {
     throw new Error("请先在右上角「设置」中配置 LLM API Key");
   }
@@ -118,7 +114,216 @@ async function ensureStep4State() {
   }
 }
 
-// ── Step 4 正文审阅问题持久化高亮与批注标记 ──
+// ── 基础计算属性 ──
+const totalChapters = computed(() => projectStore.outlineChapters.length);
+
+const currentChapter = computed(() => {
+  return (
+    projectStore.outlineChapters.find((c) => c.seq === projectStore.selectedChapterSeq) ||
+    projectStore.outlineChapters[0]
+  );
+});
+
+const currentChapterText = computed(() => {
+  if (!currentChapter.value) return "";
+  return projectStore.chapters[currentChapter.value.seq] || "";
+});
+
+const currentChapterWords = computed(() => {
+  return countContentChars(currentChapterText.value);
+});
+
+const currentChapterReview = computed<engineApi.ExpertReviewResult | null>(() => {
+  if (!currentChapter.value) return null;
+  return projectStore.chapterReviews[currentChapter.value.seq] || null;
+});
+
+const currentChapterIssues = computed<engineApi.ReviewIssue[]>(() => {
+  return currentChapterReview.value?.issues || [];
+});
+
+const currentChapterIssuesCount = computed(() => {
+  return currentChapterIssues.value.length;
+});
+
+const currentChapterReferences = computed<ReferenceItem[]>(() => {
+  return extractReferences(currentChapterText.value);
+});
+
+const refSummary = computed<ReferencesSummary>(() => {
+  return getReferencesSummary(currentChapterReferences.value);
+});
+
+const filteredChapterReferences = computed(() => {
+  if (refFilterType.value === "all") return currentChapterReferences.value;
+  return currentChapterReferences.value.filter((r) => r.type === refFilterType.value);
+});
+
+function isChapterWritten(seq: number): boolean {
+  return (projectStore.chapters[seq] || "").trim().length > 0;
+}
+
+const completedChaptersCount = computed(() => {
+  let count = 0;
+  for (const ch of projectStore.outlineChapters) {
+    if (isChapterWritten(ch.seq)) count++;
+  }
+  return count;
+});
+
+const reviewedChaptersCount = computed(() => {
+  let count = 0;
+  for (const ch of projectStore.outlineChapters) {
+    if (projectStore.chapterReviews[ch.seq]) count++;
+  }
+  return count;
+});
+
+const totalWordCount = computed(() => {
+  let total = 0;
+  for (const ch of projectStore.outlineChapters) {
+    const text = projectStore.chapters[ch.seq] || "";
+    total += countContentChars(text);
+  }
+  return total;
+});
+
+const chapterIssuesCount = computed<Record<number, number>>(() => {
+  const map: Record<number, number> = {};
+  for (const ch of projectStore.outlineChapters) {
+    const r = projectStore.chapterReviews[ch.seq];
+    map[ch.seq] = r?.issues ? r.issues.length : 0;
+  }
+  return map;
+});
+
+const chapterSubheadings = computed<Record<number, SubHeading[]>>(() => {
+  const map: Record<number, SubHeading[]> = {};
+  for (const ch of projectStore.outlineChapters) {
+    const text = projectStore.chapters[ch.seq];
+    if (text && text.trim().length > 0) {
+      map[ch.seq] = extractSubHeadings(text, ch.seq, outlineHeadings.value).filter((h) => h.level > 1);
+    } else {
+      map[ch.seq] = [];
+    }
+  }
+  return map;
+});
+
+const allIssues = computed<engineApi.ReviewIssue[]>(() => {
+  const list: engineApi.ReviewIssue[] = [];
+  for (const ch of projectStore.outlineChapters) {
+    const r = projectStore.chapterReviews[ch.seq];
+    if (r?.issues) {
+      for (const issue of r.issues) {
+        list.push({
+          ...issue,
+          chapterSeq: ch.seq,
+          chapterTitle: ch.title,
+        });
+      }
+    }
+  }
+  return list;
+});
+
+const allNumericalChecks = computed<engineApi.NumericalCheckItem[]>(() => {
+  const list: engineApi.NumericalCheckItem[] = [];
+  for (const ch of projectStore.outlineChapters) {
+    const r = projectStore.chapterReviews[ch.seq];
+    if (r?.numerical_checks) {
+      for (const check of r.numerical_checks) {
+        list.push({
+          ...check,
+          chapterSeq: ch.seq,
+          chapterTitle: ch.title,
+        });
+      }
+    }
+  }
+  return list;
+});
+
+const allDataGaps = computed<any[]>(() => {
+  const list: any[] = [];
+  for (const ch of projectStore.outlineChapters) {
+    const r = projectStore.chapterReviews[ch.seq];
+    if (r?.data_gap_checklist) {
+      for (const gap of r.data_gap_checklist) {
+        if (typeof gap === "string") {
+          list.push({ chapterSeq: ch.seq, chapterTitle: ch.title, gap });
+        } else if (typeof gap === "object" && gap !== null) {
+          list.push({ chapterSeq: ch.seq, chapterTitle: ch.title, ...(gap as Record<string, any>) });
+        }
+      }
+    }
+  }
+  return list;
+});
+
+const allReferences = computed<ReferenceItem[]>(() => {
+  const map: Record<string, ReferenceItem> = {};
+  for (const ch of projectStore.outlineChapters) {
+    const text = projectStore.chapters[ch.seq] || "";
+    const refs = extractReferences(text);
+    for (const r of refs) {
+      if (!map[r.title]) {
+        map[r.title] = r;
+      } else {
+        map[r.title].count += r.count;
+      }
+    }
+  }
+  return Object.values(map);
+});
+
+const complianceRate = computed(() => {
+  if (totalChapters.value === 0) return 100;
+  if (reviewedChaptersCount.value === 0) return 0;
+  const issues = allIssues.value.length;
+  const penalty = Math.min(100, issues * 4);
+  return Math.max(0, 100 - penalty);
+});
+
+const healthStatus = computed<"达标" | "待完善" | "存在重大缺陷" | "待审阅">(() => {
+  if (reviewedChaptersCount.value === 0) return "待审阅";
+  if (allIssues.value.length === 0) return "达标";
+  if (allIssues.value.some((i) => i.severity === "high" || i.severity === "critical" || i.severity === "error")) {
+    return "存在重大缺陷";
+  }
+  return "待完善";
+});
+
+function getChapterTitle(seq: number): string {
+  const found = projectStore.outlineChapters.find((c) => c.seq === seq);
+  return found?.title || `第 ${seq} 章`;
+}
+
+// ── 章节展开折叠状态 ──
+function isChapterCollapsed(seq: number): boolean {
+  if (chapterCollapsedMap.value[seq] !== undefined) {
+    return chapterCollapsedMap.value[seq];
+  }
+  // 默认规则：当前选中章节展开，其他章节折叠收起
+  return seq !== projectStore.selectedChapterSeq;
+}
+
+function toggleChapterCollapse(seq: number, e?: Event) {
+  if (e) e.stopPropagation();
+  chapterCollapsedMap.value[seq] = !isChapterCollapsed(seq);
+}
+
+function selectChapter(seq: number) {
+  if (projectStore.selectedChapterSeq !== seq) {
+    projectStore.selectedChapterSeq = seq;
+    chapterCollapsedMap.value[seq] = false;
+    nextTick(() => {
+      syncEditorContent();
+    });
+  }
+}
+
+// ── Step 4 正文审阅问题高亮与批注标记 ──
 function applyIssueHighlightsToHtml(html: string, seq: number): string {
   const chapterReview = projectStore.chapterReviews[seq];
   const issues = chapterReview?.issues || [];
@@ -129,28 +334,67 @@ function getUnwrittenPlaceholderHtml(seq: number, title: string): string {
   return `<div class="unwritten-chapter-placeholder"><div class="unwritten-icon">📝</div><div class="unwritten-title">第 ${seq} 章《${escapeHtml(title)}》暂未生成正文</div><div class="unwritten-desc">本章节大纲已就绪，当前内容为空。您可直接在此处点击输入排版正文，或返回【步骤 3 报告写作】进行 AI 一键撰写。</div></div>`;
 }
 
-// ── 同步排版正文到各章节 contenteditable DOM ──
-function syncAllChaptersHtml() {
-  for (const ch of projectStore.outlineChapters) {
-    const el = document.getElementById(`chapter-canvas-${ch.seq}`);
-    if (el) {
-      const text = projectStore.chapters[ch.seq] || "";
-      if (!text.trim()) {
-        el.innerHTML = getUnwrittenPlaceholderHtml(ch.seq, ch.title);
-      } else {
-        const rawHtml = markdownToHtml(text, ch.seq, outlineHeadings.value);
-        el.innerHTML = applyIssueHighlightsToHtml(rawHtml, ch.seq);
-      }
-    }
+// ── 同步排版正文到单章 contenteditable DOM ──
+function syncEditorContent() {
+  if (!editorCanvasRef.value || !currentChapter.value) return;
+  const seq = currentChapter.value.seq;
+  const text = projectStore.chapters[seq] || "";
+  if (!text.trim()) {
+    editorCanvasRef.value.innerHTML = getUnwrittenPlaceholderHtml(seq, currentChapter.value.title);
+  } else {
+    const rawHtml = markdownToHtml(text, seq, outlineHeadings.value);
+    editorCanvasRef.value.innerHTML = applyIssueHighlightsToHtml(rawHtml, seq);
   }
 }
 
-// ── 审阅高亮标记与来源内联标签及流程图卡片点击联动 ──
-function handleCanvasClick(e: MouseEvent) {
+// ── 监听选中章节切换，同步排版内容 ──
+watch(
+  () => projectStore.selectedChapterSeq,
+  () => {
+    nextTick(() => {
+      syncEditorContent();
+    });
+  },
+);
+
+// ── 监听当前章节内容外部更新 ──
+watch(
+  () => currentChapterText.value,
+  () => {
+    nextTick(() => {
+      syncEditorContent();
+    });
+  },
+);
+
+// ── 排版正文就地输入与 300ms 自动落盘 ──
+function onEditorInput(e: Event) {
+  const target = e.target as HTMLElement | null;
+  if (!target || !currentChapter.value) return;
+  const seq = currentChapter.value.seq;
+  const md = htmlToMarkdown(target.innerHTML);
+  projectStore.chapters[seq] = md;
+
+  if (saveDebounceTimers[seq]) {
+    clearTimeout(saveDebounceTimers[seq]);
+  }
+  saveDebounceTimers[seq] = setTimeout(async () => {
+    if (engine.baseUrl) {
+      try {
+        await projectStore.saveChapter(engine.baseUrl, seq, md);
+      } catch {
+        // non-fatal
+      }
+    }
+  }, 300);
+}
+
+// ── 画布交互：高亮问题点击、Mermaid 视图切换、引用定位 ──
+function handleEditorCanvasClick(e: MouseEvent) {
   const target = e.target as HTMLElement | null;
   if (!target) return;
 
-  // Mermaid 切换视图与复制代码工具栏交互
+  // 1. Mermaid 视图切换与复制代码
   const toggleBtn = target.closest(".mermaid-btn-toggle-view") as HTMLElement | null;
   if (toggleBtn) {
     e.stopPropagation();
@@ -162,19 +406,16 @@ function handleCanvasClick(e: MouseEvent) {
       const btnText = toggleBtn.querySelector(".btn-text");
       const btnIcon = toggleBtn.querySelector(".btn-icon");
 
-      if (svgWrapper && codeWrapper) {
-        const isSvgVisible = svgWrapper.style.display !== "none";
-        if (isSvgVisible) {
-          svgWrapper.style.display = "none";
-          codeWrapper.style.display = "block";
-          if (btnText) btnText.textContent = "源码模式";
-          if (btnIcon) btnIcon.textContent = "💻";
-        } else {
-          svgWrapper.style.display = "flex";
-          codeWrapper.style.display = "none";
-          if (btnText) btnText.textContent = "矢量拓扑";
-          if (btnIcon) btnIcon.textContent = "👁️";
-        }
+      if (codeWrapper?.style.display === "none" || !codeWrapper?.style.display) {
+        if (svgWrapper) svgWrapper.style.display = "none";
+        if (codeWrapper) codeWrapper.style.display = "block";
+        if (btnText) btnText.textContent = "图表视图";
+        if (btnIcon) btnIcon.textContent = "📊";
+      } else {
+        if (svgWrapper) svgWrapper.style.display = "block";
+        if (codeWrapper) codeWrapper.style.display = "none";
+        if (btnText) btnText.textContent = "源码视图";
+        if (btnIcon) btnIcon.textContent = "💻";
       }
     }
     return;
@@ -184,34 +425,88 @@ function handleCanvasClick(e: MouseEvent) {
   if (copyBtn) {
     e.stopPropagation();
     e.preventDefault();
-    const container = copyBtn.closest(".mermaid-container") as HTMLElement | null;
-    const code = container?.getAttribute("data-mermaid-code") || "";
-    if (code) {
-      navigator.clipboard.writeText(code).then(() => {
-        showMsg("已复制 Mermaid 流程图源码至剪贴板", "success");
-      }).catch(() => {
-        showMsg("复制失败，请手动选择复制", "error");
-      });
+    const code = copyBtn.getAttribute("data-code");
+    if (code && navigator.clipboard) {
+      navigator.clipboard.writeText(code);
+      showMsg("已复制 Mermaid 流程图源码至剪贴板！", "success");
     }
     return;
   }
 
-  const mark = target.closest(".review-issue-highlight") as HTMLElement | null;
-  if (mark) {
-    const issueId = mark.getAttribute("data-issue-id");
-    const chapterSeq = Number(mark.getAttribute("data-chapter-seq")) || activeChapterSeq.value || 1;
-    if (issueId) {
-      openDiagnosticDrawerAndFocusIssue(issueId, chapterSeq);
+  // 2. 引用标记点击联动抽屉
+  const refTag = target.closest(".inline-ref-tag") as HTMLElement | null;
+  if (refTag) {
+    e.stopPropagation();
+    e.preventDefault();
+    const title = refTag.getAttribute("data-ref-title");
+    const type = refTag.getAttribute("data-ref-type") as "material" | "standard" | "web" | null;
+    if (title) {
+      openRefDrawerAndFocusCard(title, type || undefined);
     }
     return;
   }
-  const refTag = target.closest(".inline-ref-tag") as HTMLElement | null;
-  if (refTag) {
-    const refType = (refTag.getAttribute("data-ref-type") || "all") as "material" | "standard" | "web" | "all";
-    const refTitle = refTag.getAttribute("data-ref-title") || "";
-    openRefDrawerAndFocusCard(refTitle, refType);
-    return;
+
+  // 3. 审阅问题高亮标记点击联动诊断抽屉
+  const issueMark = target.closest(".issue-highlight-mark") as HTMLElement | null;
+  if (issueMark) {
+    e.stopPropagation();
+    e.preventDefault();
+    const issueId = issueMark.getAttribute("data-issue-id");
+    if (issueId) {
+      openDiagnosticDrawerAndFocusIssue(issueId);
+    }
   }
+}
+
+// ── 抽屉与定位联动 ──
+function openDiagnosticDrawerAndFocusIssue(issueId: string) {
+  showDiagnosticDrawer.value = true;
+  diagnosticTab.value = "issues";
+  nextTick(() => {
+    const card = document.getElementById(`issue-card-${issueId}`);
+    if (card) {
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      card.classList.remove("issue-card-pulse");
+      void card.offsetWidth;
+      card.classList.add("issue-card-pulse");
+      setTimeout(() => {
+        card.classList.remove("issue-card-pulse");
+      }, 2000);
+    }
+  });
+}
+
+function locateIssueInCanvas(issue: engineApi.ReviewIssue) {
+  if (issue.chapterSeq && issue.chapterSeq !== projectStore.selectedChapterSeq) {
+    selectChapter(issue.chapterSeq);
+  }
+  nextTick(() => {
+    if (!editorCanvasRef.value) return;
+    const marks = editorCanvasRef.value.querySelectorAll(".issue-highlight-mark");
+    let targetMark: HTMLElement | null = null;
+    const matchText = issue.snippet || issue.quote || "";
+    for (const mark of marks) {
+      if (
+        (issue.id && mark.getAttribute("data-issue-id") === issue.id) ||
+        (matchText && mark.textContent?.includes(matchText))
+      ) {
+        targetMark = mark as HTMLElement;
+        break;
+      }
+    }
+    if (targetMark) {
+      targetMark.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetMark.classList.remove("issue-canvas-pulse");
+      void targetMark.offsetWidth;
+      targetMark.classList.add("issue-canvas-pulse");
+      setTimeout(() => {
+        targetMark?.classList.remove("issue-canvas-pulse");
+      }, 2000);
+      showMsg("已在正文中高亮定位问题位置", "success");
+    } else {
+      showMsg("未在当前正文中直接定位到该问题片段（建议查看小节上下文）", "info");
+    }
+  });
 }
 
 function openRefDrawerAndFocusCard(refTitle: string, refType?: "material" | "standard" | "web" | "all") {
@@ -222,11 +517,14 @@ function openRefDrawerAndFocusCard(refTitle: string, refType?: "material" | "sta
     refFilterType.value = "all";
   }
   nextTick(() => {
-    const allCards = document.querySelectorAll(".slide-drawer-panel .ref-card-item");
+    const allCards = document.querySelectorAll(".ref-drawer-panel .ref-card-item");
     let targetCard: HTMLElement | null = null;
     for (const card of allCards) {
       const cardTitle = card.getAttribute("data-ref-title");
-      if (cardTitle === refTitle || (cardTitle && refTitle && (cardTitle.includes(refTitle) || refTitle.includes(cardTitle)))) {
+      if (
+        cardTitle === refTitle ||
+        (cardTitle && refTitle && (cardTitle.includes(refTitle) || refTitle.includes(cardTitle)))
+      ) {
         targetCard = card as HTMLElement;
         break;
       }
@@ -244,9 +542,10 @@ function openRefDrawerAndFocusCard(refTitle: string, refType?: "material" | "sta
 }
 
 function locateRefInCanvas(title: string) {
-  const allTags = document.querySelectorAll(".contenteditable-canvas .inline-ref-tag");
+  if (!editorCanvasRef.value) return;
+  const tags = editorCanvasRef.value.querySelectorAll(".inline-ref-tag");
   let targetTag: HTMLElement | null = null;
-  for (const tag of allTags) {
+  for (const tag of tags) {
     const t = tag.getAttribute("data-ref-title");
     if (t === title || (t && title && (t.includes(title) || title.includes(t)))) {
       targetTag = tag as HTMLElement;
@@ -254,633 +553,75 @@ function locateRefInCanvas(title: string) {
     }
   }
   if (targetTag) {
-    const canvasEl = targetTag.closest(".contenteditable-canvas");
-    if (canvasEl && canvasEl.id) {
-      const match = canvasEl.id.match(/chapter-canvas-(\d+)/);
-      if (match) {
-        const seq = Number(match[1]);
-        chapterCollapsedMap.value[seq] = false;
-        activeChapterSeq.value = seq;
-      }
-    }
-    nextTick(() => {
-      targetTag?.scrollIntoView({ behavior: "smooth", block: "center" });
+    targetTag.scrollIntoView({ behavior: "smooth", block: "center" });
+    targetTag.classList.remove("inline-ref-pulse");
+    void targetTag.offsetWidth;
+    targetTag.classList.add("inline-ref-pulse");
+    setTimeout(() => {
       targetTag?.classList.remove("inline-ref-pulse");
-      if (targetTag) void targetTag.offsetWidth;
-      targetTag?.classList.add("inline-ref-pulse");
-      setTimeout(() => {
-        targetTag?.classList.remove("inline-ref-pulse");
-      }, 2000);
-    });
+    }, 2000);
     showMsg(`已定位到正文引用位置：「${title}」`, "success");
   } else {
-    showMsg(`未在正文中找到「${title}」引用标记`, "error");
-  }
-}
-
-function openDiagnosticDrawerAndFocusIssue(issueId: string, chapterSeq?: number) {
-  if (chapterSeq) {
-    activeChapterSeq.value = chapterSeq;
-  }
-  showDiagnosticDrawer.value = true;
-  diagnosticTab.value = "issues";
-  nextTick(() => {
-    const card =
-      document.getElementById(`issue-card-${issueId}`) ||
-      document.querySelector(`[data-issue-card-id="${issueId}"]`);
-    if (card) {
-      card.scrollIntoView({ behavior: "smooth", block: "center" });
-      card.classList.remove("issue-card-focused");
-      void (card as HTMLElement).offsetWidth;
-      card.classList.add("issue-card-focused");
-      setTimeout(() => {
-        card.classList.remove("issue-card-focused");
-      }, 2500);
-    }
-  });
-}
-
-onMounted(async () => {
-  await ensureStep4State();
-  nextTick(() => {
-    syncAllChaptersHtml();
-  });
-});
-
-onUnmounted(() => {
-  if (reviewTimer) clearInterval(reviewTimer);
-  if (revisionTimer) clearInterval(revisionTimer);
-  for (const timer of Object.values(saveDebounceTimers)) {
-    clearTimeout(timer);
-  }
-});
-
-watch(
-  () => projectStore.currentStep,
-  (step) => {
-    if (step === 4) {
-      ensureStep4State();
-      nextTick(() => {
-        syncAllChaptersHtml();
-      });
-    }
-  },
-);
-
-watch(
-  () => projectStore.outlineChapters,
-  () => {
-    nextTick(() => {
-      syncAllChaptersHtml();
-    });
-  },
-  { deep: true },
-);
-
-watch(
-  () => projectStore.chapterReviews,
-  () => {
-    nextTick(() => {
-      syncAllChaptersHtml();
-    });
-  },
-  { deep: true },
-);
-
-watch(viewMode, (mode) => {
-  if (mode === "rich") {
-    nextTick(() => {
-      syncAllChaptersHtml();
-    });
-  }
-});
-
-// ── 全书统计与计算属性 ──
-const totalChapters = computed(() => projectStore.outlineChapters.length);
-
-function isChapterWritten(seq: number): boolean {
-  const text = projectStore.chapters[seq];
-  return !!(text && text.trim().length > 0);
-}
-
-function getChapterTitle(seq: number): string {
-  const found = projectStore.outlineChapters.find((c) => c.seq === seq);
-  return found?.title || `第 ${seq} 章`;
-}
-
-const completedChaptersCount = computed(() => {
-  return projectStore.outlineChapters.filter((ch) => isChapterWritten(ch.seq)).length;
-});
-
-const unwrittenChaptersCount = computed(() => {
-  return projectStore.outlineChapters.filter((ch) => !isChapterWritten(ch.seq)).length;
-});
-
-const totalWordCount = computed(() => {
-  let count = 0;
-  for (const text of Object.values(projectStore.chapters)) {
-    if (text) count += countContentChars(text);
-  }
-  return count;
-});
-
-const reviewedChaptersCount = computed(() => {
-  let count = 0;
-  for (const ch of projectStore.outlineChapters) {
-    if (projectStore.chapterReviews[ch.seq]) {
-      count++;
-    }
-  }
-  return count;
-});
-
-// ── 全书多级子标题提取 ──
-const chapterSubheadings = computed<Record<number, SubHeading[]>>(() => {
-  const result: Record<number, SubHeading[]> = {};
-  for (const ch of projectStore.outlineChapters) {
-    const text = projectStore.chapters[ch.seq];
-    if (text && text.trim().length > 0) {
-      result[ch.seq] = extractSubHeadings(text, ch.seq, outlineHeadings.value).filter(
-        (h) => h.level > 1,
-      );
-    } else {
-      result[ch.seq] = [];
-    }
-  }
-  return result;
-});
-
-// ── 各章问题与缺口统计 ──
-const chapterIssuesCount = computed<Record<number, number>>(() => {
-  const map: Record<number, number> = {};
-  for (const ch of projectStore.outlineChapters) {
-    const rev = projectStore.chapterReviews[ch.seq];
-    map[ch.seq] = rev?.issues ? rev.issues.length : 0;
-  }
-  return map;
-});
-
-function getSubheadingIssueCount(seq: number, sub: SubHeading): number {
-  const rev = projectStore.chapterReviews[seq];
-  if (!rev?.issues || rev.issues.length === 0) return 0;
-
-  const subNumMatch = sub.title.match(/^\d+(?:\.\d+)*/);
-  const subNum = subNumMatch ? subNumMatch[0] : null;
-  const cleanSubTitle = sub.title.replace(/^\d+(?:\.\d+)*\s*/, "").trim();
-
-  let count = 0;
-  for (const iss of rev.issues) {
-    const loc = iss.location || "";
-    if (subNum && loc.includes(subNum)) {
-      count++;
-    } else if (cleanSubTitle && loc.includes(cleanSubTitle)) {
-      count++;
-    } else if (iss.quote && cleanSubTitle && iss.quote.includes(cleanSubTitle)) {
-      count++;
-    }
-  }
-  return count;
-}
-
-const chapterGapsCount = computed<Record<number, number>>(() => {
-  const map: Record<number, number> = {};
-  for (const ch of projectStore.outlineChapters) {
-    const rev = projectStore.chapterReviews[ch.seq];
-    map[ch.seq] = rev?.data_gap_checklist ? rev.data_gap_checklist.length : 0;
-  }
-  return map;
-});
-
-// ── 全书总问题清单 ──
-const allIssues = computed<engineApi.ReviewIssue[]>(() => {
-  if (projectStore.fullBookReview?.issues && projectStore.fullBookReview.issues.length > 0) {
-    return projectStore.fullBookReview.issues;
-  }
-  const list: engineApi.ReviewIssue[] = [];
-  for (const ch of projectStore.outlineChapters) {
-    const rev = projectStore.chapterReviews[ch.seq];
-    if (rev?.issues && rev.issues.length > 0) {
-      for (const iss of rev.issues) {
-        list.push({
-          ...iss,
-          chapterSeq: ch.seq,
-          location: iss.location || `第 ${ch.seq} 章 ${ch.title}`,
-        });
-      }
-    }
-  }
-  return list;
-});
-
-// ── 全书跨章数值核验表 ──
-const allNumericalChecks = computed(() => {
-  if (
-    projectStore.fullBookReview?.numerical_checks &&
-    projectStore.fullBookReview.numerical_checks.length > 0
-  ) {
-    return projectStore.fullBookReview.numerical_checks;
-  }
-  const list: {
-    chapterSeq?: number;
-    parameter: string;
-    extracted_value: string;
-    status: string;
-    note?: string;
-  }[] = [];
-  for (const ch of projectStore.outlineChapters) {
-    const rev = projectStore.chapterReviews[ch.seq];
-    if (rev?.numerical_checks && rev.numerical_checks.length > 0) {
-      for (const nc of rev.numerical_checks) {
-        list.push({
-          chapterSeq: ch.seq,
-          parameter: nc.parameter,
-          extracted_value: nc.extracted_value,
-          status: nc.status,
-          note: nc.note || `来自第 ${ch.seq} 章`,
-        });
-      }
-    }
-  }
-  return list;
-});
-
-// ── 全书缺失资料总台账 ──
-const allDataGaps = computed(() => {
-  if (
-    projectStore.fullBookReview?.data_gap_checklist &&
-    projectStore.fullBookReview.data_gap_checklist.length > 0
-  ) {
-    return projectStore.fullBookReview.data_gap_checklist.map((item) => {
-      if (typeof item === "string") {
-        return { gap: item, chapterTitle: "全书综合" };
-      }
-      return item;
-    });
-  }
-  const list: {
-    chapterSeq?: number;
-    chapterTitle?: string;
-    gap: string;
-  }[] = [];
-  for (const ch of projectStore.outlineChapters) {
-    const rev = projectStore.chapterReviews[ch.seq];
-    if (rev?.data_gap_checklist && rev.data_gap_checklist.length > 0) {
-      for (const gap of rev.data_gap_checklist) {
-        list.push({
-          chapterSeq: ch.seq,
-          chapterTitle: ch.title,
-          gap,
-        });
-      }
-    }
-  }
-  return list;
-});
-
-// ── 全书参考资料总台账 ──
-const allReferences = computed<ReferenceItem[]>(() => {
-  let combined = "";
-  for (const text of Object.values(projectStore.chapters)) {
-    if (text) combined += "\n" + text;
-  }
-  return extractReferences(combined);
-});
-
-const refSummary = computed<ReferencesSummary>(() => {
-  return getReferencesSummary(allReferences.value);
-});
-
-const filteredReferences = computed(() => {
-  if (refFilterType.value === "all") return allReferences.value;
-  return allReferences.value.filter((r) => r.type === refFilterType.value);
-});
-
-const totalRefCitations = computed(() => {
-  return refSummary.value.totalCitations;
-});
-
-// ── 报告达标状态与健康评价 (废除 100 分制) ──
-const healthStatus = computed(() => {
-  if (projectStore.fullBookReview?.health_status) {
-    return projectStore.fullBookReview.health_status;
-  }
-  if (reviewedChaptersCount.value === 0) {
-    return "待审阅";
-  }
-  const hasDanger = allIssues.value.some(
-    (i) => i.severity === "danger" || i.severity === "high",
-  );
-  if (hasDanger) return "存在重大缺陷";
-  if (allIssues.value.length > 0) return "待完善";
-  return "达标";
-});
-
-const complianceRate = computed(() => {
-  if (projectStore.fullBookReview?.compliance_rate !== undefined) {
-    return projectStore.fullBookReview.compliance_rate;
-  }
-  if (totalChapters.value === 0 || reviewedChaptersCount.value === 0) return 100;
-  const passed = projectStore.outlineChapters.filter(
-    (ch) => projectStore.chapterReviews[ch.seq]?.status === "通过",
-  ).length;
-  return Math.max(0, Math.min(100, Math.round((passed / totalChapters.value) * 100)));
-});
-
-// ── Diff 计算 (全宽单栏内联模式) ──
-const hasActiveRevision = computed(() => {
-  return projectStore.activeRevision !== null;
-});
-
-const currentDiffLines = computed<DiffLine[]>(() => {
-  if (!projectStore.activeRevision) return [];
-  return computeLineDiff(
-    projectStore.activeRevision.originalText,
-    projectStore.activeRevision.revisedText,
-    outlineHeadings.value,
-  );
-});
-
-const currentDiffStats = computed<DiffStats>(() => {
-  if (!projectStore.activeRevision) {
-    return {
-      addedLines: 0,
-      removedLines: 0,
-      unchangedLines: 0,
-      totalOriginalLines: 0,
-      totalModifiedLines: 0,
-    };
-  }
-  return computeDiffStats(
-    projectStore.activeRevision.originalText,
-    projectStore.activeRevision.revisedText,
-    outlineHeadings.value,
-  );
-});
-
-// ── 连续全书 Markdown ──
-const fullBookMarkdown = computed(() => {
-  const parts: string[] = [];
-  for (const ch of projectStore.outlineChapters) {
-    const text = projectStore.chapters[ch.seq];
-    if (text && text.trim().length > 0) {
-      parts.push(text.trim());
-    } else {
-      parts.push(`# ${ch.title}\n\n*（本章节暂未生成内容）*`);
-    }
-  }
-  return parts.join("\n\n---\n\n");
-});
-
-// ── 交互导航与目录操作 ──
-function isChapterCollapsed(seq: number): boolean {
-  if (chapterCollapsedMap.value[seq] !== undefined) {
-    return chapterCollapsedMap.value[seq];
-  }
-  return activeChapterSeq.value !== seq;
-}
-
-function toggleChapterCollapse(seq: number, e?: Event) {
-  if (e) e.stopPropagation();
-  const currentlyCollapsed = isChapterCollapsed(seq);
-  chapterCollapsedMap.value[seq] = !currentlyCollapsed;
-}
-
-async function scrollToChapter(seq: number) {
-  activeChapterSeq.value = seq;
-  activeHeadingId.value = null;
-  chapterCollapsedMap.value[seq] = false;
-  if (viewMode.value !== "rich" && viewMode.value !== "source") {
-    viewMode.value = "rich";
-    await nextTick();
-    syncAllChaptersHtml();
-  }
-  await nextTick();
-  const anchorId =
-    viewMode.value === "source" ? `source-chapter-${seq}` : `full-chapter-anchor-${seq}`;
-  let el = document.getElementById(anchorId);
-  if (!el && viewMode.value === "rich") {
-    el = document.querySelector(`[data-seq="${seq}"]`) as HTMLElement | null;
-  }
-  if (el) {
-    const container = (
-      viewMode.value === "source"
-        ? document.querySelector(".canvas-source-view .source-editor-wrap")
-        : document.querySelector(".full-book-scroll-canvas")
-    ) as HTMLElement | null;
-
-    if (container) {
-      const containerRect = container.getBoundingClientRect();
-      const elRect = el.getBoundingClientRect();
-      const targetTop = container.scrollTop + (elRect.top - containerRect.top) - 16;
-      container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-    } else {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-
-    el.classList.remove("heading-anchor-pulse");
-    void el.offsetWidth;
-    el.classList.add("heading-anchor-pulse");
-    setTimeout(() => {
-      el?.classList.remove("heading-anchor-pulse");
-    }, 1500);
-  }
-}
-
-async function scrollToSubheading(seq: number, headingId: string, sub?: SubHeading, e?: Event) {
-  if (e) e.stopPropagation();
-  activeChapterSeq.value = seq;
-  activeHeadingId.value = headingId;
-  chapterCollapsedMap.value[seq] = false;
-  if (viewMode.value !== "rich") {
-    viewMode.value = "rich";
-    await nextTick();
-    syncAllChaptersHtml();
-    await new Promise((r) => setTimeout(r, 60));
-  }
-  await nextTick();
-
-  let el = document.getElementById(headingId);
-  // 模糊查找匹配的 DOM 标题元素
-  if (!el) {
-    const canvas = document.getElementById(`chapter-canvas-${seq}`);
-    if (canvas) {
-      const headings = Array.from(canvas.querySelectorAll("h1, h2, h3, h4, h5, h6"));
-      const cleanSubTitle = sub ? sub.title.replace(/^\d+(?:\.\d+)*\s*/, "").trim() : "";
-      for (const h of headings) {
-        const hText = (h.textContent || "").trim();
-        if (
-          sub &&
-          (hText === sub.title ||
-            (cleanSubTitle && hText.includes(cleanSubTitle)) ||
-            (cleanSubTitle && cleanSubTitle.includes(hText)))
-        ) {
-          el = h as HTMLElement;
-          break;
-        }
-      }
-    }
-  }
-
-  if (el) {
-    const container = document.querySelector(".full-book-scroll-canvas") as HTMLElement | null;
-    if (container) {
-      const containerRect = container.getBoundingClientRect();
-      const elRect = el.getBoundingClientRect();
-      const targetTop = container.scrollTop + (elRect.top - containerRect.top) - 16;
-      container.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-    } else {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-
-    el.classList.remove("heading-anchor-pulse");
-    void el.offsetWidth;
-    el.classList.add("heading-anchor-pulse");
-    setTimeout(() => {
-      el?.classList.remove("heading-anchor-pulse");
-    }, 1500);
-  } else {
-    scrollToChapter(seq);
+    showMsg(`未在当前正文视口中找到「${title}」引用标记`, "error");
   }
 }
 
 function openChapterIssuesDrawer(seq: number, e?: Event) {
   if (e) e.stopPropagation();
-  activeChapterSeq.value = seq;
-  showDiagnosticDrawer.value = true;
+  selectChapter(seq);
+  diagnosticFilterScope.value = "current";
   diagnosticTab.value = "issues";
-  nextTick(() => {
-    const targetCard =
-      (document.querySelector(`.issue-card[data-chapter-seq="${seq}"]`) as HTMLElement | null) ||
-      (document.querySelector(".issue-card") as HTMLElement | null);
-    if (targetCard) {
-      targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
-      targetCard.classList.remove("issue-card-focused");
-      void targetCard.offsetWidth;
-      targetCard.classList.add("issue-card-focused");
-      setTimeout(() => {
-        targetCard?.classList.remove("issue-card-focused");
-      }, 2500);
-    }
-  });
+  showDiagnosticDrawer.value = true;
 }
 
-function openSubheadingIssuesDrawer(seq: number, sub: SubHeading, e?: Event) {
+function scrollToSubheading(seq: number, headingId: string, sub: SubHeading, e?: Event) {
   if (e) e.stopPropagation();
-  activeChapterSeq.value = seq;
-  showDiagnosticDrawer.value = true;
-  diagnosticTab.value = "issues";
-
-  const rev = projectStore.chapterReviews[seq];
-  const issues = rev?.issues || [];
-  const subNumMatch = sub.title.match(/^\d+(?:\.\d+)*/);
-  const subNum = subNumMatch ? subNumMatch[0] : null;
-  const cleanSubTitle = sub.title.replace(/^\d+(?:\.\d+)*\s*/, "").trim();
-
-  let matchedIssueId: string | null = null;
-  for (const iss of issues) {
-    const loc = iss.location || "";
-    if (
-      (subNum && loc.includes(subNum)) ||
-      (cleanSubTitle && loc.includes(cleanSubTitle)) ||
-      (iss.quote && cleanSubTitle && iss.quote.includes(cleanSubTitle))
-    ) {
-      matchedIssueId = iss.id || null;
-      break;
-    }
+  if (projectStore.selectedChapterSeq !== seq) {
+    selectChapter(seq);
   }
-
+  activeHeadingId.value = headingId;
   nextTick(() => {
-    let targetCard: HTMLElement | null = null;
-    if (matchedIssueId) {
-      targetCard =
-        document.getElementById(`issue-card-${matchedIssueId}`) ||
-        (document.querySelector(`[data-issue-card-id="${matchedIssueId}"]`) as HTMLElement | null);
-    }
-    if (!targetCard) {
-      targetCard =
-        (document.querySelector(`.issue-card[data-chapter-seq="${seq}"]`) as HTMLElement | null) ||
-        (document.querySelector(".issue-card") as HTMLElement | null);
-    }
-
-    if (targetCard) {
-      targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
-      targetCard.classList.remove("issue-card-focused");
-      void targetCard.offsetWidth;
-      targetCard.classList.add("issue-card-focused");
-      setTimeout(() => {
-        targetCard?.classList.remove("issue-card-focused");
-      }, 2500);
+    if (!editorCanvasRef.value) return;
+    const headings = editorCanvasRef.value.querySelectorAll("h1, h2, h3, h4, h5, h6");
+    for (const h of headings) {
+      if (h.textContent?.trim().includes(sub.title.trim())) {
+        h.scrollIntoView({ behavior: "smooth", block: "center" });
+        h.classList.remove("heading-pulse");
+        void (h as HTMLElement).offsetWidth;
+        h.classList.add("heading-pulse");
+        setTimeout(() => {
+          h.classList.remove("heading-pulse");
+        }, 2000);
+        break;
+      }
     }
   });
 }
 
-// ── 就地排版编辑输入 (contenteditable 防抖 300ms 自动落盘) ──
-function onChapterFocus(seq: number, e: FocusEvent) {
-  const target = e.currentTarget as HTMLElement;
-  if (!isChapterWritten(seq) && target.querySelector(".unwritten-chapter-placeholder")) {
-    target.innerHTML = "";
-  }
+function getSubheadingIssueCount(seq: number, sub: SubHeading): number {
+  const issues = projectStore.chapterReviews[seq]?.issues || [];
+  return issues.filter((i) => i.location && i.location.includes(sub.title)).length;
 }
 
-function onChapterBlur(seq: number, e: FocusEvent) {
-  const target = e.currentTarget as HTMLElement;
-  const currentText = (projectStore.chapters[seq] || "").trim();
-  if (!currentText && !target.innerText.trim()) {
-    const ch = projectStore.outlineChapters.find((c) => c.seq === seq);
-    const title = ch ? ch.title : `第 ${seq} 章`;
-    target.innerHTML = getUnwrittenPlaceholderHtml(seq, title);
-  }
+function openSubheadingIssuesDrawer(seq: number, _sub: SubHeading, e?: Event) {
+  if (e) e.stopPropagation();
+  selectChapter(seq);
+  diagnosticFilterScope.value = "current";
+  diagnosticTab.value = "issues";
+  showDiagnosticDrawer.value = true;
 }
 
-function onChapterInput(seq: number, e: Event) {
-  const target = e.currentTarget as HTMLElement;
-  const placeholderEl = target.querySelector(".unwritten-chapter-placeholder");
-  if (placeholderEl && target.innerText.trim()) {
-    placeholderEl.remove();
-  }
-  const html = target.innerHTML;
-  const md = htmlToMarkdown(html);
-
-  if (saveDebounceTimers[seq]) {
-    clearTimeout(saveDebounceTimers[seq]);
-  }
-  saveDebounceTimers[seq] = setTimeout(() => {
-    if (engine.baseUrl) {
-      projectStore.saveChapter(engine.baseUrl, seq, md);
-    }
-  }, 300);
-}
-
-function onSourceInput(seq: number, e: Event) {
-  const target = e.target as HTMLTextAreaElement;
-  const md = target.value;
-  if (saveDebounceTimers[seq]) {
-    clearTimeout(saveDebounceTimers[seq]);
-  }
-  saveDebounceTimers[seq] = setTimeout(() => {
-    if (engine.baseUrl) {
-      projectStore.saveChapter(engine.baseUrl, seq, md);
-    }
-  }, 300);
-}
-
-// ── 全书全维专家审阅 ──
-async function handleRunFullBookReview(forceAll = false, mode?: "fast" | "all") {
-  const targetMode = mode || reviewMode.value;
+// ── 全书审阅与单章审阅核心逻辑（国家发改委投资项目最高水准单一质检）──
+async function handleRunFullBookReview(forceAll = false) {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
   }
-  let llmConfig;
+  let llmConfig: engineApi.LLMConfig;
   try {
     llmConfig = getLLMConfig();
-  } catch (e) {
-    showMsg((e as Error).message, "error");
-    return;
-  }
-
-  if (completedChaptersCount.value === 0) {
-    showMsg("暂无可审阅的章节，请先在步骤 3 写作并生成正文", "error");
+  } catch (err: any) {
+    showMsg(err.message, "error");
     return;
   }
 
@@ -891,20 +632,12 @@ async function handleRunFullBookReview(forceAll = false, mode?: "fast" | "all") 
   }, 1000);
 
   try {
-    const modeName = targetMode === "fast" ? "⚡ 常规审查" : "🔍 全维精审";
-    showMsg(`已启动「${modeName}」，正在执行合规与数据自洽体检...`, "info");
-    const fullData = await projectStore.runFullBookReview(
-      engine.baseUrl,
-      llmConfig,
-      forceAll,
-      targetMode,
-    );
-    showMsg(
-      `全书专家审阅完成！健康达标状态：「${fullData.health_status}」，发现 ${fullData.issues.length} 处待优化项。`,
-    );
-    showDiagnosticDrawer.value = true;
-  } catch (err) {
-    showMsg(`审阅失败：${(err as Error).message}`, "error");
+    showMsg("🚀 已启动全书专家审阅，正在按发改委标准逐章深度体检...", "info");
+    await projectStore.runFullBookReview(engine.baseUrl, llmConfig, forceAll, "all");
+    showMsg("全书专家审阅完成！已自动汇总发改委质检台账。", "success");
+    syncEditorContent();
+  } catch (err: any) {
+    showMsg(`审阅失败: ${err.message}`, "error");
   } finally {
     if (reviewTimer) {
       clearInterval(reviewTimer);
@@ -913,87 +646,96 @@ async function handleRunFullBookReview(forceAll = false, mode?: "fast" | "all") 
   }
 }
 
-// ── 单章专家审阅 ──
-async function handleRunSingleReview(
-  seq: number,
-  mode?: "fast" | "all" | "compliance" | "numeric" | "technical",
-) {
-  const targetMode = mode || reviewMode.value;
+async function handleReviewSingleChapter(seq: number) {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
   }
-  let llmConfig;
-  try {
-    llmConfig = getLLMConfig();
-  } catch (e) {
-    showMsg((e as Error).message, "error");
-    return;
-  }
-
   const text = projectStore.chapters[seq] || "";
   if (!text.trim()) {
-    showMsg(`第 ${seq} 章尚无正文，无法执行审阅`, "error");
+    showMsg(`第 ${seq} 章暂无正文内容，无法执行审阅`, "error");
+    return;
+  }
+  let llmConfig: engineApi.LLMConfig;
+  try {
+    llmConfig = getLLMConfig();
+  } catch (err: any) {
+    showMsg(err.message, "error");
     return;
   }
 
-  reviewElapsedSeconds.value = 0;
-  if (reviewTimer) clearInterval(reviewTimer);
-  reviewTimer = setInterval(() => {
-    reviewElapsedSeconds.value += 1;
-  }, 1000);
-
   try {
-    const modeLabel = targetMode === "fast" ? "⚡ 常规审查" : (targetMode === "all" ? "🔍 全维精审" : targetMode);
-    showMsg(`正在对第 ${seq} 章执行【${modeLabel}】...`, "info");
-    const res = await projectStore.runChapterReview(engine.baseUrl, seq, targetMode, llmConfig);
-    showMsg(`第 ${seq} 章审阅完成！结论：${res.status}，发现 ${res.issues?.length || 0} 处问题。`);
-    // 重新整合全书总档案
-    await projectStore.runFullBookReview(engine.baseUrl, llmConfig, false, reviewMode.value);
-  } catch (err) {
-    showMsg(`单章审阅失败：${(err as Error).message}`, "error");
-  } finally {
-    if (reviewTimer) {
-      clearInterval(reviewTimer);
-      reviewTimer = null;
-    }
+    showMsg(`正在对第 ${seq} 章执行发改委高水准专家质检...`, "info");
+    await projectStore.runChapterReview(engine.baseUrl, seq, "all", llmConfig);
+    showMsg(`第 ${seq} 章审阅完成！`, "success");
+    syncEditorContent();
+    diagnosticFilterScope.value = "current";
+    diagnosticTab.value = "issues";
+    showDiagnosticDrawer.value = true;
+  } catch (err: any) {
+    showMsg(`单章审阅失败: ${err.message}`, "error");
   }
 }
 
-// ── AI 一键智能修订 (就地直接执行并切至 Diff 模式) ──
+function handleStopReview() {
+  projectStore.stopBatchReview();
+  showMsg("已停止全书审阅任务", "info");
+}
+
+// ── AI 一键智能修订与 Diff 联动 ──
+const diffOriginalText = computed(() => {
+  const targetSeq = projectStore.activeRevision?.seq || projectStore.selectedChapterSeq;
+  return projectStore.chapters[targetSeq] || "";
+});
+
+const diffRevisedText = computed(() => {
+  if (projectStore.activeRevision && projectStore.activeRevision.seq === projectStore.selectedChapterSeq) {
+    return projectStore.activeRevision.revisedText;
+  }
+  return projectStore.activeRevision?.revisedText || currentChapterText.value;
+});
+
+const diffLines = computed<DiffLine[]>(() => {
+  return computeLineDiff(diffOriginalText.value, diffRevisedText.value);
+});
+
+const currentDiffStats = computed<DiffStats>(() => {
+  return computeDiffStats(diffOriginalText.value, diffRevisedText.value);
+});
+
+const hasActiveRevision = computed(() => {
+  return !!projectStore.activeRevision && projectStore.activeRevision.seq === projectStore.selectedChapterSeq;
+});
+
 async function handleDirectRevision(seq?: number, customInstruction?: string) {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
   }
-  let llmConfig;
+  let llmConfig: engineApi.LLMConfig;
   try {
     llmConfig = getLLMConfig();
-  } catch (e) {
-    showMsg((e as Error).message, "error");
+  } catch (err: any) {
+    showMsg(err.message, "error");
     return;
   }
 
-  const targetSeq = seq || activeChapterSeq.value || 1;
-  let instruction = (customInstruction || "").trim();
+  const targetSeq = seq !== undefined ? seq : projectStore.selectedChapterSeq;
+  const originalText = projectStore.chapters[targetSeq] || "";
+  if (!originalText.trim()) {
+    showMsg(`第 ${targetSeq} 章暂无正文，无法执行修订`, "error");
+    return;
+  }
 
-  // 若未指定自定义指令，则优先聚合当前章节的专家审阅建议与问题清单
+  let instruction = customInstruction;
   if (!instruction) {
-    const chapterReview = projectStore.chapterReviews[targetSeq];
-    const issues = chapterReview?.issues || [];
-    const suggestions = chapterReview?.suggestions || "";
-    if (issues.length > 0 || suggestions) {
-      const issueDetails = issues
-        .map(
-          (iss, i) =>
-            `${i + 1}. [${iss.category || "合规与自洽"}] ${iss.message}${iss.suggestion ? `（改进建议：${iss.suggestion}）` : ""}`,
-        )
-        .join("\n");
-      instruction = `请依据本章专家诊断报告执行定向修订：\n${issueDetails}\n${suggestions ? `综合指引：${suggestions}` : ""}`.trim();
-    } else if (projectStore.fullBookReview?.general_suggestions?.length) {
-      instruction = `对照国家发改委与行业工程编制规程要求，结合全书诊断建议深化论述：\n${projectStore.fullBookReview.general_suggestions.join("\n")}`.trim();
+    const issues = projectStore.chapterReviews[targetSeq]?.issues || [];
+    if (issues.length > 0) {
+      instruction = `请依据国家发改委投资项目编制规程重点修复以下问题：\n${issues
+        .map((i, idx) => `${idx + 1}. [${i.dimension || i.category || "规范"}] ${i.description || i.message} (建议: ${i.suggestion || "完善论述"})`)
+        .join("\n")}`;
     } else {
-      instruction = "对照国家发改委与行业工程编制规程要求，核对本章数据自洽性、深化合规论证并润色工程专业术语。";
+      instruction = "请依据国家发改委投资项目高质量编制标准，进一步深化工程参数论述与规范表格排版。";
     }
   }
 
@@ -1002,16 +744,18 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
   if (revisionTimer) clearInterval(revisionTimer);
   revisionTimer = setInterval(() => {
     revisionElapsedSeconds.value += 1;
-    revisionStageIndex.value = Math.min(3, Math.floor(revisionElapsedSeconds.value / 3));
+    if (revisionElapsedSeconds.value % 4 === 0 && revisionStageIndex.value < revisionStages.length - 1) {
+      revisionStageIndex.value += 1;
+    }
   }, 1000);
 
   try {
-    showMsg(`正在对第 ${targetSeq} 章执行 AI 智能就地修订并生成 Diff...`, "info");
+    showMsg(`正在对第 ${targetSeq} 章执行 AI 智能重构修订...`, "info");
     await projectStore.runChapterRevision(engine.baseUrl, targetSeq, instruction, llmConfig);
+    showMsg(`第 ${targetSeq} 章 AI 修订生成完成！已切换至段落级 Diff 对比视图。`, "success");
     viewMode.value = "diff";
-    showMsg(`第 ${targetSeq} 章 AI 修订已就绪！已进入全宽单栏内联 Diff 差异对比视图。`);
-  } catch (err) {
-    showMsg(`修订失败：${(err as Error).message}`, "error");
+  } catch (err: any) {
+    showMsg(`修订失败: ${err.message}`, "error");
   } finally {
     if (revisionTimer) {
       clearInterval(revisionTimer);
@@ -1020,232 +764,89 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
   }
 }
 
-// ── 采纳 / 放弃修订 ──
 async function handleApplyRevision() {
-  if (!projectStore.activeRevision) return;
-  const seq = projectStore.activeRevision.seq;
+  if (!engine.baseUrl || !projectStore.activeRevision) return;
   try {
+    const seq = projectStore.activeRevision.seq;
     await projectStore.applyRevision(engine.baseUrl, seq);
-    nextTick(() => {
-      syncAllChaptersHtml();
-    });
+    showMsg(`第 ${seq} 章修订已采纳并保存为最新正文！`, "success");
     viewMode.value = "rich";
-    showMsg(`已成功采纳第 ${seq} 章的修订并保存为最新正文！`);
-  } catch (err) {
-    showMsg(`采纳修订失败：${(err as Error).message}`, "error");
+    syncEditorContent();
+  } catch (err: any) {
+    showMsg(`采纳修订失败: ${err.message}`, "error");
   }
 }
 
 function handleDiscardRevision() {
+  if (!projectStore.activeRevision) return;
+  const seq = projectStore.activeRevision.seq;
   projectStore.discardRevision();
+  showMsg(`已放弃第 ${seq} 章本次修订`, "info");
   viewMode.value = "rich";
-  showMsg("已放弃本次修订结果，恢复原正文。", "info");
 }
 
-// ── 审阅问题句子级精准定位与呼吸波纹高亮 ──
-async function locateIssueInCanvas(
-  issueOrLocation?: engineApi.ReviewIssue | string,
-  optionalChapterSeq?: number,
-) {
-  let targetSeq = optionalChapterSeq;
-  let issueId = "";
-  let quote = "";
-  let location = "";
-  let message = "";
-
-  if (issueOrLocation && typeof issueOrLocation === "object") {
-    targetSeq = issueOrLocation.chapterSeq || targetSeq;
-    issueId = (issueOrLocation.id || "").trim();
-    quote = (issueOrLocation.quote || "").trim();
-    location = (issueOrLocation.location || "").trim();
-    message = (issueOrLocation.message || "").trim();
-  } else if (typeof issueOrLocation === "string") {
-    location = issueOrLocation.trim();
-  }
-
-  // 从 location 推断 chapterSeq
-  if (!targetSeq && location) {
-    const m = location.match(/第\s*([一二三四五六七八九十百零\d]+)\s*章/);
-    if (m) {
-      targetSeq = Number(m[1]) || 1;
-    } else {
-      const numM = location.match(/^(\d+)(?:\.\d+)*/);
-      if (numM) {
-        targetSeq = Number(numM[1]) || 1;
-      }
-    }
-  }
-  if (!targetSeq) targetSeq = 1;
-
-  // 1. 确保在 rich 视图模式并激活章节
-  if (viewMode.value !== "rich") {
-    viewMode.value = "rich";
-    await nextTick();
-    syncAllChaptersHtml();
-    await new Promise((r) => setTimeout(r, 60));
-  }
-  activeChapterSeq.value = targetSeq;
-
-  // 2. 找到对应章节的 canvas DOM 容器
-  const canvasEl = document.getElementById(`chapter-canvas-${targetSeq}`);
-  let targetEl: HTMLElement | null = null;
-
-  if (canvasEl) {
-    // 优先级 1: 直接查找已高亮的 mark[data-issue-id] 元素
-    if (issueId) {
-      const markEl =
-        canvasEl.querySelector<HTMLElement>(`mark.review-issue-highlight[data-issue-id="${issueId}"]`) ||
-        document.querySelector<HTMLElement>(`mark.review-issue-highlight[data-issue-id="${issueId}"]`);
-      if (markEl) {
-        targetEl = markEl;
-      }
-    }
-
-    // 候选富文本容器
-    const candidates = Array.from(
-      canvasEl.querySelectorAll<HTMLElement>(
-        "p, h1, h2, h3, h4, h5, h6, tr, li, blockquote, pre, td, th",
-      ),
-    );
-
-    // 优先级 2: 按 quote 精确或前缀匹配富文本中的容器
-    if (!targetEl && quote && quote.length >= 2) {
-      for (const el of candidates) {
-        if (el.textContent && el.textContent.includes(quote)) {
-          targetEl = el;
-          break;
-        }
-      }
-      if (!targetEl && quote.length > 8) {
-        const shortQuote = quote.slice(0, Math.min(12, quote.length));
-        const shorterQuote = quote.slice(0, 8);
-        for (const el of candidates) {
-          if (
-            el.textContent &&
-            (el.textContent.includes(shortQuote) || el.textContent.includes(shorterQuote))
-          ) {
-            targetEl = el;
-            break;
-          }
-        }
-      }
-    }
-
-    // 优先级 3: 按 location 标题与小节编号匹配对应 DOM 标题或段落
-    if (!targetEl && location) {
-      const cleanLoc = location.replace(/^(?:第\s*[一二三四五六七八九十百零\d]+\s*章|\d+(?:\.\d+)*|[\s、：:])+/g, "").trim();
-      const locNumMatch = location.match(/\d+(?:\.\d+)*/);
-      const locNum = locNumMatch ? locNumMatch[0] : null;
-
-      // 优先匹配标题标签
-      for (const el of candidates) {
-        if (/^H[1-6]$/i.test(el.tagName)) {
-          if (cleanLoc && el.textContent?.includes(cleanLoc)) {
-            targetEl = el;
-            break;
-          }
-          if (locNum && el.textContent?.includes(locNum)) {
-            targetEl = el;
-            break;
-          }
-        }
-      }
-      // 其次匹配段落
-      if (!targetEl && cleanLoc && cleanLoc.length >= 2) {
-        for (const el of candidates) {
-          if (el.textContent && el.textContent.includes(cleanLoc)) {
-            targetEl = el;
-            break;
-          }
-        }
-      }
-    }
-
-    // 优先级 4: 按 message 核心关键词、引号片段或核心数值匹配相关段落
-    if (!targetEl && message) {
-      const quoteInMsg = message.match(/[“"「『]([^”"』」]+)[”"』」]/);
-      if (quoteInMsg && quoteInMsg[1].trim().length >= 2) {
-        const kw = quoteInMsg[1].trim();
-        for (const el of candidates) {
-          if (el.textContent && el.textContent.includes(kw)) {
-            targetEl = el;
-            break;
-          }
-        }
-      }
-      if (!targetEl) {
-        const numMatches = message.match(
-          /(?:\d+(?:\.\d+)?\s*(?:万元|亿元|万m³|万立方米|km²|km|m²|m|人|亩|%|个|台|套|座|年|月|日|天|元|吨|kw|MW|GW|h))/gi,
-        );
-        if (numMatches) {
-          for (const numKw of numMatches) {
-            const kw = numKw.trim();
-            if (kw.length >= 2) {
-              for (const el of candidates) {
-                if (el.textContent && el.textContent.includes(kw)) {
-                  targetEl = el;
-                  break;
-                }
-              }
-              if (targetEl) break;
-            }
-          }
-        }
-      }
-    }
-
-    // 如果是 td/th 且非 mark，提升为 tr
-    if (targetEl && (targetEl.tagName === "TD" || targetEl.tagName === "TH")) {
-      targetEl = (targetEl.closest("tr") as HTMLElement) || targetEl;
-    }
-  }
-
-  if (targetEl) {
-    targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
-    targetEl.classList.remove("issue-highlight-pulse");
-    void targetEl.offsetWidth; // 强制触发 reflow 播放呼吸动画
-    targetEl.classList.add("issue-highlight-pulse");
-    setTimeout(() => {
-      targetEl?.classList.remove("issue-highlight-pulse");
-    }, 2500);
-    showMsg(`已精准定位至第 ${targetSeq} 章对应问题语句/段落`, "info");
-  } else {
-    // 降级：平滑滚动到章节头部
-    await scrollToChapter(targetSeq);
-    showMsg(`已定位至第 ${targetSeq} 章`, "info");
+function copyCurrentChapterMarkdown() {
+  if (navigator.clipboard && currentChapterText.value) {
+    navigator.clipboard.writeText(currentChapterText.value);
+    showMsg(`已复制第 ${projectStore.selectedChapterSeq} 章 Markdown 源码至剪贴板！`, "success");
   }
 }
 
-// ── 复制全书 Markdown ──
 function copyFullBookMarkdown() {
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(fullBookMarkdown.value);
-    showMsg("已复制全书排版 Markdown 源码至剪贴板！");
+  let fullMd = "";
+  for (const ch of projectStore.outlineChapters) {
+    const text = projectStore.chapters[ch.seq] || "";
+    if (text.trim()) {
+      fullMd += `${text}\n\n`;
+    }
+  }
+  if (navigator.clipboard && fullMd) {
+    navigator.clipboard.writeText(fullMd);
+    showMsg("已复制全书 Markdown 源码至剪贴板！", "success");
+  } else {
+    showMsg("全书暂无已生成正文", "error");
   }
 }
+
+onMounted(async () => {
+  await ensureStep4State();
+  nextTick(() => {
+    syncEditorContent();
+  });
+});
+
+onUnmounted(() => {
+  if (reviewTimer) clearInterval(reviewTimer);
+  if (revisionTimer) clearInterval(revisionTimer);
+  for (const t of Object.values(saveDebounceTimers)) {
+    clearTimeout(t);
+  }
+});
 </script>
 
 <template>
   <div class="step4-container">
-    <!-- 全局提示 Banner -->
+    <!-- 全局操作通知条 -->
     <transition name="fade">
       <div v-if="actionMessage" :class="['alert-banner', actionMessage.type]">
         {{ actionMessage.text }}
       </div>
     </transition>
 
-    <!-- ═════════════════════════════════════════════════════════ -->
-    <!-- 顶部工作台状态与全局操作区 (Header Toolbar) -->
-    <!-- ═════════════════════════════════════════════════════════ -->
-    <header class="review-workbench-header card">
-      <div class="header-left-meta">
-        <div class="project-title-box">
-          <span class="proj-badge">{{ projectStore.currentProject?.name || "未选项目" }}</span>
-          <h2 class="workbench-main-title">全书一体化审阅与全景工作台</h2>
+    <!-- 顶部状态栏与核心信息概览 -->
+    <header class="step4-header card">
+      <div class="header-left-info">
+        <div class="title-with-badge">
+          <h2>4. 报告审阅与专家诊断</h2>
+          <span class="proj-name-badge">
+            {{ projectStore.currentProject?.name || "未选择项目" }}
+          </span>
+          <span class="report-type-badge">
+            {{ projectStore.reportType }}
+          </span>
         </div>
 
-        <div class="health-badges-group">
-          <!-- 健康达标度徽标 (彻底废除 100 分制) -->
+        <div class="health-meta-row">
           <div
             class="health-badge"
             :class="{
@@ -1278,9 +879,6 @@ function copyFullBookMarkdown() {
             <span class="meta-pill" title="已完成编写章节数">
               <strong>{{ completedChaptersCount }} / {{ totalChapters }}</strong> 章已撰写
             </span>
-            <span v-if="unwrittenChaptersCount > 0" class="meta-pill meta-pill-unwritten" title="待撰写章节数">
-              待撰写 <strong>{{ unwrittenChaptersCount }}</strong> 章
-            </span>
             <span class="meta-pill" title="已审阅章节数">
               <strong>{{ reviewedChaptersCount }} / {{ totalChapters }}</strong> 章已体检
             </span>
@@ -1288,72 +886,21 @@ function copyFullBookMarkdown() {
         </div>
       </div>
 
-      <!-- 视图切换 Tab 与核心操作 -->
-      <div class="header-center-tabs">
-        <div class="view-mode-tabs">
-          <button
-            class="tab-btn"
-            :class="{ active: viewMode === 'rich' }"
-            @click="viewMode = 'rich'"
-            title="连贯渲染全书出版级排版正文，支持点击就地直接编辑润色"
-          >
-            📝 最终排版正文 (可编辑)
-          </button>
-          <button
-            class="tab-btn"
-            :class="{ active: viewMode === 'diff' }"
-            @click="viewMode = 'diff'"
-            title="全宽单栏段落级内联高亮差异比对 (删除线/新增背景)"
-          >
-            🔍 修订差异对比
-            <span v-if="hasActiveRevision" class="active-diff-indicator">●</span>
-          </button>
-          <button
-            class="tab-btn"
-            :class="{ active: viewMode === 'source' }"
-            @click="viewMode = 'source'"
-            title="查看与编辑纯文本 Markdown 原生源码"
-          >
-            📝 Markdown 源码
-          </button>
-        </div>
-      </div>
-
       <div class="header-right-actions">
-        <!-- 审查模式切换胶囊 -->
-        <div class="review-mode-pills">
-          <button
-            class="mode-pill-btn"
-            :class="{ active: reviewMode === 'fast' }"
-            @click="reviewMode = 'fast'"
-            title="常规审查：极速聚焦名词称谓、核心数值自洽与底线合规三大维度，单章约 8~12s（推荐）"
-          >
-            ⚡ 常规审查
-          </button>
-          <button
-            class="mode-pill-btn"
-            :class="{ active: reviewMode === 'all' }"
-            @click="reviewMode = 'all'"
-            title="全维精审：全维度专家逐句诊断与方案比选深度审查，单章约 30~45s"
-          >
-            🔍 全维精审
-          </button>
-        </div>
-
         <!-- 核心行动按钮 -->
         <button
           v-if="!projectStore.batchReviewing"
           class="btn btn-primary btn-review-hero"
-          :disabled="completedChaptersCount === 0"
+          :disabled="completedChaptersCount === 0 || projectStore.reviewingSeq !== null"
           @click="handleRunFullBookReview(false)"
-          title="以当前选定模式立即运行全书审阅"
+          title="按照国家发改委投资项目编制规程运行全书深度专家审阅"
         >
-          🚀 运行全书审阅
+          🚀 一键全书审阅
         </button>
         <button
           v-else
           class="btn btn-danger btn-review-hero"
-          @click="projectStore.stopBatchReview()"
+          @click="handleStopReview"
           title="中止当前正在执行的批量全书审阅任务"
         >
           ⏹ 停止审阅
@@ -1363,7 +910,7 @@ function copyFullBookMarkdown() {
           class="btn btn-outline"
           :disabled="completedChaptersCount === 0 || projectStore.revisingSeq !== null"
           @click="handleDirectRevision()"
-          title="代入本章当前诊断建议或全维综合建议，一键由大模型执行智能就地重构并生成 Diff 对比"
+          title="代入本章专家诊断建议，一键由大模型执行智能就地重构并生成 Diff 对比"
         >
           ⚡ AI 一键智能修订
         </button>
@@ -1392,11 +939,19 @@ function copyFullBookMarkdown() {
               {{ allReferences.length }}
             </span>
           </button>
+
+          <button
+            class="btn btn-outline drawer-btn"
+            @click="copyFullBookMarkdown"
+            title="复制全书 Markdown 源码"
+          >
+            📋 全书源码
+          </button>
         </div>
       </div>
     </header>
 
-    <!-- 审阅心跳与进度条 (正在执行审阅时展示) -->
+    <!-- 审阅心跳与进度条 (正在执行全书审阅时展示) -->
     <transition name="fade">
       <div v-if="projectStore.batchReviewing" class="review-heartbeat-bar card">
         <div class="heartbeat-inner">
@@ -1407,14 +962,14 @@ function copyFullBookMarkdown() {
                 <strong>⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
               </div>
               <div class="hb-desc">
-                已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照国家发改委与行业工程编制规程进行系统体检
+                已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照国家发改委投资项目编制规程进行系统体检
               </div>
             </div>
           </div>
           <div class="hb-right">
             <button
               class="btn btn-danger btn-sm btn-stop-review"
-              @click="projectStore.stopBatchReview()"
+              @click="handleStopReview"
               title="中止当前正在执行的批量全书审阅任务"
             >
               ⏹ 停止审阅
@@ -1428,7 +983,7 @@ function copyFullBookMarkdown() {
             <div class="review-thought-header" @click="showReviewThoughtDetails = !showReviewThoughtDetails">
               <div class="review-thought-title">
                 <span class="review-thought-icon">🧠</span>
-                <span>🧠 深度技术推演与工程构思过程 (纯中文) <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
+                <span>🧠 深度技术推演与专家质检过程 (纯中文) <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
                 <span class="thinking-wave">
                   <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                 </span>
@@ -1490,17 +1045,17 @@ function copyFullBookMarkdown() {
     </transition>
 
     <!-- ═════════════════════════════════════════════════════════ -->
-    <!-- 主体工作台：左侧全书多级标题导航 + 右侧 100% 满屏连贯正文画布 -->
+    <!-- 主体工作台：左右架构与 Step 3 100% 对等同构 -->
     <!-- ═════════════════════════════════════════════════════════ -->
-    <div class="workbench-main-layout">
-      <!-- 左侧：全书多级标题目录导航 (Sidebar Outline Tree) -->
-      <aside class="sidebar-nav-panel card">
+    <div class="writing-layout">
+      <!-- 左侧：全书目录导航与控制面板 (与 Step 3 结构、类名、展开逻辑 100% 对等) -->
+      <aside class="sidebar-panel card">
         <div class="card-header sidebar-header">
           <div class="header-titles">
             <h3>📑 章节目录与导航</h3>
             <span class="proj-badge">{{ projectStore.currentProject?.name || "未选项目" }}</span>
           </div>
-          <!-- 统计指示条 (100% 对齐 Step 3) -->
+          <!-- 统计指示条 -->
           <div class="stats-overview">
             <div class="stat-item">
               <span class="stat-label">总章节</span>
@@ -1537,11 +1092,11 @@ function copyFullBookMarkdown() {
                 <span
                   class="order-chip"
                   :class="{
-                    active: activeChapterSeq === seq,
+                    active: projectStore.selectedChapterSeq === seq,
                     completed: isChapterWritten(seq),
                     warning: (chapterIssuesCount[seq] || 0) > 0,
                   }"
-                  @click="scrollToChapter(seq)"
+                  @click="selectChapter(seq)"
                   :title="`第 ${seq} 章：${getChapterTitle(seq)}`"
                 >
                   第 {{ seq }} 章
@@ -1552,27 +1107,42 @@ function copyFullBookMarkdown() {
           </div>
         </div>
 
-        <div class="outline-tree-scrollable">
-          <div v-if="totalChapters === 0" class="empty-outline-tip">
-            暂无章节目录，请先在步骤 2 生成大纲。
-          </div>
+        <!-- 全局审阅主操作区 -->
+        <div class="global-actions">
+          <button
+            v-if="projectStore.batchReviewing"
+            class="btn btn-danger btn-block"
+            @click="handleStopReview"
+          >
+            ⏹ 停止全书审阅
+          </button>
+          <button
+            v-else
+            class="btn btn-primary btn-block"
+            :disabled="completedChaptersCount === 0 || projectStore.reviewingSeq !== null"
+            @click="handleRunFullBookReview(false)"
+          >
+            🚀 一键全书审阅
+          </button>
+        </div>
 
+        <!-- Flat 平铺一体化章节目录树 (与 Step 3 结构和样式 100% 对齐) -->
+        <div class="outline-tree-scrollable">
           <div
             v-for="ch in projectStore.outlineChapters"
             :key="ch.seq"
             class="chapter-tree-node"
             :class="{
-              'is-active': activeChapterSeq === ch.seq,
+              'is-active': projectStore.selectedChapterSeq === ch.seq,
+              'is-reviewing': projectStore.reviewingSeq === ch.seq,
               'is-completed': isChapterWritten(ch.seq),
-              'has-review': !!projectStore.chapterReviews[ch.seq],
-              'has-warning': (chapterIssuesCount[ch.seq] || 0) > 0 || (chapterGapsCount[ch.seq] || 0) > 0,
-              'is-unwritten-node': !isChapterWritten(ch.seq),
+              'has-warning': (chapterIssuesCount[ch.seq] || 0) > 0,
             }"
           >
-            <!-- 章节卡片头部 -->
+            <!-- 章节行 -->
             <div
               class="chapter-node-row"
-              @click="scrollToChapter(ch.seq)"
+              @click="selectChapter(ch.seq)"
               :title="`第 ${ch.seq} 章：${ch.title}`"
             >
               <div class="row-left">
@@ -1581,15 +1151,28 @@ function copyFullBookMarkdown() {
               </div>
 
               <div class="row-right">
-                <!-- 状态药丸 (100% 对齐 Step 3) -->
+                <!-- 状态徽标 -->
                 <span
                   class="status-pill"
-                  :class="isChapterWritten(ch.seq) ? 'completed' : 'idle'"
+                  :class="
+                    projectStore.reviewingSeq === ch.seq
+                      ? 'reviewing'
+                      : isChapterWritten(ch.seq)
+                      ? 'completed'
+                      : 'idle'
+                  "
                 >
-                  {{ isChapterWritten(ch.seq) ? "已完成 ✓" : "待撰写" }}
+                  <span v-if="projectStore.reviewingSeq === ch.seq" class="spinner-inline"></span>
+                  {{
+                    projectStore.reviewingSeq === ch.seq
+                      ? "审阅中…"
+                      : isChapterWritten(ch.seq)
+                      ? "已完成 ✓"
+                      : "待撰写"
+                  }}
                 </span>
 
-                <!-- 预警角标 (若有审阅问题) -->
+                <!-- 预警角标 (若有审阅问题在右侧叠加 ⚠️ N) -->
                 <span
                   v-if="(chapterIssuesCount[ch.seq] || 0) > 0"
                   class="warning-badge-pill"
@@ -1599,20 +1182,30 @@ function copyFullBookMarkdown() {
                   ⚠️ {{ chapterIssuesCount[ch.seq] }}
                 </span>
 
+                <!-- 单章操作按钮 -->
+                <button
+                  class="ch-action-btn"
+                  :title="'审阅该章'"
+                  :disabled="projectStore.batchReviewing || projectStore.reviewingSeq === ch.seq || !isChapterWritten(ch.seq)"
+                  @click.stop="handleReviewSingleChapter(ch.seq)"
+                >
+                  🔍
+                </button>
+
                 <!-- 子标题展开/折叠 -->
                 <button
                   v-if="chapterSubheadings[ch.seq] && chapterSubheadings[ch.seq].length > 0"
                   class="collapse-toggle-icon"
                   :class="{ collapsed: isChapterCollapsed(ch.seq) }"
-                  @click="toggleChapterCollapse(ch.seq, $event)"
                   :title="isChapterCollapsed(ch.seq) ? '展开子标题' : '收起子标题'"
+                  @click="toggleChapterCollapse(ch.seq, $event)"
                 >
                   {{ isChapterCollapsed(ch.seq) ? '▶' : '▼' }}
                 </button>
               </div>
             </div>
 
-            <!-- 多级子标题列表 (节与小节: H2, H3, H4) -->
+            <!-- 多级子标题列表 (仅当前激活选中的章节高亮并展开其子标题，其它章节默认折叠收起) -->
             <transition name="tree-expand">
               <div
                 v-if="!isChapterCollapsed(ch.seq) && chapterSubheadings[ch.seq] && chapterSubheadings[ch.seq].length > 0"
@@ -1626,9 +1219,10 @@ function copyFullBookMarkdown() {
                     `level-${sub.level}`,
                     { 'is-active-heading': activeHeadingId === sub.id },
                   ]"
-                  @click="scrollToSubheading(ch.seq, sub.id, sub, $event)"
                   :title="sub.title"
+                  @click="scrollToSubheading(ch.seq, sub.id, sub, $event)"
                 >
+                  <span class="sub-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
                   <span class="sub-text">{{ sub.title }}</span>
                   <span
                     v-if="getSubheadingIssueCount(ch.seq, sub) > 0"
@@ -1642,769 +1236,626 @@ function copyFullBookMarkdown() {
               </div>
             </transition>
           </div>
+
+          <div v-if="totalChapters === 0" class="empty-outline-tip">
+            暂无章节目录，请先在步骤 2 生成大纲。
+          </div>
         </div>
       </aside>
 
-      <!-- 右侧：100% 满屏连贯正文主画布 (Main Canvas Panel) -->
-      <main class="main-canvas-panel card">
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <!-- 模式 1: 最终排版正文 (rich) — 连贯全文 + contenteditable 就地编辑 -->
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <div v-show="viewMode === 'rich'" class="canvas-rich-view">
-          <div class="rich-view-header-bar">
-            <div class="spec-label-box">
-              <span class="spec-tag">📖 国家发改委与行业规程出版级排版 (10.5pt)</span>
-              <span class="spec-sub">
-                支持直接在下方排版文字上点击输入修改，300ms 自动落盘回存对应章节。
+      <!-- 右侧：单章聚焦出版级排版与审阅主画布 -->
+      <main class="editor-panel card">
+        <div class="card-header editor-header">
+          <div class="editor-title-area">
+            <div class="title-row">
+              <span class="seq-tag" v-if="currentChapter">第 {{ currentChapter.seq }} 章</span>
+              <h3 class="active-ch-title">{{ currentChapter?.title || "未选择章节" }}</h3>
+            </div>
+            <div class="editor-meta-row">
+              <span class="meta-item">
+                当前字数：<strong>{{ currentChapterWords.toLocaleString() }}</strong> 字 (正文)
+              </span>
+              <span class="meta-item-divider">·</span>
+              <span
+                class="meta-item status-text"
+                :class="{
+                  'stat-passed': currentChapterReview && currentChapterIssuesCount === 0,
+                  'stat-warning': currentChapterIssuesCount > 0,
+                  'stat-idle': !currentChapterReview,
+                }"
+              >
+                {{
+                  projectStore.reviewingSeq === currentChapter?.seq
+                    ? "⚡ 正在专家深度质检中..."
+                    : currentChapterReview
+                    ? currentChapterIssuesCount === 0
+                      ? "🟢 发改委标准达标 ✓"
+                      : `🟡 存在 ${currentChapterIssuesCount} 处待优化建议`
+                    : isChapterWritten(currentChapter?.seq || 1)
+                    ? "⏳ 待专家审阅"
+                    : "待在步骤 3 撰写生成"
+                }}
               </span>
             </div>
-            <div class="spec-actions">
-              <button class="btn btn-outline btn-xs" @click="copyFullBookMarkdown">
-                📋 复制全书 Markdown
-              </button>
-            </div>
           </div>
 
-          <div class="full-book-scroll-canvas" @click="handleCanvasClick">
-            <div
-              v-for="ch in projectStore.outlineChapters"
-              :key="ch.seq"
-              :id="`full-chapter-anchor-${ch.seq}`"
-              class="full-book-chapter-block"
-              :class="{ 'is-unwritten-block': !isChapterWritten(ch.seq) }"
+          <!-- 右上角核心操作组 (排版正文 / Diff 对比就地切换，单章审阅，AI智能修订) -->
+          <div class="editor-actions">
+            <!-- 视图模式切换 Tab -->
+            <div class="view-mode-tabs">
+              <button
+                class="tab-btn"
+                :class="{ active: viewMode === 'rich' }"
+                @click="viewMode = 'rich'"
+                title="最终排版正文：支持在文字上直接就地点击编辑润色，300ms 自动落盘"
+              >
+                📝 最终排版正文
+              </button>
+              <button
+                class="tab-btn"
+                :class="{ active: viewMode === 'diff' }"
+                @click="viewMode = 'diff'"
+                title="纯净段落级 Diff 对比：全宽单栏段落级差异比对 (删除线/新增背景)"
+              >
+                🔍 修订差异对比
+                <span v-if="hasActiveRevision" class="active-diff-indicator">●</span>
+              </button>
+            </div>
+
+            <button
+              class="btn btn-outline"
+              :disabled="!isChapterWritten(currentChapter?.seq || 1) || projectStore.reviewingSeq === currentChapter?.seq"
+              @click="handleReviewSingleChapter(currentChapter?.seq || 1)"
+              title="针对本章执行发改委高水准专家质检"
             >
-              <!-- 标准化章标题栏 (全书连贯预览标准化呈现章标题与字数标签) -->
-              <div class="chapter-block-header">
-                <div class="header-left">
-                  <span class="ch-badge">第 {{ ch.seq }} 章</span>
-                  <h3 class="ch-title">{{ ch.title }}</h3>
-                </div>
-                <div class="header-right">
-                  <span v-if="!isChapterWritten(ch.seq)" class="ch-word-tag tag-unwritten">待撰写 · 0 字</span>
-                  <span v-else class="ch-word-tag">{{ countContentChars(projectStore.chapters[ch.seq] || '').toLocaleString() }} 字 (正文)</span>
-                </div>
-              </div>
+              🔍 审阅本章
+            </button>
 
-              <!-- 就地排版编辑器画布 (contenteditable) -->
-              <div
-                :id="`chapter-canvas-${ch.seq}`"
-                class="rich-rendered-editor spec-typography"
-                :class="{ 'is-empty-chapter': !isChapterWritten(ch.seq) }"
-                contenteditable="true"
-                :data-seq="ch.seq"
-                @input="onChapterInput(ch.seq, $event)"
-                @focus="onChapterFocus(ch.seq, $event)"
-                @blur="onChapterBlur(ch.seq, $event)"
-                data-placeholder="本章节暂未生成内容。可在此处直接输入排版文字，或返回步骤 3 自动写作..."
-              ></div>
-            </div>
-
-            <div v-if="totalChapters === 0" class="canvas-empty-state">
-              <h3>暂无章节正文</h3>
-              <p>请先在步骤 2 生成大纲并在步骤 3 写作后，在此处进行出版级排版审阅。</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <!-- 模式 2: 修订差异对比 (diff) — 全宽单栏内联段落级高亮 -->
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <div v-show="viewMode === 'diff'" class="canvas-diff-view">
-          <!-- 差异比对常驻操作栏 -->
-          <div class="diff-sticky-header">
-            <div class="diff-header-info">
-              <div class="diff-title-row">
-                <span class="diff-main-badge">🔍 全宽单栏内联 Diff 差异对比</span>
-                <span v-if="projectStore.activeRevision" class="diff-ch-tag">
-                  第 {{ projectStore.activeRevision.seq }} 章
-                </span>
-              </div>
-            </div>
-
-            <div class="diff-header-stats">
-              <span class="diff-stat-pill pill-added">+ {{ currentDiffStats.addedLines }} 新增</span>
-              <span class="diff-stat-pill pill-removed">- {{ currentDiffStats.removedLines }} 删除</span>
-              <span class="diff-stat-pill pill-unchanged">= {{ currentDiffStats.unchangedLines }} 未修改</span>
-            </div>
-
-            <div class="diff-header-actions">
-              <button
-                class="btn btn-success"
-                :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
-                @click="handleApplyRevision"
-                title="采纳本次 AI 修订结果并保存覆盖为最新正文"
-              >
-                ✅ 采纳全部修订并保存为正文
-              </button>
-              <button
-                class="btn btn-outline"
-                :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
-                @click="handleDirectRevision(projectStore.activeRevision?.seq || activeChapterSeq || 1, projectStore.activeRevision?.instruction)"
-                title="代入修改指令重新生成修订"
-              >
-                🔄 重新生成
-              </button>
-              <button
-                class="btn btn-outline btn-danger-text"
-                :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
-                @click="handleDiscardRevision"
-                title="放弃本次修订，恢复原有正文"
-              >
-                ↩ 放弃本次修订
-              </button>
-            </div>
-          </div>
-
-          <!-- 全宽内联 Diff 内容 -->
-          <div class="diff-inline-scrollable spec-typography">
-            <div v-if="hasActiveRevision && currentDiffLines.length > 0" class="diff-lines-wrapper">
-              <div
-                v-for="(line, lIdx) in currentDiffLines"
-                :key="lIdx"
-                class="diff-line-row"
-                :class="`diff-line-${line.type}`"
-              >
-                <div class="diff-line-num old-num">{{ line.oldLineNumber || '' }}</div>
-                <div class="diff-line-num new-num">{{ line.newLineNumber || '' }}</div>
-                <div class="diff-line-sign">
-                  <span v-if="line.type === 'added'">+</span>
-                  <span v-else-if="line.type === 'removed'">-</span>
-                  <span v-else>&nbsp;</span>
-                </div>
-                <div class="diff-line-content">
-                  <ins v-if="line.type === 'added'">{{ line.text }}</ins>
-                  <s v-else-if="line.type === 'removed'">{{ line.text }}</s>
-                  <span v-else>{{ line.text }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 空白状态 -->
-            <div v-else class="diff-empty-placeholder card">
-              <div class="empty-icon">💡</div>
-              <h4>当前暂无正在比对的修订版本</h4>
-              <p>您可以点击顶栏「⚡ AI 一键智能修订」或在诊断抽屉中点击「⚡ 代入建议并一键修订」，系统将自动生成段落级 Diff 对比。</p>
-              <button class="btn btn-primary" :disabled="projectStore.revisingSeq !== null" @click="handleDirectRevision(activeChapterSeq || 1)">
-                ⚡ 立即发起 AI 智能修订
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <!-- 模式 3: Markdown 源码 (source) -->
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <div v-show="viewMode === 'source'" class="canvas-source-view">
-          <div class="source-view-toolbar">
-            <div class="source-info">
-              <span>📝 Markdown 原生标记源码模式</span>
-              <span class="source-divider">·</span>
-              <span>全书共 <strong>{{ totalWordCount.toLocaleString() }}</strong> 字符 (正文)</span>
-            </div>
-            <div class="source-actions">
-              <button class="btn btn-outline btn-xs" @click="copyFullBookMarkdown">
-                📋 复制全书 Markdown
-              </button>
-            </div>
-          </div>
-
-          <div class="source-editor-scrollable">
-            <div
-              v-for="ch in projectStore.outlineChapters"
-              :key="ch.seq"
-              :id="`source-chapter-${ch.seq}`"
-              class="source-chapter-card"
+            <button
+              class="btn btn-primary"
+              :disabled="!isChapterWritten(currentChapter?.seq || 1) || projectStore.revisingSeq !== null"
+              @click="handleDirectRevision(currentChapter?.seq)"
+              title="代入本章专家诊断建议，一键由大模型执行智能重构并生成 Diff"
             >
-              <div class="source-card-header">
-                <span class="source-seq">第 {{ ch.seq }} 章</span>
-                <span class="source-title">{{ ch.title }}</span>
-                <span class="source-len">{{ countContentChars(projectStore.chapters[ch.seq] || '') }} 字符 (正文)</span>
+              ⚡ AI 智能修订
+            </button>
+
+            <button
+              class="btn btn-outline"
+              @click="copyCurrentChapterMarkdown"
+              title="复制本章 Markdown 源码"
+            >
+              📋 复制源码
+            </button>
+          </div>
+        </div>
+
+        <!-- 主工作画布容器 -->
+        <div class="editor-body">
+          <!-- ═════════════════════════════════════════════════════════ -->
+          <!-- 模式 1: 最终排版正文 (rich) — 单章聚焦 + contenteditable 就地编辑 -->
+          <!-- ═════════════════════════════════════════════════════════ -->
+          <div v-show="viewMode === 'rich'" class="writing-canvas">
+            <div class="canvas-spec-bar">
+              <span class="spec-tag">📖 国家发改委与行业规程出版级排版 (10.5pt)</span>
+              <span class="spec-tip">
+                支持直接在排版文字上点击输入修改，300ms 自动落盘。双击或点击黄色高亮诊断标记可直接联动右侧修改建议。
+              </span>
+            </div>
+
+            <!-- 单章排版正文编辑画布 -->
+            <div
+              ref="editorCanvasRef"
+              contenteditable="true"
+              class="rich-rendered-editor spec-typography"
+              @input="onEditorInput"
+              @click="handleEditorCanvasClick"
+              data-placeholder="本章节暂未生成正文。可直接在此处点击输入排版文字，或返回步骤 3 进行 AI 一键写作..."
+            ></div>
+          </div>
+
+          <!-- ═════════════════════════════════════════════════════════ -->
+          <!-- 模式 2: 纯净段落级 Diff 对比 (diff) — 全宽单栏内联段落级高亮 -->
+          <!-- ═════════════════════════════════════════════════════════ -->
+          <div v-show="viewMode === 'diff'" class="canvas-diff-view">
+            <!-- 差异比对常驻操作栏 -->
+            <div class="diff-sticky-header">
+              <div class="diff-header-info">
+                <div class="diff-title-row">
+                  <span class="diff-main-badge">🔍 全宽单栏内联 Diff 差异对比</span>
+                  <span v-if="projectStore.activeRevision" class="diff-ch-tag">
+                    第 {{ projectStore.activeRevision.seq }} 章
+                  </span>
+                </div>
               </div>
-              <textarea
-                class="source-textarea"
-                :value="projectStore.chapters[ch.seq] || ''"
-                @input="onSourceInput(ch.seq, $event)"
-                :placeholder="`第 ${ch.seq} 章 Markdown 源码...`"
-              ></textarea>
+
+              <div class="diff-header-stats">
+                <span class="diff-stat-pill pill-added">+ {{ currentDiffStats.addedLines }} 新增</span>
+                <span class="diff-stat-pill pill-removed">- {{ currentDiffStats.removedLines }} 删除</span>
+                <span class="diff-stat-pill pill-unchanged">= {{ currentDiffStats.unchangedLines }} 未修改</span>
+              </div>
+
+              <div class="diff-header-actions">
+                <button
+                  class="btn btn-success"
+                  :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
+                  @click="handleApplyRevision"
+                  title="采纳本次 AI 修订结果并保存覆盖为最新正文"
+                >
+                  ✅ 采纳全部修订并保存为正文
+                </button>
+                <button
+                  class="btn btn-outline"
+                  :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
+                  @click="handleDirectRevision(projectStore.activeRevision?.seq || projectStore.selectedChapterSeq, projectStore.activeRevision?.instruction)"
+                  title="代入修改指令重新生成修订"
+                >
+                  🔄 重新生成
+                </button>
+                <button
+                  class="btn btn-outline btn-danger-text"
+                  :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
+                  @click="handleDiscardRevision"
+                  title="放弃本次修订结果，保留原章节正文"
+                >
+                  ❌ 放弃修订
+                </button>
+              </div>
+            </div>
+
+            <!-- 内联段落级 Diff 渲染区 -->
+            <div class="diff-body-container">
+              <div v-if="diffLines.length === 0" class="diff-empty-state">
+                <div class="empty-icon">⚖️</div>
+                <div class="empty-title">当前章节暂无修订对比数据</div>
+                <div class="empty-desc">
+                  点击上方「⚡ AI 智能修订」或「审阅诊断」中的「采纳建议并修订」，系统将根据发改委规范自动生成高质量修订方案与 Diff 对比。
+                </div>
+              </div>
+
+              <div v-else class="diff-lines-list">
+                <div
+                  v-for="(dl, idx) in diffLines"
+                  :key="idx"
+                  class="diff-line-row"
+                  :class="`diff-type-${dl.type}`"
+                >
+                  <div class="diff-gutter">
+                    <span class="line-no old-no">{{ dl.oldLineNumber !== undefined ? dl.oldLineNumber : '' }}</span>
+                    <span class="line-no new-no">{{ dl.newLineNumber !== undefined ? dl.newLineNumber : '' }}</span>
+                    <span class="diff-symbol">{{ dl.type === 'added' ? '+' : dl.type === 'removed' ? '-' : ' ' }}</span>
+                  </div>
+                  <div class="diff-content">
+                    <pre>{{ dl.text || ' ' }}</pre>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- 底部全局向导步骤导航 -->
-        <footer class="workbench-footer-nav">
-          <button class="btn btn-secondary" @click="projectStore.setStep(3)">
-            &larr; 上一步：章节写作
-          </button>
-          <div class="footer-center-summary">
-            <span>健康达标状态：<strong>{{ healthStatus }}</strong></span>
-            <span class="footer-divider">·</span>
-            <span>合规达标度：<strong>{{ complianceRate }}%</strong></span>
+        <!-- ═════════════════════════════════════════════════════════ -->
+        <!-- 专家诊断总台账抽屉 (Diagnostic Drawer) -->
+        <!-- ═════════════════════════════════════════════════════════ -->
+        <transition name="drawer-fade">
+          <div v-if="showDiagnosticDrawer" class="ref-drawer-overlay" @click="showDiagnosticDrawer = false">
+            <div class="ref-drawer-panel diagnostic-drawer-panel" @click.stop>
+              <div class="drawer-header">
+                <div class="drawer-title-box">
+                  <h4>📋 国家发改委标准专家诊断总台账</h4>
+                  <span class="drawer-sub">第 {{ currentChapter?.seq }} 章：{{ currentChapter?.title }} · 全书累计 {{ allIssues.length }} 项建议</span>
+                </div>
+                <button class="drawer-close-btn" @click="showDiagnosticDrawer = false">✕</button>
+              </div>
+
+              <!-- 范围切换器：当前章 vs 全书 -->
+              <div class="drawer-scope-tabs">
+                <button
+                  class="scope-tab-btn"
+                  :class="{ active: diagnosticFilterScope === 'current' }"
+                  @click="diagnosticFilterScope = 'current'"
+                >
+                  📌 当前章 ({{ currentChapterIssues.length }})
+                </button>
+                <button
+                  class="scope-tab-btn"
+                  :class="{ active: diagnosticFilterScope === 'all' }"
+                  @click="diagnosticFilterScope = 'all'"
+                >
+                  🌐 全书诊断 ({{ allIssues.length }})
+                </button>
+              </div>
+
+              <!-- 诊断分类 Tab 组 -->
+              <div class="diagnostic-nav-tabs">
+                <button
+                  class="diag-tab-btn"
+                  :class="{ active: diagnosticTab === 'issues' }"
+                  @click="diagnosticTab = 'issues'"
+                >
+                  ⚠️ 审阅问题 ({{ diagnosticFilterScope === 'current' ? currentChapterIssues.length : allIssues.length }})
+                </button>
+                <button
+                  class="diag-tab-btn"
+                  :class="{ active: diagnosticTab === 'numerical' }"
+                  @click="diagnosticTab = 'numerical'"
+                >
+                  🔢 数值校核 ({{ allNumericalChecks.length }})
+                </button>
+                <button
+                  class="diag-tab-btn"
+                  :class="{ active: diagnosticTab === 'gaps' }"
+                  @click="diagnosticTab = 'gaps'"
+                >
+                  🧩 缺项排查 ({{ allDataGaps.length }})
+                </button>
+              </div>
+
+              <!-- 抽屉内容区 -->
+              <div class="drawer-body-scrollable">
+                <!-- 1. 审阅问题列表 -->
+                <div v-if="diagnosticTab === 'issues'" class="diag-section-list">
+                  <div
+                    v-for="(issue, idx) in (diagnosticFilterScope === 'current' ? currentChapterIssues : allIssues)"
+                    :key="issue.id || idx"
+                    :id="`issue-card-${issue.id || idx}`"
+                    class="diag-issue-card"
+                    :class="`severity-${issue.severity || 'medium'}`"
+                  >
+                    <div class="issue-card-top">
+                      <div class="issue-tag-group">
+                        <span class="severity-pill" :class="issue.severity || 'medium'">
+                          {{ issue.severity === 'critical' ? '🔴 严重' : issue.severity === 'high' ? '🟠 重大' : issue.severity === 'medium' ? '🟡 一般' : '🔵 提示' }}
+                        </span>
+                        <span class="dim-pill">{{ issue.dimension || issue.category || '编制规范' }}</span>
+                        <span v-if="issue.chapterSeq" class="ch-scope-pill">第 {{ issue.chapterSeq }} 章</span>
+                      </div>
+                      <div class="issue-actions-top">
+                        <button
+                          class="btn btn-outline btn-xs"
+                          @click="locateIssueInCanvas(issue)"
+                          title="在正文画布中高亮定位该问题"
+                        >
+                          📍 定位正文
+                        </button>
+                        <button
+                          class="btn btn-primary btn-xs"
+                          @click="handleDirectRevision(issue.chapterSeq || projectStore.selectedChapterSeq, `针对问题进行专项修订：${issue.description || issue.message}，建议：${issue.suggestion || '完善论述'}`)"
+                          title="针对该问题专项执行 AI 智能修订"
+                        >
+                          ⚡ 采纳修订
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="issue-desc-box">
+                      <strong>{{ issue.description || issue.message }}</strong>
+                    </div>
+
+                    <div v-if="issue.snippet || issue.quote" class="issue-snippet-box">
+                      <span class="snippet-label">原文片段：</span>
+                      <span class="snippet-text">“{{ issue.snippet || issue.quote }}”</span>
+                    </div>
+
+                    <div class="issue-sug-box">
+                      <span class="sug-icon">💡</span>
+                      <span class="sug-text"><strong>优化建议：</strong>{{ issue.suggestion || '请根据国家发改委投资项目编制规范补充详实论证。' }}</span>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="(diagnosticFilterScope === 'current' ? currentChapterIssues.length : allIssues.length) === 0"
+                    class="empty-diag-state"
+                  >
+                    <div class="empty-icon">🟢</div>
+                    <div class="empty-title">当前暂无审阅诊断问题</div>
+                    <div class="empty-desc">
+                      符合国家发改委投资项目编制规程，或者请点击上方「🔍 审阅本章」执行深度体检。
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 2. 数值校核列表 -->
+                <div v-if="diagnosticTab === 'numerical'" class="diag-section-list">
+                  <div
+                    v-for="(numItem, idx) in allNumericalChecks"
+                    :key="idx"
+                    class="num-check-card"
+                  >
+                    <div class="num-card-top">
+                      <span class="num-indicator-name">{{ numItem.indicator_name || numItem.parameter }}</span>
+                      <span class="num-consistent-pill" :class="{ 'is-inconsistent': !numItem.is_consistent && numItem.status === 'abnormal' }">
+                        {{ numItem.is_consistent || numItem.status === 'normal' ? '✓ 数值自洽' : '⚠️ 数值存疑' }}
+                      </span>
+                    </div>
+                    <div class="num-values-row">
+                      <div class="val-box">
+                        <span class="val-lbl">正文提及值</span>
+                        <span class="val-txt">{{ numItem.mentioned_value || numItem.extracted_value || '—' }}</span>
+                      </div>
+                      <div class="val-box">
+                        <span class="val-lbl">底稿参考值</span>
+                        <span class="val-txt">{{ numItem.reference_value || '—' }}</span>
+                      </div>
+                    </div>
+                    <div v-if="numItem.notes || numItem.note" class="num-notes-box">
+                      {{ numItem.notes || numItem.note }}
+                    </div>
+                  </div>
+                  <div v-if="allNumericalChecks.length === 0" class="empty-diag-state">
+                    <div class="empty-icon">🔢</div>
+                    <div class="empty-title">暂无数值校核数据</div>
+                    <div class="empty-desc">执行全书审阅后，系统将自动比对全书核心经济技术指标与投资估算数值。</div>
+                  </div>
+                </div>
+
+                <!-- 3. 缺项排查列表 -->
+                <div v-if="diagnosticTab === 'gaps'" class="diag-section-list">
+                  <div
+                    v-for="(gap, idx) in allDataGaps"
+                    :key="idx"
+                    class="data-gap-card"
+                  >
+                    <div class="gap-top">
+                      <span class="gap-icon">🧩</span>
+                      <span class="gap-title">{{ typeof gap === 'string' ? gap : gap.gap }}</span>
+                    </div>
+                    <div v-if="gap.chapterTitle" class="gap-ch-tag">
+                      第 {{ gap.chapterSeq }} 章：{{ gap.chapterTitle }}
+                    </div>
+                  </div>
+                  <div v-if="allDataGaps.length === 0" class="empty-diag-state">
+                    <div class="empty-icon">🧩</div>
+                    <div class="empty-title">暂无缺项提示</div>
+                    <div class="empty-desc">全书各章节编制要素完整，未发现重大缺项。</div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <button class="btn btn-primary btn-lg" @click="projectStore.setStep(5)">
-            下一步：成果导出 &rarr;
-          </button>
-        </footer>
+        </transition>
+
+        <!-- ═════════════════════════════════════════════════════════ -->
+        <!-- 参考资料来源抽屉 (Drawer) -->
+        <!-- ═════════════════════════════════════════════════════════ -->
+        <transition name="drawer-fade">
+          <div v-if="showRefDrawer" class="ref-drawer-overlay" @click="showRefDrawer = false">
+            <div class="ref-drawer-panel" @click.stop>
+              <div class="drawer-header">
+                <div class="drawer-title-box">
+                  <h4>📚 本章参考资料来源台账</h4>
+                  <span class="drawer-sub">第 {{ currentChapter?.seq }} 章：{{ currentChapter?.title }}</span>
+                </div>
+                <button class="drawer-close-btn" @click="showRefDrawer = false">✕</button>
+              </div>
+
+              <!-- 三源分类统计卡片组 -->
+              <div class="drawer-summary-grid">
+                <div class="summary-stat-card type-material">
+                  <div class="stat-card-header">
+                    <span class="stat-icon">📄</span>
+                    <span class="stat-label">项目底稿</span>
+                  </div>
+                  <div class="stat-card-count">{{ refSummary.material.count }} 条 ({{ refSummary.material.citations }} 次)</div>
+                </div>
+
+                <div class="summary-stat-card type-standard">
+                  <div class="stat-card-header">
+                    <span class="stat-icon">🏛️</span>
+                    <span class="stat-label">行业规程</span>
+                  </div>
+                  <div class="stat-card-count">{{ refSummary.standard.count }} 条 ({{ refSummary.standard.citations }} 次)</div>
+                </div>
+
+                <div class="summary-stat-card type-web">
+                  <div class="stat-card-header">
+                    <span class="stat-icon">🌐</span>
+                    <span class="stat-label">权威联网</span>
+                  </div>
+                  <div class="stat-card-count">{{ refSummary.web.count }} 条 ({{ refSummary.web.citations }} 次)</div>
+                </div>
+              </div>
+
+              <!-- 分类筛选器 Tab -->
+              <div class="ref-filter-tabs">
+                <button
+                  class="filter-tab-btn"
+                  :class="{ active: refFilterType === 'all' }"
+                  @click="refFilterType = 'all'"
+                >
+                  全部 ({{ currentChapterReferences.length }})
+                </button>
+                <button
+                  class="filter-tab-btn"
+                  :class="{ active: refFilterType === 'material' }"
+                  @click="refFilterType = 'material'"
+                >
+                  📄 项目底稿 ({{ refSummary.material.count }})
+                </button>
+                <button
+                  class="filter-tab-btn"
+                  :class="{ active: refFilterType === 'standard' }"
+                  @click="refFilterType = 'standard'"
+                >
+                  🏛️ 规程标准 ({{ refSummary.standard.count }})
+                </button>
+                <button
+                  class="filter-tab-btn"
+                  :class="{ active: refFilterType === 'web' }"
+                  @click="refFilterType = 'web'"
+                >
+                  🌐 权威联网 ({{ refSummary.web.count }})
+                </button>
+              </div>
+
+              <!-- 资料卡片滚动列表 -->
+              <div class="drawer-body-scrollable">
+                <div
+                  v-for="(refItem, idx) in filteredChapterReferences"
+                  :key="idx"
+                  class="ref-card-item"
+                  :class="`type-${refItem.type}`"
+                  :data-ref-title="refItem.title"
+                >
+                  <div class="ref-card-header">
+                    <div class="ref-type-badge">
+                      <span class="type-icon">{{ refItem.type === 'material' ? '📄' : refItem.type === 'standard' ? '🏛️' : '🌐' }}</span>
+                      <span class="type-name">{{ refItem.type === 'material' ? '项目底稿' : refItem.type === 'standard' ? '规程标准' : '政务联网' }}</span>
+                    </div>
+                    <div class="ref-count-badge">引用 {{ refItem.count }} 次</div>
+                  </div>
+
+                  <div class="ref-title-text">{{ refItem.title }}</div>
+
+                  <div class="ref-card-actions">
+                    <button class="btn btn-outline btn-xs" @click="locateRefInCanvas(refItem.title)">
+                      📍 在正文中定位
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="filteredChapterReferences.length === 0" class="drawer-empty">
+                  <div class="empty-icon">📚</div>
+                  <div class="empty-title">本章节暂未提取到有效引用来源</div>
+                  <p class="empty-desc">
+                    您可在正文中嵌入 <code>【源:文件名.docx】</code>、<code>【标:规范名】</code> 或 <code>【网:信息源】</code> 标记数据出处，系统将在此自动汇总与联动。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
       </main>
     </div>
 
-    <!-- ═════════════════════════════════════════════════════════ -->
-    <!-- 全高右侧抽屉 1: 📋 专家诊断报告 (Slide-over Drawer, 540px) -->
-    <!-- ═════════════════════════════════════════════════════════ -->
-    <transition name="slide-drawer">
-      <div v-if="showDiagnosticDrawer" class="drawer-overlay" @click="showDiagnosticDrawer = false">
-        <aside class="slide-drawer-panel" @click.stop>
-          <div class="drawer-header">
-            <div class="drawer-title-area">
-              <div class="drawer-title-row">
-                <h3>📋 专家诊断报告总台账</h3>
-                <span
-                  class="drawer-health-badge"
-                  :class="{
-                    'badge-pass': healthStatus === '达标',
-                    'badge-warn': healthStatus === '待完善',
-                    'badge-danger': healthStatus === '存在重大缺陷',
-                  }"
-                >
-                  {{ healthStatus }}
-                </span>
-              </div>
-              <span class="drawer-subtitle">
-                依据国家发改委与行业工程编制规程要求进行全维体检
-              </span>
-            </div>
-            <button class="drawer-close-btn" @click="showDiagnosticDrawer = false">✕</button>
-          </div>
-
-          <!-- 诊断报告综述卡片 -->
-          <div class="drawer-summary-card">
-            <div class="summary-header">
-              <span class="summary-tag">💡 总体评估结论</span>
-              <span class="summary-rate">达标度 <strong>{{ complianceRate }}%</strong></span>
-            </div>
-            <p class="summary-content">
-              {{
-                projectStore.fullBookReview?.summary ||
-                "全书共 " +
-                  totalChapters +
-                  " 章。暂未运行全书专家审阅，点击下方按钮可一键生成全维度合规与数据自洽诊断报告。"
-              }}
-            </p>
-            <div class="summary-actions">
-              <button
-                class="btn btn-primary btn-sm btn-block"
-                :disabled="projectStore.batchReviewing"
-                @click="handleRunFullBookReview(true)"
-                title="重新运行全书审阅（覆盖所有章节）"
-              >
-                🚀 重新运行全书审阅
-              </button>
-              <button
-                class="btn btn-warning btn-sm btn-block"
-                :disabled="projectStore.revisingSeq !== null || completedChaptersCount === 0"
-                @click="handleDirectRevision(activeChapterSeq || 1)"
-                title="代入当前选定章节的专家诊断建议直接触发就地修订"
-              >
-                ⚡ 代入本章建议并一键修订
-              </button>
-            </div>
-          </div>
-
-          <!-- 抽屉子标签页切换 -->
-          <div class="drawer-subtabs-nav">
-            <button
-              class="subtab-btn"
-              :class="{ active: diagnosticTab === 'issues' }"
-              @click="diagnosticTab = 'issues'"
-            >
-              ⚠️ 问题清单 ({{ allIssues.length }})
-            </button>
-            <button
-              class="subtab-btn"
-              :class="{ active: diagnosticTab === 'numerical' }"
-              @click="diagnosticTab = 'numerical'"
-            >
-              📐 数值核验 ({{ allNumericalChecks.length }})
-            </button>
-            <button
-              class="subtab-btn"
-              :class="{ active: diagnosticTab === 'gaps' }"
-              @click="diagnosticTab = 'gaps'"
-            >
-              📑 缺失资料 ({{ allDataGaps.length }})
-            </button>
-            <button
-              class="subtab-btn"
-              :class="{ active: diagnosticTab === 'evals' }"
-              @click="diagnosticTab = 'evals'"
-            >
-              📊 各章评价 ({{ totalChapters }})
-            </button>
-            <button
-              class="subtab-btn"
-              :class="{ active: diagnosticTab === 'suggestions' }"
-              @click="diagnosticTab = 'suggestions'"
-            >
-              💡 综合建议
-            </button>
-          </div>
-
-          <!-- 抽屉滚动内容区 -->
-          <div class="drawer-scroll-body">
-            <!-- 1. 问题清单 -->
-            <div v-if="diagnosticTab === 'issues'" class="tab-pane issues-pane">
-              <div v-if="allIssues.length > 0" class="issues-list">
-                <div
-                  v-for="(issue, idx) in allIssues"
-                  :key="idx"
-                  :id="`issue-card-${issue.id || ('idx-' + idx)}`"
-                  :data-issue-card-id="issue.id"
-                  :data-chapter-seq="issue.chapterSeq"
-                  class="issue-card"
-                  :class="`severity-${issue.severity || 'warning'}`"
-                >
-                  <div class="issue-card-top">
-                    <span class="severity-pill">{{
-                      issue.severity === 'danger' || issue.severity === 'high'
-                        ? '🔴 高风险'
-                        : issue.severity === 'warning'
-                        ? '🟡 警告'
-                        : '🔵 优化提示'
-                    }}</span>
-                    <span v-if="issue.category" class="category-pill">{{ issue.category }}</span>
-                    <span class="location-pill">{{ issue.location || '全书' }}</span>
-                  </div>
-
-                  <div class="issue-message-text">
-                    {{ issue.message }}
-                  </div>
-
-                  <div v-if="issue.suggestion" class="issue-suggestion-box">
-                    <strong>专家建议：</strong>{{ issue.suggestion }}
-                  </div>
-
-                  <div class="issue-actions-row">
-                    <button
-                      class="btn-text-link"
-                      @click="locateIssueInCanvas(issue)"
-                    >
-                      🎯 点击定位正文段落 &rarr;
-                    </button>
-                    <button
-                      class="btn-text-link link-primary"
-                      :disabled="projectStore.revisingSeq !== null"
-                      @click="handleDirectRevision(issue.chapterSeq || activeChapterSeq || 1, issue.suggestion || issue.message)"
-                    >
-                      ⚡ 代入建议并一键修订
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div v-else class="drawer-empty-state">
-                <span class="empty-icon">🎉</span>
-                <p class="empty-title">全书未发现合规与数据自洽缺陷</p>
-                <p class="empty-desc">各项工程论述、技术参数与发改委编制规程吻合良好。</p>
-              </div>
-            </div>
-
-            <!-- 2. 跨章数值核验表 -->
-            <div v-if="diagnosticTab === 'numerical'" class="tab-pane numerical-pane">
-              <div v-if="allNumericalChecks.length > 0" class="numerical-table-wrapper">
-                <table class="drawer-data-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 100px;">参数/指标</th>
-                      <th>提取数值</th>
-                      <th>核验结论</th>
-                      <th>跨章说明</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(nc, idx) in allNumericalChecks" :key="idx">
-                      <td><strong>{{ nc.parameter }}</strong></td>
-                      <td><code>{{ nc.extracted_value }}</code></td>
-                      <td>
-                        <span
-                          class="status-pill"
-                          :class="nc.status === 'normal' ? 'pill-success' : 'pill-warning'"
-                        >
-                          {{ nc.status === 'normal' ? '✅ 自洽' : '⚠️ 需核验' }}
-                        </span>
-                      </td>
-                      <td class="cell-note">{{ nc.note || '-' }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div v-else class="drawer-empty-state">
-                <span class="empty-icon">📏</span>
-                <p class="empty-title">暂无数值核验数据</p>
-                <p class="empty-desc">请点击上方「重新运行全书审阅」自动提取并勾稽全书数值。</p>
-              </div>
-            </div>
-
-            <!-- 3. 缺失资料清单 -->
-            <div v-if="diagnosticTab === 'gaps'" class="tab-pane gaps-pane">
-              <div v-if="allDataGaps.length > 0" class="gaps-list">
-                <div v-for="(gap, idx) in allDataGaps" :key="idx" class="gap-card">
-                  <div class="gap-top">
-                    <span class="gap-icon">📄</span>
-                    <strong class="gap-title">{{ gap.gap }}</strong>
-                  </div>
-                  <div class="gap-meta">
-                    <span>关联章节：{{ gap.chapterTitle || `第 ${gap.chapterSeq} 章` }}</span>
-                  </div>
-                  <div class="gap-action">
-                    <button
-                      class="btn btn-outline btn-xs"
-                      :disabled="projectStore.revisingSeq !== null"
-                      @click="handleDirectRevision(gap.chapterSeq || activeChapterSeq || 1, `依据规程要求，在正文中补充说明【${gap.gap}】的前置审批与支撑依据。`)"
-                    >
-                      ⚡ 代入建议并一键修订
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div v-else class="drawer-empty-state">
-                <span class="empty-icon">📁</span>
-                <p class="empty-title">全书前置要件与底稿支撑完整</p>
-                <p class="empty-desc">未发现缺失的关键审批批复与附表资料。</p>
-              </div>
-            </div>
-
-            <!-- 4. 各章评价 -->
-            <div v-if="diagnosticTab === 'evals'" class="tab-pane evals-pane">
-              <div class="chapter-evals-grid">
-                <div
-                  v-for="ch in projectStore.outlineChapters"
-                  :key="ch.seq"
-                  class="eval-card"
-                  @click="scrollToChapter(ch.seq)"
-                >
-                  <div class="eval-card-header">
-                    <span class="eval-seq">第 {{ ch.seq }} 章</span>
-                    <h5 class="eval-title">{{ ch.title }}</h5>
-                    <span
-                      class="eval-status"
-                      :class="`status-${projectStore.chapterReviews[ch.seq]?.status || 'idle'}`"
-                    >
-                      {{ projectStore.chapterReviews[ch.seq]?.status || '未审阅' }}
-                    </span>
-                  </div>
-                  <div class="eval-card-body">
-                    <p class="eval-summary">
-                      {{ projectStore.chapterReviews[ch.seq]?.summary || '暂无单章诊断小结' }}
-                    </p>
-                  </div>
-                  <div class="eval-card-footer">
-                    <span>字数：{{ countContentChars(projectStore.chapters[ch.seq] || '') }} (正文)</span>
-                    <span>问题：{{ chapterIssuesCount[ch.seq] || 0 }} 处</span>
-                    <button
-                      class="btn btn-outline btn-xs"
-                      @click.stop="handleRunSingleReview(ch.seq)"
-                      title="针对本章单独运行专家体检"
-                    >
-                      🔍 重新审阅
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 5. 综合建议 -->
-            <div v-if="diagnosticTab === 'suggestions'" class="tab-pane suggestions-pane">
-              <div class="suggestions-list">
-                <div
-                  v-for="(sugg, idx) in projectStore.fullBookReview?.general_suggestions || [
-                    '1. 严格对照国家发改委与行业工程编制规程，核对前后章节投资估算与建设规模数据自洽性；',
-                    '2. 补充完善缺失的附表、附图与前置审批支撑性底稿；',
-                    '3. 针对高亮批注与数据疑点小节进行专项润色与 AI 修订。',
-                  ]"
-                  :key="idx"
-                  class="sugg-card"
-                >
-                  <span class="sugg-bullet">📌</span>
-                  <p class="sugg-text">{{ sugg }}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </aside>
-      </div>
-    </transition>
-
-    <!-- ═════════════════════════════════════════════════════════ -->
-    <!-- 全高右侧抽屉 2: 📚 全书参考资料 (Slide-over Drawer, 540px) -->
-    <!-- ═════════════════════════════════════════════════════════ -->
-    <transition name="slide-drawer">
-      <div v-if="showRefDrawer" class="drawer-overlay" @click="showRefDrawer = false">
-        <aside class="slide-drawer-panel" @click.stop>
-          <div class="drawer-header">
-            <div class="drawer-title-area">
-              <div class="drawer-title-row">
-                <h3>📚 全书参考资料与行业规程台账</h3>
-              </div>
-              <span class="drawer-subtitle">
-                共命中 {{ allReferences.length }} 份底稿与规程，全书累计引用 {{ totalRefCitations }} 处
-              </span>
-            </div>
-            <button class="drawer-close-btn" @click="showRefDrawer = false">✕</button>
-          </div>
-
-          <!-- 三源分类统计卡片组 -->
-          <div class="drawer-summary-grid">
-            <div class="summary-stat-card type-material">
-              <div class="stat-card-header">
-                <span class="stat-icon">📄</span>
-                <span class="stat-label">项目底稿</span>
-              </div>
-              <div class="stat-card-values">
-                <span class="stat-count"><strong>{{ refSummary.material.count }}</strong> 份</span>
-                <span class="stat-citations">引用 <strong>{{ refSummary.material.citations }}</strong> 处</span>
-              </div>
-            </div>
-            <div class="summary-stat-card type-standard">
-              <div class="stat-card-header">
-                <span class="stat-icon">⚖️</span>
-                <span class="stat-label">国标规程</span>
-              </div>
-              <div class="stat-card-values">
-                <span class="stat-count"><strong>{{ refSummary.standard.count }}</strong> 项</span>
-                <span class="stat-citations">引用 <strong>{{ refSummary.standard.citations }}</strong> 处</span>
-              </div>
-            </div>
-            <div class="summary-stat-card type-web">
-              <div class="stat-card-header">
-                <span class="stat-icon">🌐</span>
-                <span class="stat-label">百度联网</span>
-              </div>
-              <div class="stat-card-values">
-                <span class="stat-count"><strong>{{ refSummary.web.count }}</strong> 条</span>
-                <span class="stat-citations">引用 <strong>{{ refSummary.web.citations }}</strong> 处</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 资料分类过滤 Tab -->
-          <div class="drawer-subtabs-nav">
-            <button
-              class="subtab-btn"
-              :class="{ active: refFilterType === 'all' }"
-              @click="refFilterType = 'all'"
-            >
-              全部 ({{ allReferences.length }})
-            </button>
-            <button
-              class="subtab-btn"
-              :class="{ active: refFilterType === 'material' }"
-              @click="refFilterType = 'material'"
-            >
-              📄 项目底稿 ({{ refSummary.material.count }})
-            </button>
-            <button
-              class="subtab-btn"
-              :class="{ active: refFilterType === 'standard' }"
-              @click="refFilterType = 'standard'"
-            >
-              ⚖️ 国标规程 ({{ refSummary.standard.count }})
-            </button>
-            <button
-              class="subtab-btn"
-              :class="{ active: refFilterType === 'web' }"
-              @click="refFilterType = 'web'"
-            >
-              🌐 百度联网 ({{ refSummary.web.count }})
-            </button>
-          </div>
-
-          <div class="drawer-scroll-body">
-            <div v-if="filteredReferences.length > 0" class="ref-items-list">
-              <div
-                v-for="(refItem, rIdx) in filteredReferences"
-                :key="rIdx"
-                class="ref-card-item"
-                :data-ref-title="refItem.title"
-                :data-ref-type="refItem.type"
-              >
-                <div class="ref-card-top">
-                  <span class="ref-type-badge" :class="`type-${refItem.type}`">
-                    {{ refItem.typeLabel }}
-                  </span>
-                  <div class="ref-card-top-right">
-                    <span class="ref-count-badge">引用 {{ refItem.count }} 处</span>
-                    <button
-                      class="btn-locate-ref"
-                      title="在正文画布中定位并呼吸高亮首个引用位置"
-                      @click="locateRefInCanvas(refItem.title)"
-                    >
-                      🎯 定位正文出处
-                    </button>
-                  </div>
-                </div>
-                <div class="ref-card-title">{{ refItem.title }}</div>
-                <div v-if="refItem.type === 'web'" class="ref-card-link-box">
-                  <a
-                    v-if="refItem.url"
-                    :href="refItem.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="ref-external-link"
-                  >
-                    🔗 访问原网页出处 ↗
-                  </a>
-                  <span v-else class="ref-archive-note">
-                    🌐 百度检索在线实时快照已归档入库
-                  </span>
-                </div>
-                <div class="ref-card-raw"><code>{{ refItem.raw }}</code></div>
-              </div>
-            </div>
-
-            <div v-else class="drawer-empty-state">
-              <span class="empty-icon">📂</span>
-              <p class="empty-title">
-                {{
-                  refFilterType === 'all'
-                    ? '全书暂无引用的参考资料或规程'
-                    : refFilterType === 'material'
-                    ? '全书暂无项目底稿资料引用'
-                    : refFilterType === 'standard'
-                    ? '全书暂无行业国标规程引用'
-                    : '全书暂无百度联网检索引用'
-                }}
-              </p>
-              <p class="empty-desc">
-                您可在各章正文中嵌入 <code>【源:文件名.docx】</code>、<code>【标:规程名】</code> 或 <code>【网:信息源】</code>，系统将在此自动汇总与联动。
-              </p>
-            </div>
-          </div>
-        </aside>
-      </div>
-    </transition>
+    <!-- 底部流转按钮 -->
+    <div class="bottom-nav">
+      <button class="btn btn-secondary btn-lg" @click="projectStore.setStep(3)">
+        &larr; 上一步：报告写作
+      </button>
+      <button
+        class="btn btn-primary btn-lg"
+        :disabled="completedChaptersCount === 0"
+        @click="projectStore.setStep(5)"
+      >
+        下一步：导出报告 &rarr;
+      </button>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .step4-container {
-  height: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px 24px 48px;
   display: flex;
   flex-direction: column;
-  padding: 14px 18px;
-  background: #f8fafc;
-  box-sizing: border-box;
-  overflow: hidden;
-  gap: 12px;
-}
-
-.alert-banner {
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-}
-.alert-banner.success {
-  background: #dcfce7;
-  color: #15803d;
-  border: 1px solid #bbf7d0;
-}
-.alert-banner.error {
-  background: #fee2e2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
-}
-.alert-banner.info {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid #dbeafe;
-}
-
-.card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-/* ═════════════════════════════════════════════════════════ */
-/* 顶部工作台状态与全局操作区 (Header Toolbar) */
-/* ═════════════════════════════════════════════════════════ */
-.review-workbench-header {
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.header-left-meta {
-  display: flex;
-  align-items: center;
   gap: 16px;
 }
 
-.project-title-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.alert-banner {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.4;
 }
-.proj-badge {
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  border: 1px solid #e2e8f0;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.alert-banner.success {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
 }
-.workbench-main-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  color: #0f172a;
+.alert-banner.error {
+  background: #ffebee;
+  color: #c62828;
+  border: 1px solid #ffcdd2;
+}
+.alert-banner.info {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
 }
 
-.health-badges-group {
+/* 顶部状态栏 */
+.step4-header {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.header-left-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.title-with-badge {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+.title-with-badge h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.proj-name-badge {
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+.report-type-badge {
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.health-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .health-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 3px 10px;
+  border-radius: 16px;
   font-size: 12px;
   font-weight: 600;
   border: 1px solid transparent;
 }
 .health-badge.health-passed {
-  background: #ecfdf5;
-  color: #047857;
-  border-color: #a7f3d0;
+  background: #dcfce7;
+  color: #166534;
+  border-color: #bbf7d0;
 }
 .health-badge.health-warning {
-  background: #fffbeb;
-  color: #b45309;
-  border-color: #fde68a;
+  background: #fef9c3;
+  color: #854d0e;
+  border-color: #fef08a;
 }
 .health-badge.health-danger {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: #fee2e2;
+  color: #991b1b;
   border-color: #fecaca;
 }
 .health-badge.health-pending {
-  background: #f8fafc;
+  background: #f1f5f9;
   color: #64748b;
   border-color: #e2e8f0;
 }
@@ -2417,81 +1868,35 @@ function copyFullBookMarkdown() {
 .compliance-pct {
   font-size: 11px;
   opacity: 0.85;
-  margin-left: 2px;
 }
 
 .meta-stat-pills {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .meta-pill {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: 6px;
+  font-size: 12px;
   color: #475569;
 }
 .meta-pill strong {
   color: #0f172a;
 }
-.meta-pill.meta-pill-unwritten {
-  color: #64748b;
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-}
 
-/* 顶部中间 Tab */
-.header-center-tabs {
-  display: flex;
-  justify-content: center;
-}
-.view-mode-tabs {
-  display: flex;
-  background: #f1f5f9;
-  padding: 3px;
-  border-radius: 8px;
-  gap: 3px;
-}
-.tab-btn {
-  border: none;
-  background: transparent;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #64748b;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.15s ease;
-}
-.tab-btn:hover {
-  color: #0f172a;
-}
-.tab-btn.active {
-  background: #fff;
-  color: #2563eb;
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-.active-diff-indicator {
-  color: #ef4444;
-  font-size: 10px;
-}
-
-/* 顶部右侧按钮 */
 .header-right-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
+
 .btn-review-hero {
+  padding: 8px 18px;
   font-weight: 600;
-  font-size: 12px;
-  padding: 6px 14px;
+  font-size: 13px;
 }
 
 .drawer-trigger-group {
@@ -2500,11 +1905,11 @@ function copyFullBookMarkdown() {
   gap: 6px;
 }
 .drawer-btn {
-  font-size: 12px;
-  padding: 5px 10px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-size: 12px;
+  padding: 6px 12px;
 }
 .drawer-btn.active {
   background: #eff6ff;
@@ -2512,29 +1917,28 @@ function copyFullBookMarkdown() {
   color: #1d4ed8;
 }
 .count-badge {
-  background: #f1f5f9;
+  background: #e2e8f0;
   color: #475569;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
+  font-size: 10.5px;
+  padding: 1px 6px;
   border-radius: 10px;
+  font-weight: 600;
 }
 .count-badge.has-issues {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: #ef4444;
+  color: #fff;
 }
 
-/* ═════════════════════════════════════════════════════════ */
-/* 审阅心跳指示栏 (Heartbeat Bar) */
-/* ═════════════════════════════════════════════════════════ */
-.review-heartbeat-bar {
-  padding: 10px 16px;
-  background: linear-gradient(90deg, #eff6ff 0%, #f0fdf4 100%);
+/* 审阅心跳指示条 */
+.review-heartbeat-bar,
+.revision-heartbeat-bar {
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
   border: 1px solid #bfdbfe;
-  flex-shrink: 0;
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .heartbeat-inner {
   display: flex;
@@ -2545,18 +1949,15 @@ function copyFullBookMarkdown() {
 .hb-left {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
+  gap: 12px;
 }
 .radar-pulse {
-  width: 10px;
-  height: 10px;
-  background: #3b82f6;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
+  background: #3b82f6;
   box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
   animation: pulse-ring 1.5s infinite;
-  flex-shrink: 0;
 }
 @keyframes pulse-ring {
   0% {
@@ -2572,57 +1973,31 @@ function copyFullBookMarkdown() {
     box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
   }
 }
-.hb-title-box {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.hb-main-title strong {
-  font-size: 13px;
+.hb-main-title {
+  font-size: 13.5px;
   color: #1e3a8a;
-  line-height: 1.4;
 }
 .hb-desc {
-  font-size: 11px;
-  color: #3b82f6;
-}
-.hb-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-.btn-stop-review {
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 4px;
-}
-
-/* 审阅实时思考推演窗 */
-.review-thought-stream-wrapper {
+  font-size: 11.5px;
+  color: #475569;
   margin-top: 2px;
 }
+.review-thought-stream-wrapper {
+  margin-top: 4px;
+}
 .review-thought-card {
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  overflow: hidden;
   background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
 }
 .review-thought-header {
+  padding: 8px 12px;
+  background: #f8fafc;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
-  background: #f8fafc;
   cursor: pointer;
-  user-select: none;
-  border-bottom: 1px solid #e2e8f0;
-  transition: background 0.15s;
-}
-.review-thought-header:hover {
-  background: #f1f5f9;
 }
 .review-thought-title {
   display: flex;
@@ -2630,184 +2005,117 @@ function copyFullBookMarkdown() {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #1e293b;
-}
-.review-thought-icon {
-  font-size: 13px;
-}
-.thinking-wave {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: 4px;
-}
-.thinking-wave .dot {
-  width: 4px;
-  height: 4px;
-  background: #3b82f6;
-  border-radius: 50%;
-  animation: wave-jump 1.2s infinite ease-in-out;
-}
-.thinking-wave .dot:nth-child(2) {
-  animation-delay: 0.2s;
-}
-.thinking-wave .dot:nth-child(3) {
-  animation-delay: 0.4s;
-}
-@keyframes wave-jump {
-  0%, 80%, 100% {
-    transform: translateY(0);
-    opacity: 0.4;
-  }
-  40% {
-    transform: translateY(-3px);
-    opacity: 1;
-  }
+  color: #334155;
 }
 .review-thought-toggle-btn {
-  background: none;
+  background: transparent;
   border: none;
   font-size: 11px;
-  color: #64748b;
-  font-weight: 500;
+  color: #3b82f6;
   cursor: pointer;
 }
 .review-thought-body {
-  padding: 8px 12px;
-  max-height: 140px;
+  padding: 10px 14px;
+  max-height: 180px;
   overflow-y: auto;
-  background: #ffffff;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: #334155;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #fdfdfd;
 }
 .review-thought-body pre {
   margin: 0;
   white-space: pre-wrap;
-  word-break: break-word;
+  font-family: inherit;
+  color: #334155;
 }
 .review-thought-placeholder {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: #64748b;
-  font-size: 11.5px;
-}
-.placeholder-spinner {
-  display: inline-block;
-  animation: pulse-icon 1.5s infinite;
-}
-@keyframes pulse-icon {
-  0%, 100% { opacity: 0.6; transform: scale(0.95); }
-  50% { opacity: 1; transform: scale(1.05); }
 }
 
-/* 修订心跳与进度条 (轻量内联) */
-.revision-heartbeat-bar {
-  padding: 10px 16px;
-  background: linear-gradient(90deg, #fffbeb 0%, #fef3c7 100%);
-  border: 1px solid #fde68a;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.revision-heartbeat-bar .radar-pulse {
-  background: #d97706;
-  box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.7);
-  animation: pulse-ring-amber 1.5s infinite;
-}
-@keyframes pulse-ring-amber {
-  0% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.7);
-  }
-  70% {
-    transform: scale(1);
-    box-shadow: 0 0 0 8px rgba(217, 119, 6, 0);
-  }
-  100% {
-    transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(217, 119, 6, 0);
-  }
-}
-.revision-heartbeat-bar .hb-main-title strong {
-  font-size: 13px;
-  color: #92400e;
-  line-height: 1.4;
-}
-.revision-heartbeat-bar .hb-desc {
-  font-size: 11px;
-  color: #b45309;
-}
+/* 修订步进器 */
 .hb-stepper-compact {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
-.hb-stepper-compact .stepper-item {
+.stepper-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: #94a3b8;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #64748b;
 }
-.hb-stepper-compact .stepper-item.active {
-  color: #d97706;
+.stepper-item.completed {
+  color: #16a34a;
   font-weight: 600;
 }
-.hb-stepper-compact .stepper-item.completed {
-  color: #15803d;
+.stepper-item.active {
+  color: #2563eb;
+  font-weight: 600;
 }
-.hb-stepper-compact .stepper-circle {
+.stepper-circle {
   width: 18px;
   height: 18px;
   border-radius: 50%;
+  background: #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 10px;
-  font-weight: 700;
-  background: #e2e8f0;
-  color: #64748b;
 }
-.hb-stepper-compact .stepper-item.active .stepper-circle {
-  background: #f59e0b;
-  color: #fff;
+.stepper-item.completed .stepper-circle {
+  background: #dcfce7;
+  color: #15803d;
 }
-.hb-stepper-compact .stepper-item.completed .stepper-circle {
-  background: #22c55e;
-  color: #fff;
+.stepper-item.active .stepper-circle {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 /* ═════════════════════════════════════════════════════════ */
-/* 主体工作台：双栏满屏布局 */
+/* 主体左右工作台布局 (100% 对齐 Step 3) */
 /* ═════════════════════════════════════════════════════════ */
-.workbench-main-layout {
+.writing-layout {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  gap: 18px;
+  min-height: 680px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   display: flex;
-  gap: 14px;
-  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fafafa;
+}
+
+/* 左侧栏 */
+.sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 165px);
   min-height: 0;
   overflow: hidden;
 }
 
-/* 左侧栏：全书多级标题导航 (宽度调整为 320px) */
-.sidebar-nav-panel {
-  width: 320px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
 .sidebar-header {
-  padding: 14px 16px;
-  border-bottom: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: #f8fafc;
 }
+
 .header-titles {
   display: flex;
   align-items: center;
@@ -2819,6 +2127,7 @@ function copyFullBookMarkdown() {
   font-weight: 600;
   color: #1e293b;
 }
+
 .proj-badge {
   background: #e0e7ff;
   color: #4338ca;
@@ -2831,6 +2140,7 @@ function copyFullBookMarkdown() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .stats-overview {
   display: flex;
   align-items: center;
@@ -2864,7 +2174,7 @@ function copyFullBookMarkdown() {
   background: #e2e8f0;
 }
 
-/* 推荐写作顺序流程胶囊指示 (100% 对齐 Step 3) */
+/* 推荐写作顺序流程胶囊指示 */
 .writing-order-box {
   background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
   border: 1px solid #bfdbfe;
@@ -2915,96 +2225,65 @@ function copyFullBookMarkdown() {
 }
 .order-chip.active {
   background: #3b82f6;
-  color: #ffffff;
   border-color: #2563eb;
+  color: #ffffff;
   font-weight: 600;
 }
-.order-chip.completed:not(.active) {
-  background: #dcfce7;
-  color: #15803d;
-  border-color: #86efac;
-}
-.order-chip.warning:not(.active) {
-  background: #fef3c7;
+.order-chip.warning {
+  border-color: #f59e0b;
   color: #b45309;
-  border-color: #fde68a;
 }
 .flow-arrow {
   font-size: 9px;
   color: #94a3b8;
 }
 
+.global-actions {
+  padding: 10px 18px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #ffffff;
+}
+.btn-block {
+  width: 100%;
+}
+
+/* 目录滚动树 */
 .outline-tree-scrollable {
   flex: 1;
   overflow-y: auto;
-  overflow-x: hidden;
-  padding: 8px 10px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
-}
-.outline-tree-scrollable::-webkit-scrollbar {
-  width: 5px;
-}
-.outline-tree-scrollable::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
-}
-.outline-tree-scrollable::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  gap: 8px;
 }
 
-.empty-outline-tip {
-  padding: 20px;
-  text-align: center;
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-/* 章节树节点：平铺一体化目录树（Flat Unified Tree），无独立卡片盒子 */
 .chapter-tree-node {
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
   transition: all 0.15s ease;
+  overflow: hidden;
+}
+.chapter-tree-node:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 .chapter-tree-node.is-active {
-  background: rgba(59, 130, 246, 0.06);
-}
-.chapter-tree-node.is-unwritten-node {
-  opacity: 0.78;
-}
-.chapter-tree-node.is-unwritten-node:hover,
-.chapter-tree-node.is-active.is-unwritten-node {
-  opacity: 1;
-}
-.chapter-tree-node.is-unwritten-node .ch-title-text {
-  color: #64748b;
-}
-.chapter-tree-node.has-warning {
-  /* 平铺树下保持轻量提示 */
+  border-color: #3b82f6;
+  background: #f8faff;
+  box-shadow: 0 0 0 1px #3b82f6;
 }
 
 .chapter-node-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 7px 8px;
+  padding: 9px 12px;
   cursor: pointer;
   user-select: none;
-  border-radius: 6px;
-  background: transparent;
-  transition: background 0.15s ease;
+  gap: 8px;
 }
-.chapter-node-row:hover {
-  background: #f1f5f9;
-}
-.chapter-tree-node.is-active .chapter-node-row {
-  background: #eff6ff;
-}
+
 .row-left {
   display: flex;
   align-items: center;
@@ -3012,491 +2291,387 @@ function copyFullBookMarkdown() {
   flex: 1;
   min-width: 0;
 }
+
+/* 序号徽标：选中为蓝底圆圈，未选为中性浅灰矩形 */
 .ch-seq-tag {
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 11px;
-  font-weight: 700;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 0 4px;
   flex-shrink: 0;
+  transition: all 0.15s ease;
 }
 .chapter-tree-node.is-active .ch-seq-tag {
   background: #3b82f6;
-  color: #fff;
+  color: #ffffff;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
 }
-.chapter-tree-node.is-completed:not(.is-active) .ch-seq-tag {
-  background: #dcfce7;
-  color: #15803d;
-}
+
 .ch-title-text {
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chapter-tree-node.is-active .ch-title-text {
   font-weight: 600;
-  color: #1e293b;
-  white-space: normal;
-  word-break: break-word;
-  line-height: 1.35;
+  color: #1d4ed8;
 }
 
 .row-right {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
+
+/* 状态药丸 */
 .status-pill {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 10px;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 12px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  white-space: nowrap;
-}
-.status-pill.idle {
-  background: #f1f5f9;
-  color: #64748b;
-}
-.status-pill.writing {
-  background: #fef3c7;
-  color: #b45309;
+  gap: 4px;
 }
 .status-pill.completed {
   background: #dcfce7;
   color: #15803d;
 }
-.status-pill.error {
-  background: #fee2e2;
-  color: #b91c1c;
+.status-pill.idle {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+.status-pill.reviewing {
+  background: #fef3c7;
+  color: #b45309;
 }
 
-.badge-unwritten {
-  font-size: 10px;
-  font-weight: 600;
-  color: #64748b;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+/* 预警药丸 */
+.warning-badge-pill {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  font-size: 11px;
+  font-weight: 700;
   padding: 1px 6px;
   border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
-.warning-badge-pill {
-  font-size: 10px;
-  font-weight: 700;
-  color: #b45309;
-  background: #fef3c7;
-  border: 1px solid #fde68a;
-  padding: 1px 5px;
-  border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  white-space: nowrap;
+.warning-badge-pill:hover {
+  background: #fde68a;
+  transform: scale(1.05);
 }
-.pass-dot {
-  font-size: 11px;
-  color: #10b981;
-  font-weight: 700;
+
+.ch-action-btn {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
+.ch-action-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+.ch-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .collapse-toggle-icon {
   background: transparent;
   border: none;
-  font-size: 9px;
+  font-size: 10px;
   color: #94a3b8;
   cursor: pointer;
   padding: 2px 4px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
 }
 .collapse-toggle-icon:hover {
+  background: #e2e8f0;
   color: #475569;
 }
 
-/* 子标题层级：平铺多级目录，由外层单一全局垂直滚动条滚动 */
+/* 多级子标题列表 */
 .subheadings-subtree {
-  padding: 2px 0 4px 0;
-  background: transparent;
-  border-top: none;
+  background: #f8fafc;
+  border-top: 1px solid #f1f5f9;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 .subheading-item-row {
-  padding: 4px 8px 4px 20px;
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
   cursor: pointer;
   font-size: 11.5px;
-  color: #64748b;
-  border-radius: 4px;
+  color: #475569;
   transition: all 0.12s ease;
 }
 .subheading-item-row:hover {
-  background: #f1f5f9;
+  background: #e2e8f0;
   color: #0f172a;
 }
+.subheading-item-row.is-active-heading {
+  background: #dbeafe;
+  color: #1e40af;
+  font-weight: 600;
+}
+.subheading-item-row.level-2 {
+  padding-left: 8px;
+}
 .subheading-item-row.level-3 {
-  padding-left: 30px;
+  padding-left: 18px;
 }
 .subheading-item-row.level-4 {
-  padding-left: 40px;
+  padding-left: 28px;
 }
-.subheading-item-row.is-active-heading {
-  color: #2563eb;
-  font-weight: 600;
-  background: #eff6ff;
+.sub-bullet {
+  font-size: 10px;
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 .sub-text {
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
 }
 .sub-issue-badge {
-  font-size: 9.5px;
-  font-weight: 700;
-  color: #b45309;
-  background: #fef3c7;
-  border: 1px solid #fde68a;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 10px;
   padding: 0 4px;
   border-radius: 8px;
-  margin-left: auto;
-  flex-shrink: 0;
-  white-space: nowrap;
+  font-weight: 700;
+}
+
+.empty-outline-tip {
+  text-align: center;
+  padding: 30px 10px;
+  color: #94a3b8;
+  font-size: 13px;
 }
 
 /* ═════════════════════════════════════════════════════════ */
-/* 右侧主画布 (100% 满屏可视高度) */
+/* 右侧主工作画布 (与 Step 3 100% 对等) */
 /* ═════════════════════════════════════════════════════════ */
-.main-canvas-panel {
-  flex: 1;
+.editor-panel {
   display: flex;
   flex-direction: column;
+  height: calc(100vh - 165px);
+  min-height: 0;
   overflow: hidden;
-  min-width: 0;
 }
 
-/* 模式 1: 排版正文视图 */
-.canvas-rich-view {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.rich-view-header-bar {
-  padding: 8px 16px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
+.editor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
 }
-.spec-label-box {
+
+.editor-title-area {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.title-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.spec-tag {
-  font-size: 12px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.spec-sub {
-  font-size: 11px;
-  color: #64748b;
-}
-
-.full-book-scroll-canvas {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 36px;
-  background: #ffffff;
-}
-
-.full-book-chapter-block {
-  margin-bottom: 28px;
-  scroll-margin-top: 16px;
-}
-
-/* 全书连贯预览标准化章标题栏 */
-.chapter-block-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  margin-bottom: 12px;
-}
-.chapter-block-header .header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.chapter-block-header .ch-badge {
+.seq-tag {
   background: #3b82f6;
-  color: #ffffff;
+  color: #fff;
   font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 12px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
   flex-shrink: 0;
 }
-.chapter-block-header .ch-title {
+.active-ch-title {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #1e293b;
-}
-.chapter-block-header .ch-word-tag {
-  font-size: 11.5px;
-  color: #64748b;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 500;
-}
-.chapter-block-header .ch-word-tag.tag-unwritten {
-  color: #94a3b8;
-  background: #f8fafc;
-  border: 1px dashed #cbd5e1;
-  font-style: normal;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* 10.5pt 工程咨询出版级排版规范 */
-.spec-typography {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei", sans-serif;
-  font-size: 14px;
-  line-height: 1.8;
-  color: #1e293b;
+.editor-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
 }
-.spec-typography h1,
-.spec-typography h2,
-.spec-typography h3,
-.spec-typography h4 {
+.editor-meta-row strong {
   color: #0f172a;
-  margin-top: 20px;
-  margin-bottom: 10px;
-  font-weight: 700;
 }
-.spec-typography h1 {
-  font-size: 20px;
-  border-bottom: 2px solid #e2e8f0;
-  padding-bottom: 6px;
+.meta-item-divider {
+  color: #cbd5e1;
 }
-.spec-typography h2 {
-  font-size: 17px;
+.status-text.stat-passed {
+  color: #16a34a;
+  font-weight: 600;
 }
-.spec-typography h3 {
-  font-size: 15px;
+.status-text.stat-warning {
+  color: #d97706;
+  font-weight: 600;
 }
-.spec-typography h4 {
-  font-size: 14px;
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.spec-typography p {
-  margin-bottom: 12px;
-  text-indent: 2em;
+
+.view-mode-tabs {
+  display: flex;
+  background: #f1f5f9;
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
 }
-.spec-typography table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 18px 0;
-  font-size: 10.5pt;
-  border-top: 2px solid #334155;
-  border-bottom: 2px solid #334155;
-  border-left: none;
-  border-right: none;
-}
-.spec-typography th,
-.spec-typography td {
+.tab-btn {
+  background: transparent;
   border: none;
-  padding: 8px 12px;
-  text-align: left;
-  font-size: 10.5pt;
-  line-height: 1.5;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
-.spec-typography th {
+.tab-btn.active {
+  background: #ffffff;
+  color: #2563eb;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.active-diff-indicator {
+  color: #22c55e;
+  font-size: 10px;
+}
+
+.editor-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 排版正文画布 */
+.writing-canvas {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.canvas-spec-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 18px;
   background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 11.5px;
+  color: #64748b;
+}
+.spec-tag {
   font-weight: 600;
   color: #1e293b;
-  border-bottom: 1px solid #475569;
-}
-.spec-typography tr:hover {
-  background: #f8fafc;
 }
 
 .rich-rendered-editor {
-  min-height: 120px;
-  padding: 10px 4px;
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 36px;
   outline: none;
-  border-radius: 6px;
-}
-.rich-rendered-editor:focus {
-  background: #fafafa;
-}
-.rich-rendered-editor:empty:before {
-  content: attr(data-placeholder);
-  color: #94a3b8;
-  font-style: italic;
-  font-size: 13px;
-  display: block;
-  padding: 12px 14px;
-  background: #f8fafc;
-  border: 1px dashed #cbd5e1;
-  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #1e293b;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
 
-/* 未编写章节占位引导卡片 */
 .unwritten-chapter-placeholder {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding: 60px 20px;
   text-align: center;
-  padding: 32px 24px;
-  background: #f8fafc;
-  border: 1.5px dashed #cbd5e1;
-  border-radius: 8px;
-  margin: 8px 0;
-  cursor: text;
-  user-select: none;
-  transition: all 0.2s ease;
-}
-.unwritten-chapter-placeholder:hover {
-  background: #f1f5f9;
-  border-color: #94a3b8;
 }
 .unwritten-icon {
-  font-size: 28px;
-  margin-bottom: 10px;
-  line-height: 1;
+  font-size: 36px;
+  margin-bottom: 12px;
 }
 .unwritten-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: #334155;
   margin-bottom: 8px;
 }
 .unwritten-desc {
   font-size: 13px;
-  color: #64748b;
-  max-width: 580px;
-  line-height: 1.6;
+  color: #94a3b8;
+  max-width: 480px;
 }
 
-/* Step 4 正文审阅问题持久化高亮与批注标记 */
-.review-issue-highlight {
-  cursor: pointer;
-  padding: 1px 4px;
-  border-radius: 3px;
-  transition: all 0.2s ease;
-  font-weight: 500;
-  display: inline;
-}
-.review-issue-highlight.severity-warning {
-  background: #fef08a;
-  border-bottom: 2px wavy #eab308;
-  color: #713f12;
-}
-.review-issue-highlight.severity-warning:hover {
-  background: #fde047;
-}
-.review-issue-highlight.severity-error,
-.review-issue-highlight.severity-danger,
-.review-issue-highlight.severity-high {
-  background: #fecaca;
-  border-bottom: 2px wavy #ef4444;
-  color: #991b1b;
-}
-.review-issue-highlight.severity-error:hover,
-.review-issue-highlight.severity-danger:hover,
-.review-issue-highlight.severity-high:hover {
-  background: #fca5a5;
-}
-.review-issue-highlight.severity-suggestion,
-.review-issue-highlight.severity-info {
-  background: #e0e7ff;
-  border-bottom: 2px wavy #6366f1;
-  color: #3730a3;
-}
-.review-issue-highlight.severity-suggestion:hover,
-.review-issue-highlight.severity-info:hover {
-  background: #c7d2fe;
-}
-.issue-card.issue-card-focused {
-  outline: 2px solid #3b82f6;
-  box-shadow: 0 0 14px rgba(59, 130, 246, 0.45);
-  transform: scale(1.01);
-  transition: all 0.2s ease;
-}
-
-/* 呼吸高亮动画 */
-.heading-anchor-pulse {
-  animation: anchor-pulse 1.5s ease-out;
-}
-@keyframes anchor-pulse {
-  0% {
-    background-color: #fef08a;
-    box-shadow: 0 0 0 4px #fde047;
-  }
-  100% {
-    background-color: transparent;
-    box-shadow: 0 0 0 0 transparent;
-  }
-}
-
-/* 审阅问题精准定位句子级呼吸波纹高亮 (持续 2.5s) */
-.issue-highlight-pulse {
-  animation: issuePulse 2.5s ease-out forwards;
-  border-radius: 4px;
-}
-@keyframes issuePulse {
-  0% {
-    background-color: rgba(251, 191, 36, 0.6);
-    box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.4);
-  }
-  30% {
-    background-color: rgba(251, 191, 36, 0.45);
-    box-shadow: 0 0 0 8px rgba(251, 191, 36, 0.25);
-  }
-  65% {
-    background-color: rgba(251, 191, 36, 0.25);
-    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.15);
-  }
-  100% {
-    background-color: transparent;
-    box-shadow: 0 0 0 0 transparent;
-  }
-}
-
-
-
-/* 模式 2: Diff 全宽单栏内联视图 */
+/* ═════════════════════════════════════════════════════════ */
+/* Diff 差异对比视图 */
+/* ═════════════════════════════════════════════════════════ */
 .canvas-diff-view {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
+  background: #ffffff;
 }
+
 .diff-sticky-header {
-  padding: 10px 16px;
+  padding: 10px 18px;
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  flex-shrink: 0;
-}
-.diff-header-info {
-  display: flex;
-  align-items: center;
+  gap: 16px;
 }
 .diff-title-row {
   display: flex;
@@ -3505,36 +2680,35 @@ function copyFullBookMarkdown() {
 }
 .diff-main-badge {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   color: #0f172a;
 }
 .diff-ch-tag {
-  background: #eff6ff;
-  color: #2563eb;
+  background: #e0e7ff;
+  color: #3730a3;
   font-size: 11px;
   font-weight: 600;
-  padding: 2px 6px;
+  padding: 1px 6px;
   border-radius: 4px;
 }
-
 .diff-header-stats {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 .diff-stat-pill {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 8px;
+  font-size: 11.5px;
+  padding: 2px 8px;
   border-radius: 4px;
+  font-weight: 600;
 }
 .pill-added {
   background: #dcfce7;
-  color: #15803d;
+  color: #166534;
 }
 .pill-removed {
   background: #fee2e2;
-  color: #b91c1c;
+  color: #991b1b;
 }
 .pill-unchanged {
   background: #f1f5f9;
@@ -3544,259 +2718,151 @@ function copyFullBookMarkdown() {
 .diff-header-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .btn-danger-text {
-  color: #b91c1c;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+.btn-danger-text:hover {
+  background: #fee2e2;
 }
 
-.diff-inline-scrollable {
+.diff-body-container {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 24px;
-  background: #fff;
-}
-.diff-lines-wrapper {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  padding: 16px;
+  font-family: monospace;
   font-size: 13px;
-  line-height: 1.6;
+}
+.diff-empty-state {
+  text-align: center;
+  padding: 60px 20px;
+}
+.diff-empty-state .empty-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+.diff-empty-state .empty-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+.diff-empty-state .empty-desc {
+  font-size: 13px;
+  color: #94a3b8;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.diff-lines-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
 }
 .diff-line-row {
   display: flex;
   align-items: flex-start;
   min-height: 22px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.4);
+  line-height: 22px;
 }
-.diff-line-row.diff-line-added {
-  background: #f0fdf4;
+.diff-line-row.diff-type-added {
+  background: #ecfdf5;
+  color: #065f46;
 }
-.diff-line-row.diff-line-removed {
+.diff-line-row.diff-type-removed {
   background: #fef2f2;
-}
-
-.diff-line-num {
-  width: 44px;
-  padding: 2px 6px;
-  text-align: right;
-  font-size: 11px;
-  color: #94a3b8;
-  user-select: none;
-}
-.diff-line-sign {
-  width: 20px;
-  text-align: center;
-  font-weight: 700;
-  user-select: none;
-}
-.diff-line-added .diff-line-sign {
-  color: #16a34a;
-}
-.diff-line-removed .diff-line-sign {
-  color: #dc2626;
-}
-
-.diff-line-content {
-  flex: 1;
-  padding: 2px 8px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-.diff-line-added ins {
-  background: #bbf7d0;
-  text-decoration: none;
-}
-.diff-line-removed s {
-  background: #fecaca;
   color: #991b1b;
 }
-
-.diff-empty-placeholder {
-  margin: 40px auto;
-  max-width: 460px;
-  padding: 32px;
-  text-align: center;
+.diff-line-row.diff-type-unchanged {
+  background: #ffffff;
+  color: #334155;
+}
+.diff-gutter {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12px;
-}
-.diff-empty-placeholder .empty-icon {
-  font-size: 32px;
-}
-
-/* 模式 3: Markdown 源码视图 */
-.canvas-source-view {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.source-view-toolbar {
-  padding: 8px 16px;
+  width: 90px;
   background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.source-info {
-  font-size: 12px;
-  color: #475569;
-}
-.source-divider {
-  margin: 0 6px;
-  color: #cbd5e1;
-}
-
-.source-editor-scrollable {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 24px;
-  background: #fff;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.source-chapter-card {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px;
-  background: #fafafa;
-}
-.source-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 12px;
-}
-.source-seq {
-  font-weight: 700;
-  color: #2563eb;
-}
-.source-title {
-  font-weight: 600;
-  color: #0f172a;
-}
-.source-len {
-  margin-left: auto;
-  color: #64748b;
+  border-right: 1px solid #e2e8f0;
+  padding: 0 6px;
+  user-select: none;
   font-size: 11px;
-}
-.source-textarea {
-  width: 100%;
-  min-height: 160px;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  padding: 10px;
-  box-sizing: border-box;
-  resize: vertical;
-}
-
-/* 底部步骤向导 */
-.workbench-footer-nav {
-  padding: 10px 16px;
-  background: #f8fafc;
-  border-top: 1px solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  color: #94a3b8;
   flex-shrink: 0;
 }
-.footer-center-summary {
-  font-size: 12px;
-  color: #475569;
+.line-no {
+  width: 32px;
+  text-align: right;
 }
-.footer-divider {
-  margin: 0 8px;
-  color: #cbd5e1;
+.diff-symbol {
+  width: 14px;
+  text-align: center;
+  font-weight: 700;
+}
+.diff-content {
+  flex: 1;
+  padding: 0 10px;
+  overflow-x: auto;
+}
+.diff-content pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: inherit;
 }
 
 /* ═════════════════════════════════════════════════════════ */
-/* 全高右侧抽屉 (Slide-over Drawer, 540px) */
+/* 抽屉 Drawer (专家诊断 & 参考资料) */
 /* ═════════════════════════════════════════════════════════ */
-.drawer-overlay {
+.ref-drawer-overlay {
   position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(2px);
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
   z-index: 1000;
   display: flex;
   justify-content: flex-end;
 }
-.slide-drawer-panel {
+.ref-drawer-panel {
   width: 540px;
   max-width: 90vw;
-  height: 100vh;
+  height: 100%;
   background: #ffffff;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
-  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
-  animation: slide-in-right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-@keyframes slide-in-right {
-  from {
-    transform: translateX(100%);
-  }
-  to {
-    transform: translateX(0);
-  }
 }
 
 .drawer-header {
   padding: 16px 20px;
   border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
   background: #f8fafc;
-}
-.drawer-title-area {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.drawer-title-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
 }
-.drawer-title-row h3 {
+.drawer-title-box h4 {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: #0f172a;
 }
-.drawer-health-badge {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.badge-pass {
-  background: #dcfce7;
-  color: #15803d;
-}
-.badge-warn {
-  background: #fef3c7;
-  color: #b45309;
-}
-.badge-danger {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-.drawer-subtitle {
+.drawer-sub {
   font-size: 12px;
   color: #64748b;
+  margin-top: 2px;
+  display: block;
 }
 .drawer-close-btn {
   background: transparent;
   border: none;
-  font-size: 16px;
-  color: #64748b;
+  font-size: 18px;
+  color: #94a3b8;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
@@ -3806,806 +2872,363 @@ function copyFullBookMarkdown() {
   color: #0f172a;
 }
 
-.drawer-summary-card {
-  margin: 14px 20px 0 20px;
-  padding: 12px 14px;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 8px;
-}
-.summary-header {
+.drawer-scope-tabs,
+.diagnostic-nav-tabs,
+.ref-filter-tabs {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
+  padding: 8px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  gap: 8px;
 }
-.summary-tag {
-  font-size: 12px;
-  font-weight: 700;
-  color: #1e3a8a;
-}
-.summary-rate {
-  font-size: 12px;
-  color: #2563eb;
-}
-.summary-content {
-  margin: 0 0 10px 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #1e293b;
-}
-.summary-actions .btn-block {
-  width: 100%;
-}
-
-.drawer-subtabs-nav {
-  display: flex;
-  background: #f1f5f9;
-  margin: 12px 20px 0 20px;
-  padding: 3px;
-  border-radius: 6px;
-  gap: 2px;
-}
-.subtab-btn {
-  flex: 1;
-  border: none;
+.scope-tab-btn,
+.diag-tab-btn,
+.filter-tab-btn {
   background: transparent;
-  padding: 6px 4px;
-  font-size: 11px;
-  font-weight: 500;
-  color: #64748b;
+  border: 1px solid #cbd5e1;
+  padding: 4px 10px;
   border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
   cursor: pointer;
-  white-space: nowrap;
   transition: all 0.15s ease;
 }
-.subtab-btn.active {
-  background: #fff;
-  color: #2563eb;
+.scope-tab-btn.active,
+.diag-tab-btn.active,
+.filter-tab-btn.active {
+  background: #3b82f6;
+  border-color: #2563eb;
+  color: #ffffff;
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
-.drawer-scroll-body {
+.drawer-body-scrollable {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
-}
-
-/* 问题清单卡片 */
-.issues-list {
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-.issue-card {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px;
-  background: #fff;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.issue-card.severity-danger {
-  border-left: 4px solid #ef4444;
-}
-.issue-card.severity-warning {
-  border-left: 4px solid #f59e0b;
-}
-.issue-card.severity-info {
-  border-left: 4px solid #3b82f6;
-}
 
-.issue-card-top {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.severity-pill {
-  font-size: 11px;
-  font-weight: 700;
-}
-.category-pill {
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-.location-pill {
-  font-size: 11px;
-  color: #64748b;
-  margin-left: auto;
-}
-.issue-message-text {
-  font-size: 13px;
-  color: #0f172a;
-  line-height: 1.5;
-}
-.issue-suggestion-box {
-  background: #f8fafc;
-  border: 1px dashed #cbd5e1;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #334155;
-  line-height: 1.5;
-}
-.issue-actions-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 4px;
-}
-.btn-text-link {
-  background: transparent;
-  border: none;
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  padding: 0;
-}
-.btn-text-link:hover {
-  text-decoration: underline;
-}
-
-/* 抽屉表格 */
-.numerical-table-wrapper {
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  overflow: hidden;
-}
-.drawer-data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.drawer-data-table th,
-.drawer-data-table td {
-  border-bottom: 1px solid #e2e8f0;
-  padding: 8px 10px;
-  text-align: left;
-}
-.drawer-data-table th {
-  background: #f8fafc;
-  color: #475569;
-  font-weight: 600;
-}
-.cell-note {
-  font-size: 11px;
-  color: #64748b;
-}
-
-/* 缺失资料卡片 */
-.gaps-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.gap-card {
-  border: 1px solid #fde68a;
-  background: #fffbeb;
-  border-radius: 6px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.gap-top {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.gap-icon {
-  font-size: 14px;
-}
-.gap-title {
-  font-size: 13px;
-  color: #92400e;
-}
-.gap-meta {
-  font-size: 11px;
-  color: #b45309;
-}
-.gap-action {
-  display: flex;
-  justify-content: flex-end;
-}
-
-/* 各章评价网格 */
-.chapter-evals-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.eval-card {
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 10px;
-  background: #fff;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.eval-card:hover {
-  border-color: #3b82f6;
-  background: #f8fafc;
-}
-.eval-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.eval-seq {
-  font-size: 11px;
-  font-weight: 700;
-  color: #2563eb;
-}
-.eval-title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.eval-status {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-.eval-status.status-通过 {
-  background: #dcfce7;
-  color: #15803d;
-}
-.eval-status.status-需补充 {
-  background: #fef3c7;
-  color: #b45309;
-}
-.eval-summary {
-  margin: 0;
-  font-size: 12px;
-  color: #475569;
-  line-height: 1.5;
-}
-.eval-card-footer {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 6px;
-  font-size: 11px;
-  color: #94a3b8;
-}
-
-/* 综合建议 */
-.suggestions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.sugg-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-}
-.sugg-bullet {
-  font-size: 14px;
-}
-.sugg-text {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #1e293b;
-}
-
-/* 参考资料列表与三源统计抽屉 */
 .drawer-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 10px 14px;
-  background: #f8fafc;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #ffffff;
   border-bottom: 1px solid #e2e8f0;
 }
 .summary-stat-card {
+  padding: 10px;
   border-radius: 6px;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  border: 1px solid transparent;
-}
-.summary-stat-card.type-material {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-.summary-stat-card.type-standard {
-  background: #fefce8;
-  border-color: #fef08a;
-}
-.summary-stat-card.type-web {
-  background: #ecfdf5;
-  border-color: #a7f3d0;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
 }
 .stat-card-header {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  font-weight: 700;
-}
-.summary-stat-card.type-material .stat-label {
-  color: #1d4ed8;
-}
-.summary-stat-card.type-standard .stat-label {
-  color: #a16207;
-}
-.summary-stat-card.type-web .stat-label {
-  color: #047857;
-}
-.stat-card-values {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.stat-count {
-  font-size: 12px;
-  font-weight: 700;
-  color: #0f172a;
-}
-.stat-citations {
-  font-size: 10px;
   color: #64748b;
 }
-
-.drawer-subtabs-nav {
-  display: flex;
-  gap: 4px;
-  padding: 8px 14px;
-  background: #fff;
-  border-bottom: 1px solid #e2e8f0;
-  overflow-x: auto;
-}
-.subtab-btn {
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 3px 9px;
-  font-size: 11px;
-  color: #475569;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.15s ease;
-}
-.subtab-btn:hover {
-  background: #e2e8f0;
+.stat-card-count {
+  font-size: 14px;
+  font-weight: 700;
   color: #0f172a;
-}
-.subtab-btn.active {
-  background: #2563eb;
-  border-color: #1d4ed8;
-  color: #fff;
-  font-weight: 600;
+  margin-top: 4px;
 }
 
-.ref-items-list {
+/* 诊断问题卡片 */
+.diag-issue-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #ffffff;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  transition: all 0.2s ease;
 }
-.ref-card-item {
+.diag-issue-card.severity-critical,
+.diag-issue-card.severity-error {
+  border-left: 4px solid #ef4444;
+}
+.diag-issue-card.severity-high {
+  border-left: 4px solid #f97316;
+}
+.diag-issue-card.severity-medium,
+.diag-issue-card.severity-warning {
+  border-left: 4px solid #eab308;
+}
+.diag-issue-card.severity-low,
+.diag-issue-card.severity-suggestion {
+  border-left: 4px solid #3b82f6;
+}
+
+.issue-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.issue-tag-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.severity-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.dim-pill {
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.ch-scope-pill {
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.issue-actions-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.issue-desc-box {
+  font-size: 13px;
+  color: #0f172a;
+  line-height: 1.5;
+}
+.issue-snippet-box {
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #475569;
+}
+.snippet-label {
+  font-weight: 600;
+  color: #64748b;
+}
+.issue-sug-box {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 8px 10px;
   border-radius: 6px;
-  padding: 10px 12px;
-  background: #fff;
+  font-size: 12.5px;
+  color: #166534;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.num-check-card,
+.data-gap-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  transition: all 0.2s ease;
 }
-.ref-card-pulse {
-  animation: refCardPulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+.num-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
-@keyframes refCardPulse {
+.num-indicator-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.num-consistent-pill {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #dcfce7;
+  color: #15803d;
+  font-weight: 600;
+}
+.num-consistent-pill.is-inconsistent {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.num-values-row {
+  display: flex;
+  gap: 16px;
+  background: #f8fafc;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.val-lbl {
+  color: #64748b;
+  margin-right: 4px;
+}
+.val-txt {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.ref-card-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ref-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ref-type-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.ref-count-badge {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.ref-title-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.ref-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.empty-diag-state,
+.drawer-empty {
+  text-align: center;
+  padding: 40px 10px;
+}
+.empty-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+.empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 4px;
+}
+.empty-desc {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* 定位脉冲高亮特效 */
+:deep(.issue-card-pulse) {
+  animation: card-pulse-anim 2s ease;
+}
+@keyframes card-pulse-anim {
   0% {
-    background-color: #fef08a !important;
-    box-shadow: 0 0 0 4px rgba(234, 179, 8, 0.5) !important;
-    border-color: #eab308 !important;
+    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.8);
+    transform: scale(1.02);
   }
   50% {
-    background-color: #fef9c3 !important;
-    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.25) !important;
-    border-color: #eab308 !important;
+    box-shadow: 0 0 0 8px rgba(234, 179, 8, 0);
+    transform: scale(1);
   }
   100% {
-    background-color: #ffffff;
     box-shadow: none;
   }
 }
 
-.ref-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+:deep(.issue-canvas-pulse) {
+  animation: canvas-issue-anim 2s ease !important;
 }
-.ref-card-top-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.btn-locate-ref {
-  background: #f0f9ff;
-  border: 1px solid #bae6fd;
-  color: #0284c7;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.btn-locate-ref:hover {
-  background: #0284c7;
-  color: #fff;
-  border-color: #0284c7;
-}
-
-.ref-type-badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-.ref-type-badge.type-material {
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-.ref-type-badge.type-standard {
-  background: #fef3c7;
-  color: #b45309;
-}
-.ref-type-badge.type-web {
-  background: #d1fae5;
-  color: #065f46;
-}
-.ref-count-badge {
-  font-size: 11px;
-  color: #64748b;
-}
-.ref-card-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.ref-card-link-box {
-  margin: 2px 0;
-}
-.ref-external-link {
-  color: #2563eb;
-  text-decoration: underline;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  word-break: break-all;
-}
-.ref-external-link:hover {
-  color: #1d4ed8;
-}
-.ref-archive-note {
-  font-size: 11px;
-  color: #059669;
-  background: #ecfdf5;
-  padding: 2px 6px;
-  border-radius: 4px;
-  display: inline-block;
-}
-.ref-card-raw code {
-  font-size: 11px;
-  color: #475569;
-  background: #f1f5f9;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.drawer-empty-state {
-  text-align: center;
-  padding: 40px 20px;
-}
-.drawer-empty-state .empty-icon {
-  font-size: 32px;
-}
-.drawer-empty-state .empty-title {
-  margin: 8px 0 4px 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.drawer-empty-state .empty-desc {
-  margin: 0;
-  font-size: 12px;
-  color: #64748b;
-}
-
-/* 正文内联引用标签与呼吸动画 */
-.full-book-scroll-canvas :deep(.ref-badge),
-.full-book-scroll-canvas :deep(.inline-ref-tag) {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 1px 7px;
-  border-radius: 12px;
-  margin: 0 2px;
-  vertical-align: baseline;
-  user-select: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.full-book-scroll-canvas :deep(.inline-ref-tag.type-material),
-.full-book-scroll-canvas :deep(.ref-badge) {
-  background: #e0e7ff;
-  color: #3730a3;
-  border: 1px solid #c7d2fe;
-}
-.full-book-scroll-canvas :deep(.inline-ref-tag.type-standard) {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fde68a;
-}
-.full-book-scroll-canvas :deep(.inline-ref-tag.type-web) {
-  background: #ecfdf5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
-}
-.full-book-scroll-canvas :deep(.inline-ref-tag:hover) {
-  filter: brightness(0.95);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
-}
-
-@keyframes inlineRefPulse {
+@keyframes canvas-issue-anim {
   0% {
     background-color: #fef08a !important;
-    box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.6) !important;
-    transform: scale(1.08);
+    outline: 3px solid #eab308 !important;
   }
   50% {
     background-color: #fef9c3 !important;
-    box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.3) !important;
-    transform: scale(1.04);
+    outline: 1px solid #facc15 !important;
   }
   100% {
-    box-shadow: none !important;
-    transform: scale(1);
+    background-color: #fef08a !important;
+    outline: none !important;
   }
 }
-.full-book-scroll-canvas :deep(.inline-ref-pulse),
-:deep(.inline-ref-pulse) {
-  animation: inlineRefPulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+
+:deep(.ref-card-pulse) {
+  animation: ref-card-anim 2s ease;
+}
+@keyframes ref-card-anim {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.8);
+    transform: scale(1.02);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(59, 130, 246, 0);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: none;
+  }
 }
 
-/* 按钮通用 */
-.btn {
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: inline-flex;
+:deep(.inline-ref-pulse) {
+  animation: inline-ref-anim 2s ease !important;
+}
+@keyframes inline-ref-anim {
+  0% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.6);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: none;
+  }
+}
+
+:deep(.heading-pulse) {
+  animation: heading-pulse-anim 2s ease;
+}
+@keyframes heading-pulse-anim {
+  0% {
+    background-color: #dbeafe;
+    color: #1d4ed8;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* 底部流转导航 */
+.bottom-nav {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-.btn-primary {
-  background: #2563eb;
-  color: #fff;
-}
-.btn-primary:hover {
-  background: #1d4ed8;
-}
-.btn-secondary {
-  background: #fff;
-  border-color: #cbd5e1;
-  color: #334155;
-}
-.btn-secondary:hover {
-  background: #f1f5f9;
-}
-.btn-outline {
-  background: #fff;
-  border-color: #cbd5e1;
-  color: #475569;
-}
-.btn-outline:hover {
-  background: #f8fafc;
-  color: #0f172a;
-}
-.btn-success {
-  background: #16a34a;
-  color: #fff;
-}
-.btn-success:hover {
-  background: #15803d;
-}
-.btn-danger {
-  background: #dc2626;
-  color: #fff;
-}
-.btn-danger:hover {
-  background: #b91c1c;
-}
-.btn-xs {
-  padding: 3px 8px;
-  font-size: 11px;
-}
-.btn-sm {
-  padding: 4px 10px;
-  font-size: 12px;
+  padding-top: 10px;
 }
 .btn-lg {
-  padding: 8px 18px;
+  padding: 10px 24px;
   font-size: 14px;
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* 审查模式切换胶囊样式 */
-.review-mode-pills {
-  display: flex;
-  background: #f1f5f9;
-  border-radius: 8px;
-  padding: 2px;
-  border: 1px solid #e2e8f0;
-  gap: 2px;
-}
-.mode-pill-btn {
-  padding: 5px 10px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  font-size: 12px;
-  font-weight: 500;
-  color: #64748b;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-.mode-pill-btn:hover {
-  color: #1e293b;
-}
-.mode-pill-btn.active {
-  background: #ffffff;
-  color: #2563eb;
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-/* 动画效果 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* ── Mermaid 流程图出版级卡片样式 ── */
-.mermaid-container {
-  margin: 18px 0;
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
-  overflow: hidden;
-  transition: all 0.2s ease;
-}
-.mermaid-container:hover {
-  border-color: #94a3b8;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
-}
-.mermaid-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  font-size: 12px;
-  user-select: none;
-}
-.mermaid-tag {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.mermaid-icon {
-  font-size: 15px;
-}
-.mermaid-title {
-  font-weight: 600;
-  color: #0f766e;
-}
-.mermaid-meta {
-  font-size: 11px;
-  color: #64748b;
-  background: #f1f5f9;
-  padding: 1px 7px;
-  border-radius: 10px;
-}
-.mermaid-fallback-badge {
-  font-size: 11px;
-  color: #b45309;
-  background: #fef3c7;
-  padding: 1px 7px;
-  border-radius: 10px;
-  font-weight: 500;
-}
-.mermaid-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.mermaid-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 9px;
-  font-size: 11px;
-  font-weight: 500;
-  color: #334155;
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.mermaid-btn:hover {
-  background: #f0f9ff;
-  border-color: #0284c7;
-  color: #0284c7;
-}
-.mermaid-svg-wrapper {
-  padding: 20px 16px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: #ffffff;
-  overflow-x: auto;
-}
-.mermaid-svg-wrapper svg {
-  max-width: 100%;
-  height: auto;
-}
-.mermaid-code-wrapper {
-  padding: 12px 16px;
-  background: #0f172a;
-  color: #f8fafc;
-  overflow-x: auto;
-  font-family: Consolas, Monaco, "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.mermaid-code-wrapper pre {
-  margin: 0;
-  padding: 0;
-  background: transparent;
-}
-.mermaid-code-wrapper code {
-  color: #38bdf8;
-  background: transparent;
 }
 </style>

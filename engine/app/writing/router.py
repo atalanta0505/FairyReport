@@ -82,7 +82,7 @@ class FullReviewData(BaseModel):
 
 class TemplateItemOut(BaseModel):
     report_type: str
-    total_words_max: int
+    total_words_max: int = 0
     notes: str = ""
     writing_order: list[int] = Field(default_factory=list)
     writing_order_reason: str = ""

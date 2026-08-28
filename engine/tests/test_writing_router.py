@@ -304,7 +304,7 @@ def test_list_templates_returns_14_types(client):
     assert "可行性研究报告" in report_types
     assert "产业发展规划报告" in report_types
     fe = next(it for it in items if it["report_type"] == "可行性研究报告")
-    assert fe["total_words_max"] == 50000
+    assert fe["total_words_max"] == 0
 
 
 def test_list_templates_with_installed_pack(client, installed_pack):
@@ -314,7 +314,7 @@ def test_list_templates_with_installed_pack(client, installed_pack):
     items = resp.json()
     assert len(items) == 14
     fe = next(it for it in items if it["report_type"] == "可行性研究报告")
-    assert fe["total_words_max"] == 50000
+    assert fe["total_words_max"] == 0
     assert "测试模板规范" in fe["notes"]
     assert fe["writing_order"] == [2, 1, 3]
     assert "主体论证章节" in fe["writing_order_reason"]

@@ -96,21 +96,21 @@ def get_word_limit(report_type: str) -> int:
     tmpl = load_template(report_type)
     if tmpl and tmpl.get("total_words_max"):
         return tmpl["total_words_max"]
-    return REPORT_WORD_LIMITS.get(report_type, 40000)
+    return 0
 
 
 def get_chapter_word_limit(report_type: str) -> int:
     tmpl = load_template(report_type)
     if tmpl and tmpl.get("per_chapter_max"):
         return tmpl["per_chapter_max"]
-    return MAX_WORDS_PER_CHAPTER.get(report_type, DEFAULT_MAX_WORDS_PER_CHAPTER)
+    return 0
 
 
 def get_summary_chapter_limit(report_type: str) -> int:
     tmpl = load_template(report_type)
     if tmpl and tmpl.get("summary_chapter_max"):
         return tmpl["summary_chapter_max"]
-    return DEFAULT_SUMMARY_CHAPTER_LIMIT
+    return 0
 
 
 def is_summary_chapter(report_type: str, chapter_seq: int) -> bool:
@@ -146,13 +146,11 @@ def get_chapter_template_prompt(report_type: str) -> str:
     for ch in chapters:
         title = ch["title"]
         desc = ch.get("description", "")
-        budget = ch.get("word_budget", 0)
-        budget_str = f" — {budget:,}字" if budget > 0 else ""
         if desc:
-            lines.append(f"{title}（{desc}）{budget_str}")
+            lines.append(f"{title}（{desc}）")
         else:
-            lines.append(f"{title}{budget_str}")
-    lines.append("\n章标题可微调以适应具体项目，但章数、顺序和每章字数预算须与以上模板一致。")
+            lines.append(f"{title}")
+    lines.append("\n章标题可微调以适应具体项目，但章数和顺序须与以上模板一致。")
     return "\n".join(lines)
 
 
@@ -161,15 +159,8 @@ def get_chapter_word_budget(report_type: str, chapter_seq: int) -> int:
     if tmpl and "chapters" in tmpl:
         for ch in tmpl["chapters"]:
             if ch.get("seq") == chapter_seq:
-                budget = ch.get("word_budget")
-                if budget is not None and budget > 0:
-                    return budget
-                if ch.get("is_summary"):
-                    return get_summary_chapter_limit(report_type)
-                return get_chapter_word_limit(report_type)
-    if is_summary_chapter(report_type, chapter_seq):
-        return get_summary_chapter_limit(report_type)
-    return get_chapter_word_limit(report_type)
+                return ch.get("word_budget", 0)
+    return 0
 
 
 def get_writing_order(report_type: str, total_chapters: int = 0) -> list[int]:

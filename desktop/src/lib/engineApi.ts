@@ -54,7 +54,7 @@ export interface GenericUpdateResult {
 
 export interface TemplateItem {
   report_type: string;
-  total_words_max: number;
+  total_words_max?: number;
   notes?: string;
   writing_order?: number[];
   writing_order_reason?: string;
@@ -511,19 +511,30 @@ export function streamChapterWriting(
 export interface ReviewIssue {
   id?: string;
   severity: "error" | "warning" | "suggestion" | string;
-  category: string;
-  message: string;
+  category?: string;
+  message?: string;
+  dimension?: string;
+  description?: string;
   location?: string;
   quote?: string;
+  snippet?: string;
   suggestion?: string;
   chapterSeq?: number;
+  chapterTitle?: string;
 }
 
 export interface NumericalCheckItem {
-  parameter: string;
-  extracted_value: string;
-  status: "normal" | "abnormal" | "pending";
+  parameter?: string;
+  extracted_value?: string;
+  indicator_name?: string;
+  mentioned_value?: string;
+  reference_value?: string;
+  is_consistent?: boolean;
+  status?: "normal" | "abnormal" | "pending" | string;
   note?: string;
+  notes?: string;
+  chapterSeq?: number;
+  chapterTitle?: string;
 }
 
 export interface ExpertReviewResult {

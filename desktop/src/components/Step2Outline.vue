@@ -139,14 +139,11 @@ function nextStep() {
             当前项目：{{ projectStore.currentProject?.name || "未选择项目" }}
           </span>
         </div>
-        <span class="type-badge" v-if="currentTemplate">
-          目标字数：约 {{ currentTemplate.total_words_max.toLocaleString() }} 字
-        </span>
       </div>
 
       <div class="card-body">
         <p class="section-desc">
-          请选择本次编制的标准报告类型。系统将根据行业规程规范与模板标准约束章节深度与篇幅字数：
+          请选择本次编制的标准报告类型。系统将根据行业规程规范与模板标准自动构建报告结构体系：
         </p>
 
         <!-- 14 种标准报告模板网格 -->
@@ -161,9 +158,6 @@ function nextStep() {
             <div class="template-item-top">
               <span class="template-icon">📄</span>
               <span class="template-name">{{ t.report_type }}</span>
-            </div>
-            <div class="template-item-meta">
-              <span class="words-limit">约 {{ (t.total_words_max / 10000).toFixed(1) }} 万字</span>
             </div>
           </div>
         </div>
@@ -207,7 +201,7 @@ function nextStep() {
           <div class="spinner"></div>
           <div>
             <strong>AI 正在结合项目资料与通用规范生成报告大纲...</strong>
-            <p>基于 {{ projectStore.reportType }} 规范自动规划章节层级与字数预算，请稍候。</p>
+            <p>基于 {{ projectStore.reportType }} 规范自动规划章节层级与标准结构体系，请稍候。</p>
           </div>
         </div>
 

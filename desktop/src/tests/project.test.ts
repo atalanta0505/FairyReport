@@ -2225,5 +2225,40 @@ describe("Pinia useProjectStore", () => {
       expect(refs.some((r) => r.title === "总体规划.docx#L1-10" && r.type === "material")).toBe(true);
       expect(refs.some((r) => r.title === "水利部公告" && r.type === "web")).toBe(true);
     });
+
+    it("V2-T34: 模板取消字数限制适配与自由长文推演支持", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse([
+          { report_type: "可行性研究报告", notes: "标准规范模板" },
+          { report_type: "初步可行性研究报告", notes: "初设模板" },
+        ]),
+      );
+      const store = useProjectStore();
+      const tmpls = await store.loadTemplates(BASE_URL);
+      expect(tmpls).toHaveLength(2);
+      expect(tmpls[0].report_type).toBe("可行性研究报告");
+      expect(tmpls[0].total_words_max).toBeUndefined();
+    });
+
+    it("V2-T34: isThinkingStage 计算逻辑与流式首字到达即时切换", () => {
+      // 场景 1: 正在写作但处于推理构思阶段且正文为空 -> isThinkingStage 为 true
+      const isWriting = true;
+      let stage: string = "reasoning";
+      let text: string = "";
+      let isThinking = isWriting && stage !== "writing" && (!text || text.trim().length === 0);
+      expect(isThinking).toBe(true);
+
+      // 场景 2: 大模型开始输出首字 (stage 变为 writing 或 text 有内容) -> isThinkingStage 立即为 false
+      stage = "writing";
+      text = "本项目位于";
+      isThinking = isWriting && stage !== "writing" && (!text || text.trim().length === 0);
+      expect(isThinking).toBe(false);
+
+      // 场景 3: stage 仍为 reasoning 但首个 chunk 已到达写入正文 -> isThinkingStage 立即为 false
+      stage = "reasoning";
+      text = "一、";
+      isThinking = isWriting && stage !== "writing" && (!text || text.trim().length === 0);
+      expect(isThinking).toBe(false);
+    });
   });
 });

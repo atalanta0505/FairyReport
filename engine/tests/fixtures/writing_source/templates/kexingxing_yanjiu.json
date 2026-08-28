@@ -1,13 +1,21 @@
 {
   "report_type": "可行性研究报告",
-  "total_words_max": 50000,
-  "per_chapter_max": 5000,
-  "summary_chapter_max": 3000,
   "notes": "测试模板规范：章节须与大纲一致",
   "outline_md": "# 第一章 概述\n## 1.1 项目概况\n## 1.2 编制依据\n# 第二章 项目建设背景和必要性\n## 2.1 建设背景\n## 2.2 建设必要性\n# 第三章 研究结论及建议\n## 3.1 主要结论\n## 3.2 问题与建议",
   "chapters": [
-    {"seq": 1, "title": "第一章 概述", "word_budget": 3000, "is_summary": true},
-    {"seq": 2, "title": "第二章 项目建设背景和必要性", "word_budget": 5000},
-    {"seq": 3, "title": "第三章 研究结论及建议", "word_budget": 2000, "is_summary": true}
+    {
+      "seq": 1,
+      "title": "第一章 概述",
+      "is_summary": true
+    },
+    {
+      "seq": 2,
+      "title": "第二章 项目建设背景和必要性"
+    },
+    {
+      "seq": 3,
+      "title": "第三章 研究结论及建议",
+      "is_summary": true
+    }
   ]
 }

@@ -304,6 +304,14 @@ const isCurrentChapterWriting = computed(() => {
   );
 });
 
+const isThinkingStage = computed(() => {
+  return (
+    isCurrentChapterWriting.value &&
+    projectStore.writingProgress?.stage !== "writing" &&
+    (!currentChapterText.value || currentChapterText.value.trim().length === 0)
+  );
+});
+
 // 提取当前所有章节的子标题树（过滤掉 H1 级别，因章节行已展示章标题）
 const chapterSubHeadingsMap = computed<Record<number, SubHeading[]>>(() => {
   const map: Record<number, SubHeading[]> = {};
@@ -809,10 +817,10 @@ function nextStep() {
               </span>
             </div>
 
-            <!-- 动态构思等待卡片：当正在流式写作且正文字数为 0 时展示 -->
+            <!-- 动态构思等待卡片：当正在深度构思且正文字数为 0 时展示 -->
             <transition name="fade">
               <div
-                v-if="isCurrentChapterWriting && currentChapterWords === 0"
+                v-if="isThinkingStage"
                 class="thinking-state-container"
               >
                 <div class="thinking-card-inner">
@@ -947,7 +955,7 @@ function nextStep() {
 
             <!-- 纯净排版模式：就地 contenteditable 编辑画布 -->
             <div
-              v-show="!isCurrentChapterWriting || currentChapterWords > 0"
+              v-show="!isThinkingStage"
               ref="editorCanvasRef"
               contenteditable="true"
               class="rich-rendered-editor"

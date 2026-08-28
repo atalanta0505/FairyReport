@@ -1,5 +1,9 @@
-﻿{
+{
   "report_type": "可行性研究报告",
-  "total_words_max": 50000,
-  "chapters": [{"seq": 1, "title": "概述"}]
+  "chapters": [
+    {
+      "seq": 1,
+      "title": "概述"
+    }
+  ]
 }
