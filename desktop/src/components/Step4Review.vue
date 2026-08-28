@@ -242,6 +242,11 @@ function isChapterWritten(seq: number): boolean {
   return !!(text && text.trim().length > 0);
 }
 
+function getChapterTitle(seq: number): string {
+  const found = projectStore.outlineChapters.find((c) => c.seq === seq);
+  return found?.title || `第 ${seq} 章`;
+}
+
 const completedChaptersCount = computed(() => {
   return projectStore.outlineChapters.filter((ch) => isChapterWritten(ch.seq)).length;
 });
@@ -503,17 +508,22 @@ const fullBookMarkdown = computed(() => {
 
 // ── 交互导航与目录操作 ──
 function isChapterCollapsed(seq: number): boolean {
-  return !!chapterCollapsedMap.value[seq];
+  if (chapterCollapsedMap.value[seq] !== undefined) {
+    return chapterCollapsedMap.value[seq];
+  }
+  return activeChapterSeq.value !== seq;
 }
 
 function toggleChapterCollapse(seq: number, e?: Event) {
   if (e) e.stopPropagation();
-  chapterCollapsedMap.value[seq] = !chapterCollapsedMap.value[seq];
+  const currentlyCollapsed = isChapterCollapsed(seq);
+  chapterCollapsedMap.value[seq] = !currentlyCollapsed;
 }
 
 async function scrollToChapter(seq: number) {
   activeChapterSeq.value = seq;
   activeHeadingId.value = null;
+  chapterCollapsedMap.value[seq] = false;
   if (viewMode.value !== "rich" && viewMode.value !== "source") {
     viewMode.value = "rich";
     await nextTick();
@@ -555,6 +565,7 @@ async function scrollToSubheading(seq: number, headingId: string, sub?: SubHeadi
   if (e) e.stopPropagation();
   activeChapterSeq.value = seq;
   activeHeadingId.value = headingId;
+  chapterCollapsedMap.value[seq] = false;
   if (viewMode.value !== "rich") {
     viewMode.value = "rich";
     await nextTick();
@@ -1361,7 +1372,7 @@ function copyFullBookMarkdown() {
       <aside class="sidebar-nav-panel card">
         <div class="card-header sidebar-header">
           <div class="header-titles">
-            <h3>📑 全书多级目录导航</h3>
+            <h3>📑 章节目录与导航</h3>
             <span class="proj-badge">{{ projectStore.currentProject?.name || "未选项目" }}</span>
           </div>
           <!-- 统计指示条 (100% 对齐 Step 3) -->
@@ -1381,6 +1392,39 @@ function copyFullBookMarkdown() {
               <span class="stat-val">{{ totalWordCount.toLocaleString() }} 字</span>
             </div>
           </div>
+
+          <!-- 💡 推荐写作顺序：流程胶囊提示 -->
+          <div
+            v-if="projectStore.writingOrder && projectStore.writingOrder.length > 0"
+            class="writing-order-box"
+            :title="projectStore.writingOrderReason || '推荐写作顺序'"
+          >
+            <div class="order-box-header">
+              <span class="order-icon">💡</span>
+              <span class="order-title">推荐写作顺序</span>
+            </div>
+            <div class="order-flow-chips">
+              <span
+                v-for="(seq, idx) in projectStore.writingOrder"
+                :key="seq"
+                class="order-node-wrap"
+              >
+                <span
+                  class="order-chip"
+                  :class="{
+                    active: activeChapterSeq === seq,
+                    completed: isChapterWritten(seq),
+                    warning: (chapterIssuesCount[seq] || 0) > 0,
+                  }"
+                  @click="scrollToChapter(seq)"
+                  :title="`第 ${seq} 章：${getChapterTitle(seq)}`"
+                >
+                  第 {{ seq }} 章
+                </span>
+                <span v-if="idx < projectStore.writingOrder.length - 1" class="flow-arrow">➔</span>
+              </span>
+            </div>
+          </div>
         </div>
 
         <div class="outline-tree-scrollable">
@@ -1394,6 +1438,7 @@ function copyFullBookMarkdown() {
             class="chapter-tree-node"
             :class="{
               'is-active': activeChapterSeq === ch.seq,
+              'is-completed': isChapterWritten(ch.seq),
               'has-review': !!projectStore.chapterReviews[ch.seq],
               'has-warning': (chapterIssuesCount[ch.seq] || 0) > 0 || (chapterGapsCount[ch.seq] || 0) > 0,
               'is-unwritten-node': !isChapterWritten(ch.seq),
@@ -1411,29 +1456,25 @@ function copyFullBookMarkdown() {
               </div>
 
               <div class="row-right">
-                <!-- 待撰写徽标 -->
+                <!-- 状态药丸 (100% 对齐 Step 3) -->
                 <span
-                  v-if="!isChapterWritten(ch.seq)"
-                  class="badge-unwritten"
-                  title="该章节大纲已就绪，暂未生成正文"
+                  class="status-pill"
+                  :class="isChapterWritten(ch.seq) ? 'completed' : 'idle'"
                 >
-                  待撰写
+                  {{ isChapterWritten(ch.seq) ? "已完成 ✓" : "待撰写" }}
                 </span>
-                <!-- 预警角标 -->
+
+                <!-- 预警角标 (若有审阅问题) -->
                 <span
-                  v-else-if="(chapterIssuesCount[ch.seq] || 0) > 0"
+                  v-if="(chapterIssuesCount[ch.seq] || 0) > 0"
                   class="warning-badge-pill"
                   :title="`第 ${ch.seq} 章存在 ${chapterIssuesCount[ch.seq]} 处待优化诊断，点击定位问题`"
                   @click.stop="openChapterIssuesDrawer(ch.seq, $event)"
                 >
                   ⚠️ {{ chapterIssuesCount[ch.seq] }}
                 </span>
-                <span
-                  v-else-if="projectStore.chapterReviews[ch.seq]?.status === '通过'"
-                  class="pass-dot"
-                  title="该章专家体检合格"
-                >✓</span>
 
+                <!-- 子标题展开/折叠 -->
                 <button
                   v-if="chapterSubheadings[ch.seq] && chapterSubheadings[ch.seq].length > 0"
                   class="collapse-toggle-icon"
@@ -1463,7 +1504,6 @@ function copyFullBookMarkdown() {
                   @click="scrollToSubheading(ch.seq, sub.id, sub, $event)"
                   :title="sub.title"
                 >
-                  <span class="sub-bullet">{{ sub.level === 2 ? '🔹' : sub.level === 3 ? '▪' : '▫' }}</span>
                   <span class="sub-text">{{ sub.title }}</span>
                   <span
                     v-if="getSubheadingIssueCount(ch.seq, sub) > 0"
@@ -2634,6 +2674,77 @@ function copyFullBookMarkdown() {
   height: 20px;
   background: #e2e8f0;
 }
+
+/* 推荐写作顺序流程胶囊指示 (100% 对齐 Step 3) */
+.writing-order-box {
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.order-box-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.order-icon {
+  font-size: 13px;
+}
+.order-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #1e40af;
+}
+.order-flow-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.order-node-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.order-chip {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+.order-chip:hover {
+  border-color: #3b82f6;
+  color: #1d4ed8;
+}
+.order-chip.active {
+  background: #3b82f6;
+  color: #ffffff;
+  border-color: #2563eb;
+  font-weight: 600;
+}
+.order-chip.completed:not(.active) {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+.order-chip.warning:not(.active) {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+.flow-arrow {
+  font-size: 9px;
+  color: #94a3b8;
+}
+
 .outline-tree-scrollable {
   flex: 1;
   overflow-y: auto;
@@ -2729,6 +2840,10 @@ function copyFullBookMarkdown() {
   background: #3b82f6;
   color: #fff;
 }
+.chapter-tree-node.is-completed:not(.is-active) .ch-seq-tag {
+  background: #dcfce7;
+  color: #15803d;
+}
 .ch-title-text {
   font-size: 12px;
   font-weight: 600;
@@ -2743,6 +2858,33 @@ function copyFullBookMarkdown() {
   align-items: center;
   gap: 6px;
 }
+.status-pill {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+.status-pill.idle {
+  background: #f1f5f9;
+  color: #64748b;
+}
+.status-pill.writing {
+  background: #fef3c7;
+  color: #b45309;
+}
+.status-pill.completed {
+  background: #dcfce7;
+  color: #15803d;
+}
+.status-pill.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 .badge-unwritten {
   font-size: 10px;
   font-weight: 600;
@@ -2792,7 +2934,7 @@ function copyFullBookMarkdown() {
   border-top: none;
 }
 .subheading-item-row {
-  padding: 4px 8px 4px 26px;
+  padding: 4px 8px 4px 20px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2807,20 +2949,15 @@ function copyFullBookMarkdown() {
   color: #0f172a;
 }
 .subheading-item-row.level-3 {
-  padding-left: 36px;
+  padding-left: 30px;
 }
 .subheading-item-row.level-4 {
-  padding-left: 48px;
+  padding-left: 40px;
 }
 .subheading-item-row.is-active-heading {
   color: #2563eb;
   font-weight: 600;
   background: #eff6ff;
-}
-.sub-bullet {
-  font-size: 8px;
-  opacity: 0.6;
-  flex-shrink: 0;
 }
 .sub-text {
   flex: 1;

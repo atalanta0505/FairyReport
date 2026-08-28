@@ -2127,5 +2127,50 @@ describe("Pinia useProjectStore", () => {
       expect(store.chapters[1]).toBe(cleanMd);
       expect(store.chapters[1]).not.toContain("<mark");
     });
+
+    it("V2-T29: 推荐写作顺序流程胶囊与章节折叠逻辑（100% 对齐 Step 3）", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "可研测试", created_at: "2026-08-28T00:00:00Z" };
+      store.writingOrder = [2, 3, 4, 1, 5];
+      store.writingOrderReason = "先完成主体论证，最后编制概述与附表";
+      store.outlineChapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 背景" },
+        { seq: 3, title: "第三章 需求分析" },
+        { seq: 4, title: "第四章 建设方案" },
+        { seq: 5, title: "第五章 结论" },
+      ];
+      store.chapters = {
+        1: "概述正文",
+        2: "背景正文",
+      };
+
+      // 验证推荐写作顺序状态
+      expect(store.writingOrder).toHaveLength(5);
+      expect(store.writingOrder[0]).toBe(2);
+      expect(store.writingOrderReason).toContain("先完成主体论证");
+
+      // 验证章节完成状态辅助判断
+      const isWritten = (seq: number) => !!(store.chapters[seq] && store.chapters[seq].trim().length > 0);
+      expect(isWritten(1)).toBe(true);
+      expect(isWritten(2)).toBe(true);
+      expect(isWritten(3)).toBe(false);
+
+      // 验证默认折叠判定函数（除 activeChapter 外默认全部折叠收起）
+      const activeChapterSeq = 2;
+      const collapsedMap: Record<number, boolean> = {};
+      const isChapterCollapsed = (seq: number) => {
+        if (collapsedMap[seq] !== undefined) return collapsedMap[seq];
+        return activeChapterSeq !== seq;
+      };
+
+      expect(isChapterCollapsed(2)).toBe(false); // 激活章展开
+      expect(isChapterCollapsed(1)).toBe(true);  // 非激活章默认折叠
+      expect(isChapterCollapsed(3)).toBe(true);  // 非激活章默认折叠
+
+      // 手动展开第 3 章
+      collapsedMap[3] = false;
+      expect(isChapterCollapsed(3)).toBe(false);
+    });
   });
 });

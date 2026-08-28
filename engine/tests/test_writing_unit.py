@@ -81,7 +81,7 @@ def test_parse_outline_hierarchy_extracts_h2_h3():
     assert h["h2_sections"][0]["title"] == "1.1 项目概况"
 
 
-def test_build_section_quota_block_contains_budgets_and_sentences():
+def test_build_section_quota_block_unconstrained_depth_advice():
     hierarchy = {
         "chapter_title": "第二章 测试",
         "h2_sections": [
@@ -91,12 +91,15 @@ def test_build_section_quota_block_contains_budgets_and_sentences():
         ],
     }
     block = _build_section_quota_block(hierarchy, {"h2_sections": hierarchy["h2_sections"], "total_allocated": 1700})
-    assert "结构参考与小节句数/字数硬控制" in block
+    assert "结构参考与小节篇幅建议" in block
     assert "2.1 A" in block
     assert "1,700" in block  # 逗号格式化
-    assert "34~49 句话以内" in block  # 1700/50=34, 1700/35=49
-    assert "以中文句号『。』为准计" in block
-    assert "达到句数上限即行收尾" in block
+    assert "建议深度论证，参考篇幅约" in block
+    assert "杜绝空洞简略与内容缩水" in block
+    # 验证句数硬控制已彻底移除
+    assert "句话以内" not in block
+    assert "以中文句号『。』为准计" not in block
+    assert "达到句数上限即行收尾" not in block
 
 
 def test_pure_chinese_reasoning_constraint_in_prompts():
@@ -378,16 +381,25 @@ def test_standard_three_line_table_rules_in_prompts_and_writer():
     from engine.app.writing.prompts import _BASE_WRITING_PROMPT
     from engine.app.writing.writer import _build_writing_system_prompt, ChapterWriter
 
-    # 1. _BASE_WRITING_PROMPT 硬约束检查
-    assert "标准三线表格强制规范" in _BASE_WRITING_PROMPT
-    assert "主要技术经济指标" in _BASE_WRITING_PROMPT
-    assert "建设规模方案比选" in _BASE_WRITING_PROMPT
-    assert "总投资估算构成与资金筹措" in _BASE_WRITING_PROMPT
+    # 1. _BASE_WRITING_PROMPT 发改委 12 项规定动作三线表格检查
+    assert "发改委通用大纲 12 项规定动作标准三线表格强制规范" in _BASE_WRITING_PROMPT
+    assert "主要技术经济指标表" in _BASE_WRITING_PROMPT
+    assert "建设规模方案比选表" in _BASE_WRITING_PROMPT
+    assert "场址方案比选表" in _BASE_WRITING_PROMPT
+    assert "技术路线比选表" in _BASE_WRITING_PROMPT
+    assert "关键设备比选表" in _BASE_WRITING_PROMPT
+    assert "主要设备清单表" in _BASE_WRITING_PROMPT
+    assert "工程方案比选表" in _BASE_WRITING_PROMPT
+    assert "建设投资估算表 / 总投资与分年度资金计划表" in _BASE_WRITING_PROMPT
+    assert "财务评价指标汇总表" in _BASE_WRITING_PROMPT
+    assert "融资方案比选表" in _BASE_WRITING_PROMPT
+    assert "债务清偿能力指标表" in _BASE_WRITING_PROMPT
+    assert "风险评价与管控矩阵表" in _BASE_WRITING_PROMPT
     assert "对齐分隔线如 `| :--- | :---: | ---: |`" in _BASE_WRITING_PROMPT
 
     # 2. _build_writing_system_prompt 规则检查
     sys_prompt = _build_writing_system_prompt(report_type="可行性研究报告", chapter_title="第五章 建设方案")
-    assert "标准三线表" in sys_prompt
+    assert "发改委 12 项规定动作标准三线表" in sys_prompt
 
     # 3. ChapterWriter._build_chapter_write_args prompt 写作要求检查
     writer = ChapterWriter(llm=None, report_type="可行性研究报告")
@@ -398,8 +410,12 @@ def test_standard_three_line_table_rules_in_prompts_and_writer():
         rag_context="",
         topic="水利枢纽",
     )
-    assert "标准三线表格强制规范（最高优先级）" in prompt
+    assert "发改委 12 项规定动作标准三线表格强制规范（最高优先级）" in prompt
     assert "严禁全篇纯文字堆砌" in prompt
+    assert "内容深度与充实展开（极重要）" in prompt
+    assert "全面展开实质性工程分析、技术论证" in prompt
+    # 验证句数硬控制已彻底删除
+    assert "句数与篇幅硬控制" not in prompt
 
 
 def test_strip_markdown_tables_and_count_content_chars():
