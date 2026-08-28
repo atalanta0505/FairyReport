@@ -24,6 +24,46 @@ export interface ReferenceItem {
   url?: string;
 }
 
+export interface ReferencesSummary {
+  material: { count: number; citations: number };
+  standard: { count: number; citations: number };
+  web: { count: number; citations: number };
+  totalCount: number;
+  totalCitations: number;
+}
+
+/**
+ * 汇总三源参考文献的条目数量与引用次数
+ */
+export function getReferencesSummary(refs: ReferenceItem[]): ReferencesSummary {
+  const summary: ReferencesSummary = {
+    material: { count: 0, citations: 0 },
+    standard: { count: 0, citations: 0 },
+    web: { count: 0, citations: 0 },
+    totalCount: 0,
+    totalCitations: 0,
+  };
+  if (!refs || !Array.isArray(refs)) return summary;
+
+  for (const ref of refs) {
+    const count = typeof ref.count === "number" && ref.count > 0 ? ref.count : 1;
+    if (ref.type === "standard") {
+      summary.standard.count += 1;
+      summary.standard.citations += count;
+    } else if (ref.type === "web") {
+      summary.web.count += 1;
+      summary.web.citations += count;
+    } else {
+      summary.material.count += 1;
+      summary.material.citations += count;
+    }
+    summary.totalCount += 1;
+    summary.totalCitations += count;
+  }
+
+  return summary;
+}
+
 export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -60,14 +100,39 @@ export function formatInline(text: string): string {
     return `\uFFF0CODE${idx}\uFFF0`;
   });
 
-  // 3. 来源引用徽章：【源:...】、【网:...】、【标:...】、【规:...】与 [Z]
+  // 3. 来源引用语义化内联标签：【源:...】、【网:...】、【标:...】、【规:...】与 [Z]
   escaped = escaped.replace(
-    /【(源|材料|网|网络|标|标准|规|规程)([:：][^】]+)】/g,
-    '<span class="ref-badge">🏷️ 【$1$2】</span>'
+    /【(源|材料|网|网络|标|标准|规|规程|法|法规)([:：][^】]+)】/g,
+    (_match, prefix: string, rest: string) => {
+      const colon = rest[0];
+      const content = rest.slice(1).trim();
+      let type: "material" | "standard" | "web" = "material";
+      if (prefix.startsWith("网")) {
+        type = "web";
+      } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
+        type = "standard";
+      } else {
+        if (/规程|规范|标准|GB|SL|NB|DL|定额|导则|通则|法/i.test(content)) {
+          type = "standard";
+        } else {
+          type = "material";
+        }
+      }
+      const escapedTitle = escapeHtml(unescapeHtml(content));
+      const rawTag = `【${prefix}${colon}${content}】`;
+      return `<span class="inline-ref-tag type-${type}" data-ref-type="${type}" data-ref-title="${escapedTitle}" title="点击查看参考资料出处">${rawTag}</span>`;
+    }
   );
+
   escaped = escaped.replace(
     /\[Z(?::|：|-)?([a-zA-Z0-9_\-\u4e00-\u9fa5]*)\]/g,
-    '<span class="ref-badge">🏷️ [Z$1]</span>'
+    (_match, suffix: string) => {
+      const s = suffix ? suffix.trim() : "";
+      const identifier = s ? `标准规范依据 [Z-${s}]` : "标准规范规程库 [Z]";
+      const rawTag = s ? `[Z-${s}]` : "[Z]";
+      const escapedTitle = escapeHtml(identifier);
+      return `<span class="inline-ref-tag type-standard" data-ref-type="standard" data-ref-title="${escapedTitle}" title="点击查看参考资料出处">${rawTag}</span>`;
+    }
   );
 
   // 4. 粗斜体 ***text***
@@ -286,12 +351,12 @@ export function extractReferences(text: string, ragContext?: string): ReferenceI
     if (!content) continue;
 
     let type: "material" | "standard" | "web" | "other" = "material";
-    let typeLabel = "底稿文件";
+    let typeLabel = "项目底稿";
     let url: string | undefined = undefined;
 
     if (prefix.startsWith("网")) {
       type = "web";
-      typeLabel = "网络检索";
+      typeLabel = "百度联网";
       // 尝试提取真实 URL（从正文、附带格式或 ragContext 中）
       const escapedTitle = content.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const urlPattern = new RegExp(`【(?:网|网络)[:：]\\s*${escapedTitle}】\\s*\\n?\\s*(https?:\\/\\/[^\\s\\n>"]+)`);
@@ -306,14 +371,14 @@ export function extractReferences(text: string, ragContext?: string): ReferenceI
       }
     } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
       type = "standard";
-      typeLabel = "规程标准";
+      typeLabel = "国标规程";
     } else {
       if (/规程|规范|标准|GB|SL|NB|DL|定额|导则|通则|法/i.test(content)) {
         type = "standard";
-        typeLabel = "规程标准";
+        typeLabel = "国标规程";
       } else {
         type = "material";
-        typeLabel = "底稿文件";
+        typeLabel = "项目底稿";
       }
     }
 
@@ -348,7 +413,7 @@ export function extractReferences(text: string, ragContext?: string): ReferenceI
     } else {
       map.set(key, {
         type: "standard",
-        typeLabel: "规程标准",
+        typeLabel: "国标规程",
         title: identifier,
         raw: rawTag,
         count: 1,
@@ -547,12 +612,15 @@ export function htmlToMarkdown(html: string): string {
 
   let text = html.replace(/\r\n/g, "\n");
 
-  // 1. 来源引用徽章还原：<span class="ref-badge">🏷️ 【源:...】</span> -> 【源:...】
-  text = text.replace(/<span[^>]*class="[^"]*ref-badge[^"]*"[^>]*>🏷️\s*(【[^】]+】)<\/span>/gi, "$1");
-  text = text.replace(/<span[^>]*class="[^"]*ref-badge[^"]*"[^>]*>🏷️\s*(\[Z[^\]]*\])<\/span>/gi, "$1");
-  text = text.replace(/<span[^>]*class="[^"]*ref-badge[^"]*"[^>]*>(?:🏷️\s*)?([^<]+)<\/span>/gi, "$1");
+  // 1. 来源引用语义化标签还原：<span class="inline-ref-tag type-material" data-ref-type="material" data-ref-title="...">【源:...】</span> -> 【源:...】
+  text = text.replace(/<span[^>]*class="[^"]*(?:inline-ref-tag|ref-badge)[^"]*"[^>]*>(?:🏷️\s*)?(【[^】]+】)<\/span>/gi, "$1");
+  text = text.replace(/<span[^>]*class="[^"]*(?:inline-ref-tag|ref-badge)[^"]*"[^>]*>(?:🏷️\s*)?(\[Z[^\]]*\])<\/span>/gi, "$1");
+  text = text.replace(/<span[^>]*class="[^"]*(?:inline-ref-tag|ref-badge)[^"]*"[^>]*>(?:🏷️\s*)?([^<]+)<\/span>/gi, "$1");
 
-  // 2. 表格转换 <table>...</table> -> Markdown 表格
+  // 2. 剥离审阅高亮标记 <mark class="review-issue-highlight ...">...</mark>
+  text = text.replace(/<mark[^>]*class="[^"]*review-issue-highlight[^"]*"[^>]*>([\s\S]*?)<\/mark>/gi, "$1");
+
+  // 3. 表格转换 <table>...</table> -> Markdown 表格
   text = text.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_match, tableContent: string) => {
     // 提取表头
     const thMatches = [...tableContent.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi)];
@@ -586,20 +654,20 @@ export function htmlToMarkdown(html: string): string {
     return `\n\n${mdTable}\n\n`;
   });
 
-  // 3. 代码块 <pre><code class="language-xyz">...</code></pre>
+  // 4. 代码块 <pre><code class="language-xyz">...</code></pre>
   text = text.replace(/<pre[^>]*><code(?: class="language-([^"]*)")?[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_match, lang, code) => {
     const language = lang || "";
     const cleanCode = unescapeHtml(code.replace(/<br\s*\/?>/gi, "\n"));
     return `\n\n\`\`\`${language}\n${cleanCode.trim()}\n\`\`\`\n\n`;
   });
 
-  // 4. 各级标题 <h1 id="...">...</h1>
+  // 5. 各级标题 <h1 id="...">...</h1>
   text = text.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_match, level, content) => {
     const hashes = "#".repeat(Number(level));
     return `\n\n${hashes} ${cleanInlineHtml(content).trim()}\n\n`;
   });
 
-  // 5. 引用块 <blockquote>...</blockquote>
+  // 6. 引用块 <blockquote>...</blockquote>
   text = text.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_match, content) => {
     const lines = cleanInlineHtml(content)
       .replace(/<br\s*\/?>/gi, "\n")
@@ -609,21 +677,21 @@ export function htmlToMarkdown(html: string): string {
     return `\n\n` + lines.map((l) => `> ${l}`).join("\n") + `\n\n`;
   });
 
-  // 6. 无序列表 <ul><li>...</li></ul>
+  // 7. 无序列表 <ul><li>...</li></ul>
   text = text.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_match, content) => {
     const liMatches = [...content.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)];
     const items = liMatches.map((m) => `- ${cleanInlineHtml(m[1]).trim()}`);
     return `\n\n` + items.join("\n") + `\n\n`;
   });
 
-  // 7. 有序列表 <ol><li>...</li></ol>
+  // 8. 有序列表 <ol><li>...</li></ol>
   text = text.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_match, content) => {
     const liMatches = [...content.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)];
     const items = liMatches.map((m, idx) => `${idx + 1}. ${cleanInlineHtml(m[1]).trim()}`);
     return `\n\n` + items.join("\n") + `\n\n`;
   });
 
-  // 8. 段落与通用容器标签
+  // 9. 段落与通用容器标签
   text = text.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_match, content) => {
     return `\n\n${cleanInlineHtml(content).trim()}\n\n`;
   });
@@ -631,13 +699,13 @@ export function htmlToMarkdown(html: string): string {
     return `\n\n${cleanInlineHtml(content).trim()}\n\n`;
   });
 
-  // 9. 分割线
+  // 10. 分割线
   text = text.replace(/<hr\s*\/?>/gi, "\n\n---\n\n");
 
-  // 10. 处理剩余的内联元素并转义还原
+  // 11. 处理剩余的内联元素并转义还原
   text = cleanInlineHtml(text);
 
-  // 11. 整理空行与首尾空白
+  // 12. 整理空行与首尾空白
   text = text
     .split("\n")
     .map((line) => line.trimEnd())
@@ -653,6 +721,14 @@ export function htmlToMarkdown(html: string): string {
  */
 function cleanInlineHtml(html: string): string {
   let str = html;
+
+  // 来源引用语义化标签还原
+  str = str.replace(/<span[^>]*class="[^"]*(?:inline-ref-tag|ref-badge)[^"]*"[^>]*>(?:🏷️\s*)?(【[^】]+】)<\/span>/gi, "$1");
+  str = str.replace(/<span[^>]*class="[^"]*(?:inline-ref-tag|ref-badge)[^"]*"[^>]*>(?:🏷️\s*)?(\[Z[^\]]*\])<\/span>/gi, "$1");
+  str = str.replace(/<span[^>]*class="[^"]*(?:inline-ref-tag|ref-badge)[^"]*"[^>]*>(?:🏷️\s*)?([^<]+)<\/span>/gi, "$1");
+
+  // 剥离审阅高亮
+  str = str.replace(/<mark[^>]*class="[^"]*review-issue-highlight[^"]*"[^>]*>([\s\S]*?)<\/mark>/gi, "$1");
 
   // 换行标签替换为换行符
   str = str.replace(/<br\s*\/?>/gi, "\n");

@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { fetch as pluginFetch } from "@tauri-apps/plugin-http";
 import * as engineApi from "../lib/engineApi";
-import { highlightIssuesInHtml, htmlToMarkdown, markdownToHtml } from "../lib/markdown";
+import {
+  extractReferences,
+  getReferencesSummary,
+  highlightIssuesInHtml,
+  htmlToMarkdown,
+  markdownToHtml,
+} from "../lib/markdown";
 import { useProjectStore } from "../stores/project";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
@@ -2171,6 +2177,53 @@ describe("Pinia useProjectStore", () => {
       // 手动展开第 3 章
       collapsedMap[3] = false;
       expect(isChapterCollapsed(3)).toBe(false);
+    });
+
+    it("V2-T30: 全书多章节三源参考文献分类汇总与统计指标一致性", () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "三源统计项目", created_at: "2026-08-28T00:00:00Z" };
+      store.chapters = {
+        1: "# 第一章 概述\n依据批复【源:工程立项批复.docx】与勘测【源:地质报告.pdf】，结合规程【标:水工混凝土规范】。",
+        2: "# 第二章 建设必要性\n复核批复【源:工程立项批复.docx】，参考宏观政策【网:国家发改委投资指引】与依据 [Z]。",
+        3: "# 第三章 建设方案\n参照规程【标:水工混凝土规范】落实防洪标准【源:防洪规程.pdf】。",
+      };
+
+      // 提取全书合并参考文献
+      let combined = "";
+      for (const text of Object.values(store.chapters)) {
+        if (text) combined += "\n" + text;
+      }
+      const allRefs = extractReferences(combined);
+      expect(allRefs).toHaveLength(6);
+
+      const summary = getReferencesSummary(allRefs);
+      expect(summary.material.count).toBe(2); // 工程立项批复, 地质报告 (防洪规程 contains 规程 -> standard)
+      expect(summary.standard.count).toBe(3); // 水工混凝土规范, 防洪规程, [Z]
+      expect(summary.web.count).toBe(1);      // 国家发改委投资指引
+
+      // 验证引用频次累加
+      expect(summary.material.citations).toBe(3); // 2 + 1
+      expect(summary.standard.citations).toBe(4); // 2 + 1 + 1
+      expect(summary.web.citations).toBe(1);
+      expect(summary.totalCount).toBe(6);
+      expect(summary.totalCitations).toBe(8);
+    });
+
+    it("V2-T30: 正文内联标签与抽屉卡片数据特征匹配与高亮标记生成", () => {
+      const chapterText = "# 第一章 概述\n项目建设方案【源:总体规划.docx#L1-10】以及【网:水利部公告】。";
+      const html = markdownToHtml(chapterText, 1);
+
+      expect(html).toContain('class="inline-ref-tag type-material"');
+      expect(html).toContain('data-ref-type="material"');
+      expect(html).toContain('data-ref-title="总体规划.docx#L1-10"');
+      expect(html).toContain('class="inline-ref-tag type-web"');
+      expect(html).toContain('data-ref-type="web"');
+      expect(html).toContain('data-ref-title="水利部公告"');
+
+      // 提取引用清单
+      const refs = extractReferences(chapterText);
+      expect(refs.some((r) => r.title === "总体规划.docx#L1-10" && r.type === "material")).toBe(true);
+      expect(refs.some((r) => r.title === "水利部公告" && r.type === "web")).toBe(true);
     });
   });
 });

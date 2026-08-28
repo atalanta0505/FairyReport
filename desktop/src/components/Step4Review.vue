@@ -13,10 +13,12 @@ import {
   extractOutlineHeadings,
   extractReferences,
   extractSubHeadings,
+  getReferencesSummary,
   highlightIssuesInHtml,
   htmlToMarkdown,
   markdownToHtml,
   type ReferenceItem,
+  type ReferencesSummary,
   type SubHeading,
 } from "../lib/markdown";
 import { useEngineStore } from "../stores/engine";
@@ -143,7 +145,7 @@ function syncAllChaptersHtml() {
   }
 }
 
-// ── 审阅高亮标记点击联动定位至诊断报告卡片 ──
+// ── 审阅高亮标记与来源内联标签点击联动 ──
 function handleCanvasClick(e: MouseEvent) {
   const target = e.target as HTMLElement | null;
   if (!target) return;
@@ -154,6 +156,78 @@ function handleCanvasClick(e: MouseEvent) {
     if (issueId) {
       openDiagnosticDrawerAndFocusIssue(issueId, chapterSeq);
     }
+    return;
+  }
+  const refTag = target.closest(".inline-ref-tag") as HTMLElement | null;
+  if (refTag) {
+    const refType = (refTag.getAttribute("data-ref-type") || "all") as "material" | "standard" | "web" | "all";
+    const refTitle = refTag.getAttribute("data-ref-title") || "";
+    openRefDrawerAndFocusCard(refTitle, refType);
+    return;
+  }
+}
+
+function openRefDrawerAndFocusCard(refTitle: string, refType?: "material" | "standard" | "web" | "all") {
+  showRefDrawer.value = true;
+  if (refType && refType !== "all") {
+    refFilterType.value = refType;
+  } else {
+    refFilterType.value = "all";
+  }
+  nextTick(() => {
+    const allCards = document.querySelectorAll(".slide-drawer-panel .ref-card-item");
+    let targetCard: HTMLElement | null = null;
+    for (const card of allCards) {
+      const cardTitle = card.getAttribute("data-ref-title");
+      if (cardTitle === refTitle || (cardTitle && refTitle && (cardTitle.includes(refTitle) || refTitle.includes(cardTitle)))) {
+        targetCard = card as HTMLElement;
+        break;
+      }
+    }
+    if (targetCard) {
+      targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetCard.classList.remove("ref-card-pulse");
+      void targetCard.offsetWidth;
+      targetCard.classList.add("ref-card-pulse");
+      setTimeout(() => {
+        targetCard?.classList.remove("ref-card-pulse");
+      }, 2000);
+    }
+  });
+}
+
+function locateRefInCanvas(title: string) {
+  const allTags = document.querySelectorAll(".contenteditable-canvas .inline-ref-tag");
+  let targetTag: HTMLElement | null = null;
+  for (const tag of allTags) {
+    const t = tag.getAttribute("data-ref-title");
+    if (t === title || (t && title && (t.includes(title) || title.includes(t)))) {
+      targetTag = tag as HTMLElement;
+      break;
+    }
+  }
+  if (targetTag) {
+    const canvasEl = targetTag.closest(".contenteditable-canvas");
+    if (canvasEl && canvasEl.id) {
+      const match = canvasEl.id.match(/chapter-canvas-(\d+)/);
+      if (match) {
+        const seq = Number(match[1]);
+        chapterCollapsedMap.value[seq] = false;
+        activeChapterSeq.value = seq;
+      }
+    }
+    nextTick(() => {
+      targetTag?.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetTag?.classList.remove("inline-ref-pulse");
+      if (targetTag) void targetTag.offsetWidth;
+      targetTag?.classList.add("inline-ref-pulse");
+      setTimeout(() => {
+        targetTag?.classList.remove("inline-ref-pulse");
+      }, 2000);
+    });
+    showMsg(`已定位到正文引用位置：「${title}」`, "success");
+  } else {
+    showMsg(`未在正文中找到「${title}」引用标记`, "error");
   }
 }
 
@@ -425,13 +499,17 @@ const allReferences = computed<ReferenceItem[]>(() => {
   return extractReferences(combined);
 });
 
+const refSummary = computed<ReferencesSummary>(() => {
+  return getReferencesSummary(allReferences.value);
+});
+
 const filteredReferences = computed(() => {
   if (refFilterType.value === "all") return allReferences.value;
   return allReferences.value.filter((r) => r.type === refFilterType.value);
 });
 
 const totalRefCitations = computed(() => {
-  return allReferences.value.reduce((sum, item) => sum + item.count, 0);
+  return refSummary.value.totalCitations;
 });
 
 // ── 报告达标状态与健康评价 (废除 100 分制) ──
@@ -2028,6 +2106,40 @@ function copyFullBookMarkdown() {
             <button class="drawer-close-btn" @click="showRefDrawer = false">✕</button>
           </div>
 
+          <!-- 三源分类统计卡片组 -->
+          <div class="drawer-summary-grid">
+            <div class="summary-stat-card type-material">
+              <div class="stat-card-header">
+                <span class="stat-icon">📄</span>
+                <span class="stat-label">项目底稿</span>
+              </div>
+              <div class="stat-card-values">
+                <span class="stat-count"><strong>{{ refSummary.material.count }}</strong> 份</span>
+                <span class="stat-citations">引用 <strong>{{ refSummary.material.citations }}</strong> 处</span>
+              </div>
+            </div>
+            <div class="summary-stat-card type-standard">
+              <div class="stat-card-header">
+                <span class="stat-icon">⚖️</span>
+                <span class="stat-label">国标规程</span>
+              </div>
+              <div class="stat-card-values">
+                <span class="stat-count"><strong>{{ refSummary.standard.count }}</strong> 项</span>
+                <span class="stat-citations">引用 <strong>{{ refSummary.standard.citations }}</strong> 处</span>
+              </div>
+            </div>
+            <div class="summary-stat-card type-web">
+              <div class="stat-card-header">
+                <span class="stat-icon">🌐</span>
+                <span class="stat-label">百度联网</span>
+              </div>
+              <div class="stat-card-values">
+                <span class="stat-count"><strong>{{ refSummary.web.count }}</strong> 条</span>
+                <span class="stat-citations">引用 <strong>{{ refSummary.web.citations }}</strong> 处</span>
+              </div>
+            </div>
+          </div>
+
           <!-- 资料分类过滤 Tab -->
           <div class="drawer-subtabs-nav">
             <button
@@ -2042,21 +2154,21 @@ function copyFullBookMarkdown() {
               :class="{ active: refFilterType === 'material' }"
               @click="refFilterType = 'material'"
             >
-              📄 底稿文件
+              📄 项目底稿 ({{ refSummary.material.count }})
             </button>
             <button
               class="subtab-btn"
               :class="{ active: refFilterType === 'standard' }"
               @click="refFilterType = 'standard'"
             >
-              ⚖️ 标准规程
+              ⚖️ 国标规程 ({{ refSummary.standard.count }})
             </button>
             <button
               class="subtab-btn"
               :class="{ active: refFilterType === 'web' }"
               @click="refFilterType = 'web'"
             >
-              🌐 网络检索
+              🌐 百度联网 ({{ refSummary.web.count }})
             </button>
           </div>
 
@@ -2066,18 +2178,38 @@ function copyFullBookMarkdown() {
                 v-for="(refItem, rIdx) in filteredReferences"
                 :key="rIdx"
                 class="ref-card-item"
+                :data-ref-title="refItem.title"
+                :data-ref-type="refItem.type"
               >
                 <div class="ref-card-top">
                   <span class="ref-type-badge" :class="`type-${refItem.type}`">
                     {{ refItem.typeLabel }}
                   </span>
-                  <span class="ref-count-badge">引用 {{ refItem.count }} 次</span>
+                  <div class="ref-card-top-right">
+                    <span class="ref-count-badge">引用 {{ refItem.count }} 处</span>
+                    <button
+                      class="btn-locate-ref"
+                      title="在正文画布中定位并呼吸高亮首个引用位置"
+                      @click="locateRefInCanvas(refItem.title)"
+                    >
+                      🎯 定位正文出处
+                    </button>
+                  </div>
                 </div>
                 <div class="ref-card-title">{{ refItem.title }}</div>
-                <div v-if="refItem.url" class="ref-card-link">
-                  <a :href="refItem.url" target="_blank" rel="noopener noreferrer" class="ref-external-link">
-                    🔗 {{ refItem.url }}
+                <div v-if="refItem.type === 'web'" class="ref-card-link-box">
+                  <a
+                    v-if="refItem.url"
+                    :href="refItem.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="ref-external-link"
+                  >
+                    🔗 访问原网页出处 ↗
                   </a>
+                  <span v-else class="ref-archive-note">
+                    🌐 百度检索在线实时快照已归档入库
+                  </span>
                 </div>
                 <div class="ref-card-raw"><code>{{ refItem.raw }}</code></div>
               </div>
@@ -2085,9 +2217,19 @@ function copyFullBookMarkdown() {
 
             <div v-else class="drawer-empty-state">
               <span class="empty-icon">📂</span>
-              <p class="empty-title">暂无引用的底稿或标准规程</p>
+              <p class="empty-title">
+                {{
+                  refFilterType === 'all'
+                    ? '全书暂无引用的参考资料或规程'
+                    : refFilterType === 'material'
+                    ? '全书暂无项目底稿资料引用'
+                    : refFilterType === 'standard'
+                    ? '全书暂无行业国标规程引用'
+                    : '全书暂无百度联网检索引用'
+                }}
+              </p>
               <p class="empty-desc">
-                您可在正文中嵌入 <code>【源:文件名.docx】</code> 或 <code>【标:规程名】</code>，系统将在此自动汇总。
+                您可在各章正文中嵌入 <code>【源:文件名.docx】</code>、<code>【标:规程名】</code> 或 <code>【网:信息源】</code>，系统将在此自动汇总与联动。
               </p>
             </div>
           </div>
@@ -3915,7 +4057,96 @@ function copyFullBookMarkdown() {
   color: #1e293b;
 }
 
-/* 参考资料列表 */
+/* 参考资料列表与三源统计抽屉 */
+.drawer-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.summary-stat-card {
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid transparent;
+}
+.summary-stat-card.type-material {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+.summary-stat-card.type-standard {
+  background: #fefce8;
+  border-color: #fef08a;
+}
+.summary-stat-card.type-web {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+.stat-card-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.summary-stat-card.type-material .stat-label {
+  color: #1d4ed8;
+}
+.summary-stat-card.type-standard .stat-label {
+  color: #a16207;
+}
+.summary-stat-card.type-web .stat-label {
+  color: #047857;
+}
+.stat-card-values {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.stat-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.stat-citations {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.drawer-subtabs-nav {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  overflow-x: auto;
+}
+.subtab-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 3px 9px;
+  font-size: 11px;
+  color: #475569;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.subtab-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.subtab-btn.active {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #fff;
+  font-weight: 600;
+}
+
 .ref-items-list {
   display: flex;
   flex-direction: column;
@@ -3929,12 +4160,55 @@ function copyFullBookMarkdown() {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  transition: all 0.2s ease;
 }
+.ref-card-pulse {
+  animation: refCardPulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+}
+@keyframes refCardPulse {
+  0% {
+    background-color: #fef08a !important;
+    box-shadow: 0 0 0 4px rgba(234, 179, 8, 0.5) !important;
+    border-color: #eab308 !important;
+  }
+  50% {
+    background-color: #fef9c3 !important;
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.25) !important;
+    border-color: #eab308 !important;
+  }
+  100% {
+    background-color: #ffffff;
+    box-shadow: none;
+  }
+}
+
 .ref-card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
+.ref-card-top-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-locate-ref {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #0284c7;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-locate-ref:hover {
+  background: #0284c7;
+  color: #fff;
+  border-color: #0284c7;
+}
+
 .ref-type-badge {
   font-size: 11px;
   font-weight: 600;
@@ -3946,12 +4220,12 @@ function copyFullBookMarkdown() {
   color: #1d4ed8;
 }
 .ref-type-badge.type-standard {
-  background: #ecfdf5;
-  color: #047857;
+  background: #fef3c7;
+  color: #b45309;
 }
 .ref-type-badge.type-web {
-  background: #fdf2f8;
-  color: #9d174d;
+  background: #d1fae5;
+  color: #065f46;
 }
 .ref-count-badge {
   font-size: 11px;
@@ -3962,9 +4236,7 @@ function copyFullBookMarkdown() {
   font-weight: 600;
   color: #0f172a;
 }
-.ref-card-link {
-  font-size: 11px;
-  word-break: break-all;
+.ref-card-link-box {
   margin: 2px 0;
 }
 .ref-external-link {
@@ -3974,9 +4246,19 @@ function copyFullBookMarkdown() {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-size: 11px;
+  word-break: break-all;
 }
 .ref-external-link:hover {
   color: #1d4ed8;
+}
+.ref-archive-note {
+  font-size: 11px;
+  color: #059669;
+  background: #ecfdf5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
 }
 .ref-card-raw code {
   font-size: 11px;
@@ -4003,6 +4285,65 @@ function copyFullBookMarkdown() {
   margin: 0;
   font-size: 12px;
   color: #64748b;
+}
+
+/* 正文内联引用标签与呼吸动画 */
+.full-book-scroll-canvas :deep(.ref-badge),
+.full-book-scroll-canvas :deep(.inline-ref-tag) {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 12px;
+  margin: 0 2px;
+  vertical-align: baseline;
+  user-select: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.full-book-scroll-canvas :deep(.inline-ref-tag.type-material),
+.full-book-scroll-canvas :deep(.ref-badge) {
+  background: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+}
+.full-book-scroll-canvas :deep(.inline-ref-tag.type-standard) {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.full-book-scroll-canvas :deep(.inline-ref-tag.type-web) {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+.full-book-scroll-canvas :deep(.inline-ref-tag:hover) {
+  filter: brightness(0.95);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+@keyframes inlineRefPulse {
+  0% {
+    background-color: #fef08a !important;
+    box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.6) !important;
+    transform: scale(1.08);
+  }
+  50% {
+    background-color: #fef9c3 !important;
+    box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.3) !important;
+    transform: scale(1.04);
+  }
+  100% {
+    box-shadow: none !important;
+    transform: scale(1);
+  }
+}
+.full-book-scroll-canvas :deep(.inline-ref-pulse),
+:deep(.inline-ref-pulse) {
+  animation: inlineRefPulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
 }
 
 /* 按钮通用 */

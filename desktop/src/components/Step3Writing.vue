@@ -5,9 +5,11 @@ import {
   extractOutlineHeadings,
   extractReferences,
   extractSubHeadings,
+  getReferencesSummary,
   htmlToMarkdown,
   markdownToHtml,
   type ReferenceItem,
+  type ReferencesSummary,
   type SubHeading,
 } from "../lib/markdown";
 import { useEngineStore } from "../stores/engine";
@@ -21,6 +23,7 @@ const projectStore = useProjectStore();
 const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
 const showHintSection = ref<boolean>(false);
 const showRefDrawer = ref<boolean>(false);
+const refFilterType = ref<"all" | "material" | "standard" | "web">("all");
 const chapterHints = ref<Record<number, string>>({});
 
 const collapsedChapters = ref<Record<number, boolean>>({});
@@ -166,9 +169,79 @@ const currentChapterReferences = computed<ReferenceItem[]>(() => {
   return extractReferences(currentChapterText.value);
 });
 
-const totalRefCitations = computed(() => {
-  return currentChapterReferences.value.reduce((sum, item) => sum + item.count, 0);
+const refSummary = computed<ReferencesSummary>(() => {
+  return getReferencesSummary(currentChapterReferences.value);
 });
+
+const filteredChapterReferences = computed(() => {
+  if (refFilterType.value === "all") return currentChapterReferences.value;
+  return currentChapterReferences.value.filter((r) => r.type === refFilterType.value);
+});
+
+function openRefDrawerAndFocusCard(refTitle: string, refType?: "material" | "standard" | "web" | "all") {
+  showRefDrawer.value = true;
+  if (refType && refType !== "all") {
+    refFilterType.value = refType;
+  } else {
+    refFilterType.value = "all";
+  }
+  nextTick(() => {
+    const allCards = document.querySelectorAll(".ref-drawer-panel .ref-card-item");
+    let targetCard: HTMLElement | null = null;
+    for (const card of allCards) {
+      const cardTitle = card.getAttribute("data-ref-title");
+      if (cardTitle === refTitle || (cardTitle && refTitle && (cardTitle.includes(refTitle) || refTitle.includes(cardTitle)))) {
+        targetCard = card as HTMLElement;
+        break;
+      }
+    }
+    if (targetCard) {
+      targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetCard.classList.remove("ref-card-pulse");
+      void targetCard.offsetWidth;
+      targetCard.classList.add("ref-card-pulse");
+      setTimeout(() => {
+        targetCard?.classList.remove("ref-card-pulse");
+      }, 2000);
+    }
+  });
+}
+
+function locateRefInCanvas(title: string) {
+  if (!editorCanvasRef.value) return;
+  const tags = editorCanvasRef.value.querySelectorAll(".inline-ref-tag");
+  let targetTag: HTMLElement | null = null;
+  for (const tag of tags) {
+    const t = tag.getAttribute("data-ref-title");
+    if (t === title || (t && title && (t.includes(title) || title.includes(t)))) {
+      targetTag = tag as HTMLElement;
+      break;
+    }
+  }
+  if (targetTag) {
+    targetTag.scrollIntoView({ behavior: "smooth", block: "center" });
+    targetTag.classList.remove("inline-ref-pulse");
+    void targetTag.offsetWidth;
+    targetTag.classList.add("inline-ref-pulse");
+    setTimeout(() => {
+      targetTag?.classList.remove("inline-ref-pulse");
+    }, 2000);
+    showMsg(`已定位到正文引用位置：「${title}」`, "success");
+  } else {
+    showMsg(`未在当前正文视口中找到「${title}」引用标记`, "error");
+  }
+}
+
+function handleEditorCanvasClick(e: MouseEvent) {
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  const refTag = target.closest(".inline-ref-tag") as HTMLElement | null;
+  if (refTag) {
+    const refType = (refTag.getAttribute("data-ref-type") || "all") as "material" | "standard" | "web" | "all";
+    const refTitle = refTag.getAttribute("data-ref-title") || "";
+    openRefDrawerAndFocusCard(refTitle, refType);
+  }
+}
 
 const currentChapterStatus = computed(() => {
   return (
@@ -832,6 +905,7 @@ function nextStep() {
               contenteditable="true"
               class="rich-rendered-editor"
               @input="onEditorInput"
+              @click="handleEditorCanvasClick"
               data-placeholder="点击上方「✍️ 单章流式写作」或「🚀 一键开始全书写作」，系统将结合工程底稿与标准规程自动打字机式流式生成章节排版正文；生成后可直接在文字上就地点击输入编辑..."
             ></div>
           </div>
@@ -851,18 +925,80 @@ function nextStep() {
                 <button class="drawer-close-btn" @click="showRefDrawer = false">✕</button>
               </div>
 
-              <div class="drawer-summary-bar">
-                <span>共命中 <strong>{{ currentChapterReferences.length }}</strong> 份底稿与标准规程</span>
-                <span>·</span>
-                <span>累计引用 <strong>{{ totalRefCitations }}</strong> 处</span>
+              <!-- 三源分类统计卡片组 -->
+              <div class="drawer-summary-grid">
+                <div class="summary-stat-card type-material">
+                  <div class="stat-card-header">
+                    <span class="stat-icon">📄</span>
+                    <span class="stat-label">项目底稿</span>
+                  </div>
+                  <div class="stat-card-values">
+                    <span class="stat-count"><strong>{{ refSummary.material.count }}</strong> 份</span>
+                    <span class="stat-citations">引用 <strong>{{ refSummary.material.citations }}</strong> 处</span>
+                  </div>
+                </div>
+                <div class="summary-stat-card type-standard">
+                  <div class="stat-card-header">
+                    <span class="stat-icon">⚖️</span>
+                    <span class="stat-label">国标规程</span>
+                  </div>
+                  <div class="stat-card-values">
+                    <span class="stat-count"><strong>{{ refSummary.standard.count }}</strong> 项</span>
+                    <span class="stat-citations">引用 <strong>{{ refSummary.standard.citations }}</strong> 处</span>
+                  </div>
+                </div>
+                <div class="summary-stat-card type-web">
+                  <div class="stat-card-header">
+                    <span class="stat-icon">🌐</span>
+                    <span class="stat-label">百度联网</span>
+                  </div>
+                  <div class="stat-card-values">
+                    <span class="stat-count"><strong>{{ refSummary.web.count }}</strong> 条</span>
+                    <span class="stat-citations">引用 <strong>{{ refSummary.web.citations }}</strong> 处</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 分类筛选 Tab 导航 -->
+              <div class="drawer-subtabs-nav">
+                <button
+                  class="subtab-btn"
+                  :class="{ active: refFilterType === 'all' }"
+                  @click="refFilterType = 'all'"
+                >
+                  全部 ({{ currentChapterReferences.length }})
+                </button>
+                <button
+                  class="subtab-btn"
+                  :class="{ active: refFilterType === 'material' }"
+                  @click="refFilterType = 'material'"
+                >
+                  📄 项目底稿 ({{ refSummary.material.count }})
+                </button>
+                <button
+                  class="subtab-btn"
+                  :class="{ active: refFilterType === 'standard' }"
+                  @click="refFilterType = 'standard'"
+                >
+                  ⚖️ 国标规程 ({{ refSummary.standard.count }})
+                </button>
+                <button
+                  class="subtab-btn"
+                  :class="{ active: refFilterType === 'web' }"
+                  @click="refFilterType = 'web'"
+                >
+                  🌐 百度联网 ({{ refSummary.web.count }})
+                </button>
               </div>
 
               <div class="drawer-body">
-                <div v-if="currentChapterReferences.length > 0" class="ref-items-list">
+                <div v-if="filteredChapterReferences.length > 0" class="ref-items-list">
                   <div
-                    v-for="(refItem, rIdx) in currentChapterReferences"
+                    v-for="(refItem, rIdx) in filteredChapterReferences"
                     :key="rIdx"
                     class="ref-card-item"
+                    :data-ref-title="refItem.title"
+                    :data-ref-type="refItem.type"
                   >
                     <div class="ref-card-top">
                       <span
@@ -871,13 +1007,31 @@ function nextStep() {
                       >
                         {{ refItem.typeLabel }}
                       </span>
-                      <span class="ref-count-tag">引用 {{ refItem.count }} 次</span>
+                      <div class="ref-card-top-right">
+                        <span class="ref-count-tag">引用 {{ refItem.count }} 处</span>
+                        <button
+                          class="btn-locate-ref"
+                          title="在正文画布中定位并呼吸高亮首个引用位置"
+                          @click="locateRefInCanvas(refItem.title)"
+                        >
+                          🎯 定位正文出处
+                        </button>
+                      </div>
                     </div>
                     <div class="ref-card-title">{{ refItem.title }}</div>
-                    <div v-if="refItem.url" class="ref-card-link">
-                      <a :href="refItem.url" target="_blank" rel="noopener noreferrer" class="ref-external-link">
-                        🔗 {{ refItem.url }}
+                    <div v-if="refItem.type === 'web'" class="ref-card-link-box">
+                      <a
+                        v-if="refItem.url"
+                        :href="refItem.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="ref-external-link"
+                      >
+                        🔗 访问原网页出处 ↗
                       </a>
+                      <span v-else class="ref-archive-note">
+                        🌐 百度检索在线实时快照已归档入库
+                      </span>
                     </div>
                     <div class="ref-card-raw"><code>{{ refItem.raw }}</code></div>
                   </div>
@@ -885,9 +1039,19 @@ function nextStep() {
 
                 <div v-else class="ref-empty-state">
                   <span class="empty-icon">📂</span>
-                  <p class="empty-title">本章正文中暂未引用底稿标签</p>
+                  <p class="empty-title">
+                    {{
+                      refFilterType === 'all'
+                        ? '本章正文中暂未引用任何参考资料'
+                        : refFilterType === 'material'
+                        ? '本章暂无项目底稿资料引用'
+                        : refFilterType === 'standard'
+                        ? '本章暂无行业国标规程引用'
+                        : '本章暂无百度联网检索引用'
+                    }}
+                  </p>
                   <p class="empty-desc">
-                    您可在正文中嵌入 <code>【源:文件名.docx】</code> 或 <code>【标:规范名】</code> 标记数据与论述来源，系统将在此自动汇总。
+                    您可在正文中嵌入 <code>【源:文件名.docx】</code>、<code>【标:规范名】</code> 或 <code>【网:信息源】</code> 标记数据出处，系统将在此自动汇总与联动。
                   </p>
                 </div>
               </div>
@@ -2010,12 +2174,11 @@ function nextStep() {
   border-top: 1px solid #e2e8f0;
   margin: 20px 0;
 }
-.rich-rendered-editor :deep(.ref-badge) {
+.rich-rendered-editor :deep(.ref-badge),
+.rich-rendered-editor :deep(.inline-ref-tag) {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  background: #e0e7ff;
-  color: #3730a3;
   font-size: 11px;
   font-weight: 500;
   padding: 1px 7px;
@@ -2023,6 +2186,29 @@ function nextStep() {
   margin: 0 2px;
   vertical-align: baseline;
   user-select: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.rich-rendered-editor :deep(.inline-ref-tag.type-material),
+.rich-rendered-editor :deep(.ref-badge) {
+  background: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+}
+.rich-rendered-editor :deep(.inline-ref-tag.type-standard) {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.rich-rendered-editor :deep(.inline-ref-tag.type-web) {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+.rich-rendered-editor :deep(.inline-ref-tag:hover) {
+  filter: brightness(0.95);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
 }
 
 /* 锚点定位呼吸高亮动画 */
@@ -2045,6 +2231,27 @@ function nextStep() {
 .rich-rendered-editor :deep(.heading-anchor-pulse),
 :deep(.heading-anchor-pulse) {
   animation: headingPulse 1.5s ease-out forwards;
+}
+
+@keyframes inlineRefPulse {
+  0% {
+    background-color: #fef08a !important;
+    box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.6) !important;
+    transform: scale(1.08);
+  }
+  50% {
+    background-color: #fef9c3 !important;
+    box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.3) !important;
+    transform: scale(1.04);
+  }
+  100% {
+    box-shadow: none !important;
+    transform: scale(1);
+  }
+}
+.rich-rendered-editor :deep(.inline-ref-pulse),
+:deep(.inline-ref-pulse) {
+  animation: inlineRefPulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
 }
 
 /* 按钮通用 */
@@ -2226,20 +2433,99 @@ function nextStep() {
   color: #0f172a;
 }
 
-.drawer-summary-bar {
-  background: #eff6ff;
-  padding: 8px 16px;
-  font-size: 12px;
-  color: #1e40af;
-  border-bottom: 1px solid #dbeafe;
+.drawer-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.summary-stat-card {
+  border-radius: 6px;
+  padding: 8px 10px;
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid transparent;
+}
+.summary-stat-card.type-material {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+.summary-stat-card.type-standard {
+  background: #fefce8;
+  border-color: #fef08a;
+}
+.summary-stat-card.type-web {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+.stat-card-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.summary-stat-card.type-material .stat-label {
+  color: #1d4ed8;
+}
+.summary-stat-card.type-standard .stat-label {
+  color: #a16207;
+}
+.summary-stat-card.type-web .stat-label {
+  color: #047857;
+}
+.stat-card-values {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.stat-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.stat-citations {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.drawer-subtabs-nav {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  overflow-x: auto;
+}
+.subtab-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 3px 9px;
+  font-size: 11px;
+  color: #475569;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.subtab-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.subtab-btn.active {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #fff;
+  font-weight: 600;
 }
 
 .drawer-body {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 16px;
+  padding: 12px 14px;
 }
 .ref-items-list {
   display: flex;
@@ -2247,19 +2533,62 @@ function nextStep() {
   gap: 10px;
 }
 .ref-card-item {
-  background: #f8fafc;
+  background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  transition: all 0.2s ease;
 }
+.ref-card-pulse {
+  animation: refCardPulse 2s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+}
+@keyframes refCardPulse {
+  0% {
+    background-color: #fef08a !important;
+    box-shadow: 0 0 0 4px rgba(234, 179, 8, 0.5) !important;
+    border-color: #eab308 !important;
+  }
+  50% {
+    background-color: #fef9c3 !important;
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.25) !important;
+    border-color: #eab308 !important;
+  }
+  100% {
+    background-color: #ffffff;
+    box-shadow: none;
+  }
+}
+
 .ref-card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
+.ref-card-top-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-locate-ref {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  color: #0284c7;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-locate-ref:hover {
+  background: #0284c7;
+  color: #fff;
+  border-color: #0284c7;
+}
+
 .ref-type-tag {
   font-size: 10px;
   padding: 1px 6px;
@@ -2275,8 +2604,8 @@ function nextStep() {
   color: #b45309;
 }
 .type-web {
-  background: #e0e7ff;
-  color: #4338ca;
+  background: #d1fae5;
+  color: #065f46;
 }
 .type-other {
   background: #f1f5f9;
@@ -2292,9 +2621,7 @@ function nextStep() {
   color: #1e293b;
   word-break: break-all;
 }
-.ref-card-link {
-  font-size: 11px;
-  word-break: break-all;
+.ref-card-link-box {
   margin: 2px 0;
 }
 .ref-external-link {
@@ -2304,9 +2631,19 @@ function nextStep() {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-size: 11px;
+  word-break: break-all;
 }
 .ref-external-link:hover {
   color: #1d4ed8;
+}
+.ref-archive-note {
+  font-size: 11px;
+  color: #059669;
+  background: #ecfdf5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
 }
 .ref-card-raw {
   font-size: 11px;

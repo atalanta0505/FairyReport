@@ -9,6 +9,7 @@ import {
   extractReferences,
   extractSubHeadings,
   formatInline,
+  getReferencesSummary,
   highlightIssuesInHtml,
   htmlToMarkdown,
   markdownToHtml,
@@ -59,7 +60,7 @@ describe("Markdown 解析与排版工具", () => {
       const md = "# 第一章 建设背景 **重点** 【源:规划纲要.docx】";
       const html = markdownToHtml(md, 2);
       expect(html).toContain('<h1 id="h-ch2-idx0">第一章 建设背景</h1>');
-      expect(html).toContain('<p><strong>重点</strong> <span class="ref-badge">🏷️ 【源:规划纲要.docx】</span></p>');
+      expect(html).toContain('<p><strong>重点</strong> <span class="inline-ref-tag type-material" data-ref-type="material" data-ref-title="规划纲要.docx" title="点击查看参考资料出处">【源:规划纲要.docx】</span></p>');
     });
   });
 
@@ -73,11 +74,11 @@ describe("Markdown 解析与排版工具", () => {
       expect(html).toContain("<del>删除内容</del>");
     });
 
-    it("来源标签自动识别并徽章化 (ref-badge)", () => {
+    it("来源标签自动识别并语义化内联标签化 (inline-ref-tag)", () => {
       const text = "本段引自水利规程【源:水利规程.docx#L1-10】以及地质监测【源：监测报告.pdf】。";
       const html = formatInline(text);
-      expect(html).toContain('<span class="ref-badge">🏷️ 【源:水利规程.docx#L1-10】</span>');
-      expect(html).toContain('<span class="ref-badge">🏷️ 【源：监测报告.pdf】</span>');
+      expect(html).toContain('<span class="inline-ref-tag type-standard" data-ref-type="standard" data-ref-title="水利规程.docx#L1-10" title="点击查看参考资料出处">【源:水利规程.docx#L1-10】</span>');
+      expect(html).toContain('<span class="inline-ref-tag type-material" data-ref-type="material" data-ref-title="监测报告.pdf" title="点击查看参考资料出处">【源：监测报告.pdf】</span>');
     });
 
     it("行内代码中的特殊字符不被二次解析", () => {
@@ -136,7 +137,7 @@ describe("Markdown 解析与排版工具", () => {
       expect(html).toContain("<td>总库容</td>");
       expect(html).toContain("<td>万m³</td>");
       expect(html).toContain("<td>1500</td>");
-      expect(html).toContain('<span class="ref-badge">🏷️ 【源:立项批复.docx】</span>');
+      expect(html).toContain('<span class="inline-ref-tag type-material" data-ref-type="material" data-ref-title="立项批复.docx" title="点击查看参考资料出处">【源:立项批复.docx】</span>');
       expect(html).toContain("</table>");
     });
   });
@@ -150,7 +151,7 @@ describe("Markdown 解析与排版工具", () => {
 
       const html = markdownToHtml(md);
       expect(html).toContain("<blockquote><p>");
-      expect(html).toContain("引用第一行规范说明<br />引用第二行重点提示 <span class=\"ref-badge\">🏷️ 【源:设计手册.pdf】</span>");
+      expect(html).toContain("引用第一行规范说明<br />引用第二行重点提示 <span class=\"inline-ref-tag type-material\" data-ref-type=\"material\" data-ref-title=\"设计手册.pdf\" title=\"点击查看参考资料出处\">【源:设计手册.pdf】</span>");
       expect(html).toContain("</p></blockquote>");
     });
 
@@ -500,10 +501,11 @@ describe("Markdown 解析与排版工具", () => {
       expect(refs[0].title).toBe("立项批复文件.docx#L1-10");
       expect(refs[0].count).toBe(2);
       expect(refs[0].type).toBe("material");
-      expect(refs[0].typeLabel).toBe("底稿文件");
+      expect(refs[0].typeLabel).toBe("项目底稿");
 
       expect(refs[1].title).toBe("地质勘察报告.pdf");
       expect(refs[1].count).toBe(1);
+      expect(refs[1].typeLabel).toBe("项目底稿");
     });
 
     it("精准分类规程标准、网络来源与参考文献 [Z]", () => {
@@ -713,6 +715,86 @@ describe("Markdown 解析与排版工具", () => {
       expect(countContentChars("   \n\t  ")).toBe(0);
       expect(countContentChars("# 纯标题\n## 二级标题\n### 三级标题")).toBe(0);
       expect(countContentChars("| 表头1 | 表头2 |\n|---|---|\n| 数据1 | 数据2 |")).toBe(0);
+    });
+  });
+
+  describe("V2-T30: 三源参考文献分类统计与内联标签双向联动", () => {
+    it("getReferencesSummary: 准确统计三源分类（项目底稿/国标规程/百度联网）数量与引用频次", () => {
+      const refs = [
+        { type: "material" as const, typeLabel: "项目底稿", title: "可研报告.docx", raw: "【源:可研报告.docx】", count: 3 },
+        { type: "material" as const, typeLabel: "项目底稿", title: "地质勘探.pdf", raw: "【源:地质勘探.pdf】", count: 1 },
+        { type: "standard" as const, typeLabel: "国标规程", title: "防洪标准GB50201", raw: "【标:防洪标准GB50201】", count: 2 },
+        { type: "web" as const, typeLabel: "百度联网", title: "国家发改委产业目录", raw: "【网:国家发改委产业目录】", count: 4, url: "https://www.ndrc.gov.cn" },
+      ];
+
+      const summary = getReferencesSummary(refs);
+      expect(summary.material.count).toBe(2);
+      expect(summary.material.citations).toBe(4); // 3 + 1
+      expect(summary.standard.count).toBe(1);
+      expect(summary.standard.citations).toBe(2);
+      expect(summary.web.count).toBe(1);
+      expect(summary.web.citations).toBe(4);
+      expect(summary.totalCount).toBe(4);
+      expect(summary.totalCitations).toBe(10);
+    });
+
+    it("getReferencesSummary: 空数组或异常输入防御", () => {
+      const s1 = getReferencesSummary([]);
+      expect(s1.totalCount).toBe(0);
+      expect(s1.totalCitations).toBe(0);
+      expect(s1.material.count).toBe(0);
+      expect(s1.standard.citations).toBe(0);
+
+      const s2 = getReferencesSummary(null as unknown as any[]);
+      expect(s2.totalCount).toBe(0);
+      expect(s2.totalCitations).toBe(0);
+    });
+
+    it("markdownToHtml: 三源来源标签生成 semantic inline-ref-tag 包含 type 与 data-ref-title", () => {
+      const md = `
+        根据立项依据【源:项目立项批复.docx#L10-20】，
+        对照规程【标:水工混凝土结构设计规范SL191-2008】，
+        结合最新检索【网:国家发展改革委投资项目大纲】，
+        以及标准库 [Z] 与专题规范 [Z-03]。
+      `;
+
+      const html = markdownToHtml(md);
+
+      // 项目底稿
+      expect(html).toContain('class="inline-ref-tag type-material"');
+      expect(html).toContain('data-ref-type="material"');
+      expect(html).toContain('data-ref-title="项目立项批复.docx#L10-20"');
+      expect(html).toContain('【源:项目立项批复.docx#L10-20】');
+
+      // 国标规程
+      expect(html).toContain('class="inline-ref-tag type-standard"');
+      expect(html).toContain('data-ref-type="standard"');
+      expect(html).toContain('data-ref-title="水工混凝土结构设计规范SL191-2008"');
+      expect(html).toContain('【标:水工混凝土结构设计规范SL191-2008】');
+
+      // 百度联网
+      expect(html).toContain('class="inline-ref-tag type-web"');
+      expect(html).toContain('data-ref-type="web"');
+      expect(html).toContain('data-ref-title="国家发展改革委投资项目大纲"');
+      expect(html).toContain('【网:国家发展改革委投资项目大纲】');
+
+      // 标准依据 [Z]
+      expect(html).toContain('data-ref-title="标准规范规程库 [Z]"');
+      expect(html).toContain('data-ref-title="标准规范依据 [Z-03]"');
+    });
+
+    it("htmlToMarkdown: 双向转换纯净还原为原始 Markdown 标签（杜绝 HTML 与 span 污染）", () => {
+      const originalMd = "# 第一章 建设方案\n\n根据立项批复【源:批复文件.docx】，本项目建设规模符合标准【标:水利规范.pdf】及政策【网:发改委文件】。";
+      const html = markdownToHtml(originalMd);
+
+      expect(html).toContain("inline-ref-tag");
+      expect(html).toContain("data-ref-title");
+
+      const roundTripMd = htmlToMarkdown(html);
+      expect(roundTripMd).toBe(originalMd);
+      expect(roundTripMd).not.toContain("<span");
+      expect(roundTripMd).not.toContain("inline-ref-tag");
+      expect(roundTripMd).not.toContain("data-ref");
     });
   });
 });
