@@ -8,6 +8,7 @@ import re
 from . import templates_loader as tmpl
 from .prompts import (
     ORDER_SYSTEM_PROMPT,
+    REASONING_CHINESE_DEFENSE_PROMPT,
     TEMPERATURE_HINT,
     TEMPERATURE_ORDER,
     TEMPERATURE_OUTLINE,
@@ -85,7 +86,8 @@ class OutlineGenerator:
             f"请为以下项目生成详细的报告大纲{report_label}：\n\n"
             f"**项目名称**：{report_name}\n\n"
             f"**参考资料摘要**：\n{context}\n\n"
-            f"请生成详细的 Markdown 大纲（使用 # 到 ##### 的标题层级）："
+            f"请生成详细的 Markdown 大纲（使用 # 到 ##### 的标题层级）：\n\n"
+            f"{REASONING_CHINESE_DEFENSE_PROMPT}"
         )
         return self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_OUTLINE)
 
@@ -108,7 +110,8 @@ class OutlineGenerator:
             f"请为以下项目生成详细的报告大纲{report_label}：\n\n"
             f"**项目名称**：{report_name}\n\n"
             f"**参考资料摘要**：\n{context}\n\n"
-            f"请生成详细的 Markdown 大纲（使用 # 到 ##### 的标题层级）："
+            f"请生成详细的 Markdown 大纲（使用 # 到 ##### 的标题层级）：\n\n"
+            f"{REASONING_CHINESE_DEFENSE_PROMPT}"
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
         return self.llm.chat_stream(messages, temperature=TEMPERATURE_OUTLINE, callback=callback)
@@ -119,7 +122,8 @@ class OutlineGenerator:
             f"已生成以下大纲：\n\n{outline_md}\n\n"
             f"请按从上到下的顺序为每个「第X章」编号（1,2,3...），"
             f"然后建议一个最优写作顺序。\n"
-            f"只返回逗号分隔的数字序列，如 2,3,4,1,5"
+            f"只返回逗号分隔的数字序列，如 2,3,4,1,5\n\n"
+            f"{REASONING_CHINESE_DEFENSE_PROMPT}"
         )
         raw = self.llm.chat(prompt, system_prompt=ORDER_SYSTEM_PROMPT, temperature=TEMPERATURE_ORDER).strip()
 

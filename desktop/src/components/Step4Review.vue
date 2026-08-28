@@ -1381,7 +1381,7 @@ function copyFullBookMarkdown() {
             <div class="review-thought-header" @click="showReviewThoughtDetails = !showReviewThoughtDetails">
               <div class="review-thought-title">
                 <span class="review-thought-icon">🧠</span>
-                <span>专家审阅实时思考推演窗 <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
+                <span>🧠 深度技术推演与工程构思过程 (纯中文) <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
                 <span class="thinking-wave">
                   <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                 </span>
@@ -1394,7 +1394,7 @@ function copyFullBookMarkdown() {
               <pre v-if="projectStore.reviewProgress?.thoughtText">{{ projectStore.reviewProgress.thoughtText }}</pre>
               <div v-else class="review-thought-placeholder">
                 <span class="placeholder-spinner">🔍</span>
-                <span>AI 专家正在对照国家发改委与行业编制规程深度核查章节参数指标与数据自洽性...</span>
+                <span>思维推演中 (纯中文)... AI 专家正在对照国家发改委与行业编制规程深度核查章节参数指标与数据自洽性...</span>
               </div>
             </div>
           </div>

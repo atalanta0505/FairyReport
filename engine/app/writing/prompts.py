@@ -105,24 +105,30 @@ TECH_CHAPTER_KEYWORDS = [
 ]
 
 # ═══════════════════════════════════════════════════════════════
-# 提示词资产（中文原文不改写）
+# 提示词资产（中文原文不改写，大模型思考链纯中文绝对纯化硬防线）
 # ═══════════════════════════════════════════════════════════════
 
-# ── 大纲生成（移自 outline.py）──
-_OUTLINE_BASE_PROMPT = """\
-你是资深工程咨询报告编制专家。
-根据用户输入的项目主题、报告类型和参考资料片段，生成详细的报告大纲（Markdown 格式）。"""
+REASONING_CHINESE_DEFENSE_PROMPT = """【思考链与语言规范（最高优先级·纯中文绝对纯化防线）】：如果模型输出内部思维推演过程（reasoning_content / thought），该思考推演过程必须 100% 使用规范中文进行国家发改委投资项目与工程咨询专业论证，绝对禁止夹杂任何英文思考句子、英文短语或英文分析单词（法定国家标准代码如 GB/T、ISO 及法定工程量纲单位符号如 m³、kW·h、% 除外）！严禁出现 'Okay', 'Let me', 'First', 'Next', 'I should', 'We need to' 等任何英文构思句式！"""
 
-ORDER_SYSTEM_PROMPT = """\
+# ── 大纲生成（移自 outline.py）──
+_OUTLINE_BASE_PROMPT = f"""\
+你是资深工程咨询报告编制专家。
+根据用户输入的项目主题、报告类型和参考资料片段，生成详细的报告大纲（Markdown 格式）。
+
+{REASONING_CHINESE_DEFENSE_PROMPT}"""
+
+ORDER_SYSTEM_PROMPT = f"""\
 你是报告写作规划专家。分析大纲章节内容，建议最优写作顺序。
 核心章节先写，总则和结论最后写。
-先返回一行逗号分隔的章节序号（如 2,3,4,1,5），然后另起一行用 REASON: xxx 简短说明排序理由。"""
+先返回一行逗号分隔的章节序号（如 2,3,4,1,5），然后另起一行用 REASON: xxx 简短说明排序理由。
+
+{REASONING_CHINESE_DEFENSE_PROMPT}"""
 
 # ── 章节写作（移自 writer.py）──
-_BASE_WRITING_PROMPT = """\
+_BASE_WRITING_PROMPT = f"""\
 你是资深工程咨询报告撰写专家。
 
-【思考链与语言规范（最高优先级）】：内部构思与推理推演过程必须 100% 使用纯中文进行国家发改委投资项目与工程咨询专业论证，严禁夹杂任何英文思考句或英文单词（除 GB/T、ISO 等法定国家标准代码与标准工程单位外）！
+{REASONING_CHINESE_DEFENSE_PROMPT}
 
 【发改委通用大纲 12 项规定动作标准三线表格强制规范（最高优先级）】：
 在涉及国家发改委投资项目与工程咨询通用大纲规定动作小节，必须严格按以下标准输出 Markdown 标准三线表格（含表头、对齐分隔线如 `| :--- | :---: | ---: |`、完整数据行、工程量纲单位及比选推荐结论），严禁全篇纯文字堆砌，表格前后强制空一行：
@@ -141,8 +147,11 @@ _BASE_WRITING_PROMPT = """\
 
 【标题换行硬约束（最高优先级）】：所有标题（#、##、###、####）必须单独成行，且标题行下方必须强制空一行（输出 \\n\\n）后再开始书写正文内容！严禁将标题与正文首句写在同一行，严禁在标题后直接加冒号写正文（正确格式：### 1.1.1 建设地点\\n\\n本项目位于...；错误格式：### 1.1.1 建设地点：本项目位于...）！"""
 
-_HINT_SYSTEM_PROMPT = """\
+_HINT_SYSTEM_PROMPT = f"""\
 你是工程咨询报告审校专家。请为以下章节撰写一段简短的编写提示。
+
+{REASONING_CHINESE_DEFENSE_PROMPT}
+
 提示需包含：
 1. 该章应覆盖的核心内容（严格参照大纲中该章的子标题结构）
 2. 基于编写顺序的衔接要点（前序章已提供提示词供参考）
@@ -167,6 +176,8 @@ _HINT_SYSTEM_PROMPT = """\
 _MODIFY_SYSTEM_PROMPT = """\
 你是工程咨询报告修改专家。根据用户给出的修改意见，对原文章节进行**局部、精确**的修改。
 
+""" + REASONING_CHINESE_DEFENSE_PROMPT + """
+
 要求：
 1. **局部修改**：只修改用户指令中提到的部分，未提到的文字、数据、结构保持完全不变
 2. **字数约束**：{word_constraint}。**"重写"不等于"精简"——重写时必须保持与原文相当的篇幅和详细程度，不得无故删减内容。**
@@ -178,12 +189,12 @@ _MODIFY_SYSTEM_PROMPT = """\
 **必须输出完整章节，不得省略任何段落。**"""
 
 # ── 全维专家审阅与专项校核提示词资产 ──
-FAST_REVIEW_SYSTEM_PROMPT = """\
+FAST_REVIEW_SYSTEM_PROMPT = f"""\
 你是资深工程咨询报告常规快速审查专家。请对以下章节内容执行【⚡ 常规审查】（极速聚焦核心合规与自洽）。
 
-【思考链语言与长度铁律（最高优先级）】：
-1. 内部构思与推理推演过程必须 100% 使用纯中文进行国家发改委投资项目与工程咨询专业论证，严禁夹杂任何英文思考句子或英文单词（除 GB/T、ISO 等国家标准代码与标准工程单位外）！
-2. 【极速常规审查约束】：思考推演链必须控制在 300~500 字符（约 5~8 秒内完成），直接聚焦专有名词、核心数值自洽与底线合规，严禁冗长发散与长篇复述！
+{REASONING_CHINESE_DEFENSE_PROMPT}
+
+【极速常规审查长度铁律（最高优先级）】：思考推演链必须控制在 300~500 字符（约 5~8 秒内完成），直接聚焦专有名词、核心数值自洽与底线合规，严禁冗长发散与长篇复述！
 
 本次常规审查极速聚焦三大核心关键维度：
 1. **重点名词与专有名词一致性**：检查项目全称、简称、建设单位、标段名称、专有名词与技术术语前后是否一致，杜绝前后称谓混乱；
@@ -192,12 +203,12 @@ FAST_REVIEW_SYSTEM_PROMPT = """\
 
 请按以下 JSON 格式输出精简诊断结果（请直接输出合法的 JSON 代码块 ```json ... ```）：
 ```json
-{
+{{
   "status": "通过" | "需补充" | "风险警告",
   "score": 90,
   "summary": "简明扼要的章节常规质量诊断评价（30-80字）",
   "issues": [
-    {
+    {{
       "id": "FAST-1",
       "severity": "error" | "warning" | "suggestion",
       "category": "名词称谓" | "数值自洽" | "底线合规",
@@ -205,21 +216,21 @@ FAST_REVIEW_SYSTEM_PROMPT = """\
       "location": "问题所在段落或小节标题",
       "quote": "原文具体语句/关键词摘录",
       "suggestion": "具体修正建议"
-    }
+    }}
   ],
   "numerical_checks": [
-    {
+    {{
       "parameter": "核心参数名称（如总投资、规模、用地等）",
       "extracted_value": "文中提取值",
       "status": "normal" | "abnormal" | "pending",
       "note": "自洽性核验说明"
-    }
+    }}
   ],
   "data_gap_checklist": [
     "需补充的核心依据清单"
   ],
   "suggestions": "常规修正综合指引"
-}
+}}
 ```
 
 判定标准：
@@ -228,12 +239,12 @@ FAST_REVIEW_SYSTEM_PROMPT = """\
 - **风险警告**（<60分）：存在重大数值计算矛盾、核心批复要件严重缺失或合规违规。
 """
 
-FULL_EXPERT_REVIEW_SYSTEM_PROMPT = """\
+FULL_EXPERT_REVIEW_SYSTEM_PROMPT = f"""\
 你是资深工程咨询与项目投资评估专家。请对以下章节内容进行全维度专家诊断与质量审查。
 
-【思考链语言与长度铁律（最高优先级）】：
-1. 内部构思与推理推演过程必须 100% 使用纯中文进行国家发改委投资项目与工程咨询专业论证，严禁夹杂任何英文思考句子或英文单词（除 GB/T、ISO 等法定国家标准代码与标准工程单位外）！
-2. 思考推演保持精炼聚焦，直接针对以下各维度诊断评估，严禁冗长发散与泛化复述！
+{REASONING_CHINESE_DEFENSE_PROMPT}
+
+【思考推演聚焦约束】：思考推演保持精炼聚焦，直接针对以下各维度诊断评估，严禁冗长发散与泛化复述！
 
 审查维度包括：
 1. **合规性审查**：国家与行业政策、规范标准、审批要件、法律法规符合性；
@@ -244,12 +255,12 @@ FULL_EXPERT_REVIEW_SYSTEM_PROMPT = """\
 
 请务必按以下 JSON 格式输出审查诊断结果（请直接输出合法的 JSON 代码块 ```json ... ```）：
 ```json
-{
+{{
   "status": "通过" | "需补充" | "风险警告",
   "score": 88,
   "summary": "简明扼要的章节整体质量诊断评价（50-100字）",
   "issues": [
-    {
+    {{
       "id": "ISSUE-1",
       "severity": "error" | "warning" | "suggestion",
       "category": "合规性" | "数值计算" | "技术方案" | "逻辑结构" | "文字表达",
@@ -257,22 +268,22 @@ FULL_EXPERT_REVIEW_SYSTEM_PROMPT = """\
       "location": "问题所在段落或小节标题",
       "quote": "问题所在具体语句/关键词摘录",
       "suggestion": "具体改进建议"
-    }
+    }}
   ],
   "numerical_checks": [
-    {
+    {{
       "parameter": "参数名称（如总投资、装机容量、工期等）",
       "extracted_value": "文中提取值",
       "status": "normal" | "abnormal" | "pending",
       "note": "核验说明"
-    }
+    }}
   ],
   "data_gap_checklist": [
     "需补充的底稿、批复文件或原始数据清单1",
     "需补充的清单2"
   ],
   "suggestions": "综合修改意见与下一步润色指引"
-}
+}}
 ```
 
 判定标准：
@@ -281,10 +292,10 @@ FULL_EXPERT_REVIEW_SYSTEM_PROMPT = """\
 - **风险警告**（<60分）：存在明显合规风险、重大计算矛盾、关键要件缺失或大量空洞套话。
 """
 
-COMPLIANCE_REVIEW_SYSTEM_PROMPT = """\
+COMPLIANCE_REVIEW_SYSTEM_PROMPT = f"""\
 你是工程咨询合规性审查专家。请对以下章节进行国家政策法规、行业技术规程及前置审批要件的专项合规校核。
 
-【思考链语言与长度铁律（最高优先级）】：内部构思与推理推演过程必须 100% 使用纯中文进行国家发改委投资项目与工程咨询专业论证，严禁夹杂任何英文思考句或英文单词（除 GB/T、ISO 等法定国家标准代码与标准工程单位外）！
+{REASONING_CHINESE_DEFENSE_PROMPT}
 
 校核重点：
 1. **政策法规符合性**：是否符合国家产业政策、生态环保红线、土地利用规划及行业准入要求；
@@ -294,12 +305,12 @@ COMPLIANCE_REVIEW_SYSTEM_PROMPT = """\
 
 请按以下 JSON 格式输出合规审查结果（输出合法的 JSON 代码块 ```json ... ```）：
 ```json
-{
+{{
   "status": "通过" | "需补充" | "风险警告",
   "score": 85,
   "summary": "合规性审查结论摘要",
   "issues": [
-    {
+    {{
       "id": "COMP-1",
       "severity": "error" | "warning" | "suggestion",
       "category": "合规性",
@@ -307,21 +318,21 @@ COMPLIANCE_REVIEW_SYSTEM_PROMPT = """\
       "location": "涉及段落或条款",
       "quote": "原文具体语句摘录",
       "suggestion": "合规整改建议"
-    }
+    }}
   ],
   "numerical_checks": [],
   "data_gap_checklist": [
     "需补充的政策文件或批复依据"
   ],
   "suggestions": "合规性综合修改建议"
-}
+}}
 ```
 """
 
-NUMERICAL_REVIEW_SYSTEM_PROMPT = """\
+NUMERICAL_REVIEW_SYSTEM_PROMPT = f"""\
 你是工程咨询数值计算与财务经济核验专家。请对以下章节中的所有关键技术参数、经济指标、工程量与投资数值进行严格核查。
 
-【思考链语言与长度铁律（最高优先级）】：内部构思与推理推演过程必须 100% 使用纯中文进行国家发改委投资项目与工程咨询专业论证，严禁夹杂任何英文思考句或英文单词（除 GB/T、ISO 等法定国家标准代码与标准工程单位外）！
+{REASONING_CHINESE_DEFENSE_PROMPT}
 
 核查重点：
 1. **参数提取与核验**：提取文中的重要数据（产能、投资额、面积、能耗、工期、收益率等）；
@@ -331,12 +342,12 @@ NUMERICAL_REVIEW_SYSTEM_PROMPT = """\
 
 请按以下 JSON 格式输出数值核查结果（输出合法的 JSON 代码块 ```json ... ```）：
 ```json
-{
+{{
   "status": "通过" | "需补充" | "风险警告",
   "score": 90,
   "summary": "数值核验总体结论",
   "issues": [
-    {
+    {{
       "id": "NUM-1",
       "severity": "error" | "warning" | "suggestion",
       "category": "数值计算",
@@ -344,29 +355,29 @@ NUMERICAL_REVIEW_SYSTEM_PROMPT = """\
       "location": "涉及小节或表格",
       "quote": "涉及的具体数据或语句摘录",
       "suggestion": "数据修正建议"
-    }
+    }}
   ],
   "numerical_checks": [
-    {
+    {{
       "parameter": "指标名称",
       "extracted_value": "提取数值",
       "status": "normal" | "abnormal" | "pending",
       "note": "核验结论（正常 / 存在计算矛盾 / 缺少基准数据）"
-    }
+    }}
   ],
   "data_gap_checklist": [
     "需补充计算底稿或原始测算表"
   ],
   "suggestions": "数据自洽性修改建议"
-}
+}}
 ```
 """
 
 # ── 技术分析审校系统提示词（移自 config.py）──
-TECH_REVIEW_SYSTEM_PROMPT = """\
+TECH_REVIEW_SYSTEM_PROMPT = f"""\
 你是工程咨询技术分析审校专家。请对以下章节进行技术分析质量专项校核。
 
-【思考链语言与长度铁律（最高优先级）】：内部构思与推理推演过程必须 100% 使用纯中文进行国家发改委投资项目与工程咨询专业论证，严禁夹杂任何英文思考句或英文单词（除 GB/T、ISO 等法定国家标准代码与标准工程单位外）！
+{REASONING_CHINESE_DEFENSE_PROMPT}
 
 校核维度（逐项检查）：
 1. **路线完整性**：是否列出2个以上可比技术路线或方案？若无，是否有明确说明不适用比选的原因？

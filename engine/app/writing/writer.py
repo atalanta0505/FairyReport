@@ -16,6 +16,7 @@ from .prompts import (
     FULL_EXPERT_REVIEW_SYSTEM_PROMPT,
     NUMERICAL_REVIEW_SYSTEM_PROMPT,
     PRESENCE_PENALTY,
+    REASONING_CHINESE_DEFENSE_PROMPT,
     TECH_ANALYSIS_ALWAYS_REPORT_TYPES,
     TECH_ANALYSIS_CONDITIONAL_REPORT_TYPES,
     TECH_CHAPTER_KEYWORDS,
@@ -463,7 +464,7 @@ class ChapterWriter:
             )
             prompt += "\n"
 
-        prompt += f"请为「{chapter_title}」撰写编写提示："
+        prompt += f"请为「{chapter_title}」撰写编写提示：\n\n{REASONING_CHINESE_DEFENSE_PROMPT}"
         hint = self.llm.chat(prompt, system_prompt=_HINT_SYSTEM_PROMPT,
                              temperature=TEMPERATURE_HINT).strip()
         return hint
@@ -543,7 +544,8 @@ class ChapterWriter:
             f"- **内容深度与充实展开（极重要）：全面展开实质性工程分析、技术论证、详实参数核算、政策背景契合度推演与合规论证，每小节论述充分详尽，杜绝空洞简略与短句敷衍！**\n"
             f"- **格式规范（极重要）：每个标题（#、##、###、####）必须独占一行且强制空一行（\\n\\n）后再写正文，严禁标题与正文连在同一行，严禁标题与正文首句同名同句同排连写（例如严禁输出'### 1.1.1 建设地点：本项目位于...'，正确格式为'### 1.1.1 建设地点\\n\\n本项目位于...'）；表格每行末尾必须输出标准换行符 \\n，表格前后强制空一行，严禁使用 || 连写在同一行！**\n"
             f"- 对事实性陈述插入引用标记：只能使用上方「参考资料」中实际出现的标签【源:文件名】、【标:规程标准】或【网:标题】，严禁输出孤立的 [Z] 标记\n"
-            f"- 请输出完整的章节正文（Markdown 格式），直接从标题和正文开始，禁止任何开场白或字数统计元数据标注\n"
+            f"- 请输出完整的章节正文（Markdown 格式），直接从标题和正文开始，禁止任何开场白或字数统计元数据标注\n\n"
+            f"{REASONING_CHINESE_DEFENSE_PROMPT}\n"
         )
 
         # 字数预算：注入结构配额块（_allocate_section_budgets 等价移植）
@@ -621,7 +623,8 @@ class ChapterWriter:
         prompt = (
             f"## 原文\n{original_content}\n\n"
             f"## 修改意见\n{instruction}\n\n"
-            f"请根据上述修改意见，返回修改后的完整章节内容："
+            f"请根据上述修改意见，返回修改后的完整章节内容：\n\n"
+            f"{REASONING_CHINESE_DEFENSE_PROMPT}"
         )
         return prompt, system
 
@@ -631,7 +634,7 @@ class ChapterWriter:
         prompt = (
             f"## 待审阅章节标题\n{chapter_title or '当前章节'}\n\n"
             f"## 待审阅正文内容\n{chapter_text}\n\n"
-            f"【思考链语言与长度约束】：内部推演过程必须 100% 使用纯中文，严禁英文！常规审查思考过程保持极速精炼（300-500字），快速输出 JSON 诊断结果。\n\n"
+            f"{REASONING_CHINESE_DEFENSE_PROMPT}\n\n"
             f"请按要求进行专业诊断并严格输出规定的 JSON 结果。"
         )
         if mode == "fast":

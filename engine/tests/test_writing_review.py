@@ -250,30 +250,33 @@ def test_chapter_writer_expert_review_modes():
 
 def test_chapter_writer_build_expert_review_args_modes():
     from engine.app.writing.prompts import (
+        COMPLIANCE_REVIEW_SYSTEM_PROMPT,
         FAST_REVIEW_SYSTEM_PROMPT,
         FULL_EXPERT_REVIEW_SYSTEM_PROMPT,
-        COMPLIANCE_REVIEW_SYSTEM_PROMPT,
         NUMERICAL_REVIEW_SYSTEM_PROMPT,
+        REASONING_CHINESE_DEFENSE_PROMPT,
     )
     llm = LLMClient(LLM_CONFIG)
     writer = ChapterWriter(llm, report_type="可行性研究报告")
 
     prompt_fast, sys_fast = writer._build_expert_review_args("第一章", "正文", mode="fast")
     assert sys_fast == FAST_REVIEW_SYSTEM_PROMPT
-    assert "100% 使用纯中文" in sys_fast
-    assert "极速常规审查约束" in sys_fast
+    assert REASONING_CHINESE_DEFENSE_PROMPT in sys_fast
+    assert "【极速常规审查长度铁律（最高优先级）】" in sys_fast
     assert "300~500 字符" in sys_fast
-    assert "【思考链语言与长度约束】" in prompt_fast
+    assert REASONING_CHINESE_DEFENSE_PROMPT in prompt_fast
 
     _, sys_all = writer._build_expert_review_args("第一章", "正文", mode="all")
     assert sys_all == FULL_EXPERT_REVIEW_SYSTEM_PROMPT
-    assert "100% 使用纯中文" in sys_all
+    assert REASONING_CHINESE_DEFENSE_PROMPT in sys_all
 
     _, sys_comp = writer._build_expert_review_args("第一章", "正文", mode="compliance")
     assert sys_comp == COMPLIANCE_REVIEW_SYSTEM_PROMPT
+    assert REASONING_CHINESE_DEFENSE_PROMPT in sys_comp
 
     _, sys_num = writer._build_expert_review_args("第一章", "正文", mode="numeric")
     assert sys_num == NUMERICAL_REVIEW_SYSTEM_PROMPT
+    assert REASONING_CHINESE_DEFENSE_PROMPT in sys_num
 
 
 def test_chapter_writer_modify_chapter():

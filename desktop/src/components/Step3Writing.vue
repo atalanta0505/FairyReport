@@ -773,7 +773,7 @@ function nextStep() {
                   <div class="thinking-top-row">
                     <div class="thinking-badge">
                       <span class="radar-pulse"></span>
-                      <span class="thinking-badge-text">大模型深度推理与专业构思中</span>
+                      <span class="thinking-badge-text">大模型深度推理与专业构思中 (纯中文)</span>
                     </div>
                     <div class="thinking-elapsed-timer">
                       ⚡ 构思已耗时 <strong>{{ projectStore.writingProgress?.elapsedSeconds || 0 }}</strong> 秒
@@ -859,7 +859,7 @@ function nextStep() {
                       <span class="sw-bar b5"></span>
                     </div>
                     <span class="thinking-msg-text">
-                      {{ projectStore.writingProgress?.message || '大模型正在深度思考与组织专业工程论证与数据表格...' }}
+                      {{ projectStore.writingProgress?.message || '思维推演中 (纯中文)...' }}
                     </span>
                   </div>
 
@@ -867,8 +867,8 @@ function nextStep() {
                   <div v-if="projectStore.writingProgress?.thoughtText" class="thought-stream-card">
                     <div class="thought-stream-header" @click="showThoughtDetails = !showThoughtDetails">
                       <div class="thought-stream-title">
-                        <span class="thought-icon">💭</span>
-                        <span>思维链实时推演细节 ({{ projectStore.writingProgress.thoughtText.length }} 字符)</span>
+                        <span class="thought-icon">🧠</span>
+                        <span>🧠 深度技术推演与工程构思过程 (纯中文) ({{ projectStore.writingProgress.thoughtText.length }} 字符)</span>
                       </div>
                       <button class="thought-toggle-btn">
                         {{ showThoughtDetails ? '收起 ▲' : '展开 ▼' }}
@@ -883,7 +883,7 @@ function nextStep() {
                   <div v-else class="thought-placeholder-card">
                     <div class="placeholder-icon">✨</div>
                     <div class="placeholder-desc">
-                      已提取并锁定本章全层级大纲骨架。大模型正结合工程底稿、行业规程与权威政务联网资料进行方案论证与指标校核计算，正文到达后将自动进入实时排版打字机输出...
+                      已提取并锁定本章全层级大纲骨架。大模型正结合工程底稿、行业规程与权威政务联网资料进行纯中文深度推演与指标校核计算，正文到达后将自动进入实时排版打字机输出...
                     </div>
                   </div>
 

@@ -103,24 +103,79 @@ def test_build_section_quota_block_unconstrained_depth_advice():
 
 
 def test_pure_chinese_reasoning_constraint_in_prompts():
+    from engine.app.writing.outline import OutlineGenerator, _build_outline_system_prompt
     from engine.app.writing.prompts import (
+        COMPLIANCE_REVIEW_SYSTEM_PROMPT,
+        FAST_REVIEW_SYSTEM_PROMPT,
+        FULL_EXPERT_REVIEW_SYSTEM_PROMPT,
+        NUMERICAL_REVIEW_SYSTEM_PROMPT,
+        ORDER_SYSTEM_PROMPT,
+        REASONING_CHINESE_DEFENSE_PROMPT,
+        TECH_REVIEW_SYSTEM_PROMPT,
+        _BASE_WRITING_PROMPT,
+        _HINT_SYSTEM_PROMPT,
+        _MODIFY_SYSTEM_PROMPT,
+        _OUTLINE_BASE_PROMPT,
+    )
+    from engine.app.writing.writer import ChapterWriter
+
+    # 1. 核心防御常量硬性规范核验
+    assert "【思考链与语言规范（最高优先级·纯中文绝对纯化防线）】" in REASONING_CHINESE_DEFENSE_PROMPT
+    assert "100% 使用规范中文进行国家发改委投资项目与工程咨询专业论证" in REASONING_CHINESE_DEFENSE_PROMPT
+    assert "绝对禁止夹杂任何英文思考句子、英文短语或英文分析单词" in REASONING_CHINESE_DEFENSE_PROMPT
+    assert "'Okay', 'Let me', 'First', 'Next', 'I should', 'We need to'" in REASONING_CHINESE_DEFENSE_PROMPT
+
+    # 2. 验证全部 10 个系统提示词资产均包含最高优先级纯中文绝对纯化防线
+    all_system_prompts = [
+        _BASE_WRITING_PROMPT,
+        _OUTLINE_BASE_PROMPT,
+        ORDER_SYSTEM_PROMPT,
+        _HINT_SYSTEM_PROMPT,
+        _MODIFY_SYSTEM_PROMPT.format(word_constraint="保持原文规模"),
         FAST_REVIEW_SYSTEM_PROMPT,
         FULL_EXPERT_REVIEW_SYSTEM_PROMPT,
         COMPLIANCE_REVIEW_SYSTEM_PROMPT,
         NUMERICAL_REVIEW_SYSTEM_PROMPT,
-        _BASE_WRITING_PROMPT,
+        TECH_REVIEW_SYSTEM_PROMPT,
+    ]
+    for prompt_text in all_system_prompts:
+        assert REASONING_CHINESE_DEFENSE_PROMPT in prompt_text
+
+    # 3. 验证 Outline 生成与排序的用户 Prompt 注入
+    outline_gen = OutlineGenerator(llm=None, report_type="可行性研究报告")
+    order_prompt = (
+        f"已生成以下大纲：\n\n# 第一章 概述\n\n"
+        f"请按从上到下的顺序为每个「第X章」编号（1,2,3...），"
+        f"然后建议一个最优写作顺序。\n"
+        f"只返回逗号分隔的数字序列，如 2,3,4,1,5\n\n"
+        f"{REASONING_CHINESE_DEFENSE_PROMPT}"
     )
-    expected_rule = "内部构思与推理推演过程必须 100% 使用纯中文进行国家发改委投资项目与工程咨询专业论证"
-    assert expected_rule in FAST_REVIEW_SYSTEM_PROMPT
-    assert expected_rule in FULL_EXPERT_REVIEW_SYSTEM_PROMPT
-    assert expected_rule in COMPLIANCE_REVIEW_SYSTEM_PROMPT
-    assert expected_rule in NUMERICAL_REVIEW_SYSTEM_PROMPT
-    assert expected_rule in _BASE_WRITING_PROMPT
-    assert "⚡ 常规审查" in FAST_REVIEW_SYSTEM_PROMPT
-    assert "专有名词一致性" in FAST_REVIEW_SYSTEM_PROMPT
-    assert "核心数值指标前后自洽性" in FAST_REVIEW_SYSTEM_PROMPT
-    assert "极速常规审查约束" in FAST_REVIEW_SYSTEM_PROMPT
-    assert "300~500 字符" in FAST_REVIEW_SYSTEM_PROMPT
+    assert REASONING_CHINESE_DEFENSE_PROMPT in order_prompt
+
+    # 4. 验证 ChapterWriter 编写、修订、审阅等用户 Prompt 注入
+    writer = ChapterWriter(llm=None, report_type="可行性研究报告")
+    write_prompt, _ = writer._build_chapter_write_args(
+        chapter_title="第一章 概述",
+        outline_md="# 第一章 概述",
+        predecessor_chapters={},
+        rag_context="",
+        topic="数字水利",
+    )
+    assert REASONING_CHINESE_DEFENSE_PROMPT in write_prompt
+
+    modify_prompt, _ = writer._build_modify_args(
+        original_content="原文内容",
+        instruction="修改第1段",
+        chapter_budget=2000,
+    )
+    assert REASONING_CHINESE_DEFENSE_PROMPT in modify_prompt
+
+    review_prompt, _ = writer._build_expert_review_args(
+        chapter_title="第一章 概述",
+        chapter_text="正文段落",
+        mode="fast",
+    )
+    assert REASONING_CHINESE_DEFENSE_PROMPT in review_prompt
 
 
 # ── writer.parse_tech_review_result ──
