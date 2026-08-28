@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildGeneralizedRegex,
   escapeHtml,
+  extractIssueCandidateKeys,
   extractOutlineHeadings,
   extractReferences,
   extractSubHeadings,
   formatInline,
+  highlightIssuesInHtml,
   htmlToMarkdown,
   markdownToHtml,
   normalizeMarkdown,
@@ -538,6 +541,120 @@ describe("Markdown 解析与排版工具", () => {
       const md = htmlToMarkdown(html);
       expect(md).toBe("本项目总投资为 3500 万元，工期为 18 个月。");
       expect(md).not.toContain("<mark");
+    });
+
+    it("extractIssueCandidateKeys: 多级特征提取（quote -> 引号内容 -> 工程数值 -> location）", () => {
+      // 1. 优先 quote
+      const k1 = extractIssueCandidateKeys({
+        category: "测试",
+        message: "测试消息包含“其他内容”和 5000 万元",
+        quote: "  这是直接摘录的文本  ",
+        severity: "warning",
+      });
+      expect(k1).toEqual(["这是直接摘录的文本"]);
+
+      // 2. 无 quote，提取 message 中的引号
+      const k2 = extractIssueCandidateKeys({
+        category: "测试",
+        message: "核实该段落「重要防洪指标」的合理性",
+        severity: "error",
+      });
+      expect(k2).toEqual(["重要防洪指标"]);
+
+      // 3. 无 quote 与引号，提取核心数值与单位
+      const k3 = extractIssueCandidateKeys({
+        category: "测试",
+        message: "设计年径流量 1500万m³ 与水库规模不符",
+        severity: "suggestion",
+      });
+      expect(k3).toContain("1500万m³");
+
+      // 4. 仅有 location
+      const k4 = extractIssueCandidateKeys({
+        category: "测试",
+        location: "第 2 章 2.3 水土保持与环境影响分析",
+        message: "缺少必要的水保方案论证",
+        severity: "warning",
+      });
+      expect(k4).toContain("水土保持与环境影响分析");
+    });
+
+    it("buildGeneralizedRegex: 全半角标点与空白泛化匹配", () => {
+      const regex = buildGeneralizedRegex("投资3500万元，工期（18个月）：符合规划。");
+      // 半角逗号、半角括号、半角冒号、半角句号均应匹配
+      expect(regex.test("投资3500万元,工期(18个月):符合规划.")).toBe(true);
+      // 中文全角标点应匹配
+      expect(regex.test("投资3500万元，工期（18个月）：符合规划。")).toBe(true);
+    });
+
+    it("highlightIssuesInHtml: 级别 1 精确匹配并注入规范 mark 标签", () => {
+      const html = "<p>本项目总投资为 3500 万元，工期为 18 个月。</p>";
+      const issues = [
+        {
+          id: "ISS-101",
+          category: "数值自洽",
+          severity: "warning",
+          message: "投资数据不一致",
+          quote: "3500 万元",
+        },
+      ];
+      const res = highlightIssuesInHtml(html, issues, 1);
+      expect(res).toContain('<mark class="review-issue-highlight severity-warning" data-issue-id="ISS-101" data-chapter-seq="1" title="数值自洽: 投资数据不一致">3500 万元</mark>');
+    });
+
+    it("highlightIssuesInHtml: 级别 2 全半角标点泛化容错高亮", () => {
+      const html = "<p>本项目总投资为3500万元,工期为18个月。</p>";
+      const issues = [
+        {
+          id: "ISS-102",
+          category: "数据核实",
+          severity: "error",
+          message: "工期核实",
+          quote: "本项目总投资为3500万元，工期为18个月", // 全角逗号
+        },
+      ];
+      const res = highlightIssuesInHtml(html, issues, 2);
+      expect(res).toContain('<mark class="review-issue-highlight severity-error" data-issue-id="ISS-102" data-chapter-seq="2"');
+      expect(res).toContain("本项目总投资为3500万元,工期为18个月");
+    });
+
+    it("highlightIssuesInHtml: 级别 3 长句前缀滑动窗口匹配", () => {
+      const html = "<p>根据防洪评价计算报告要求，本工程需设置溢洪道以满足千年一遇校核洪水标准。</p>";
+      const issues = [
+        {
+          id: "ISS-103",
+          category: "合规审查",
+          severity: "suggestion",
+          message: "溢洪道设计需补充校核标准",
+          quote: "根据防洪评价计算报告要求，需要进一步验算溢流坝面水力学特性与水工模型。", // 前半句匹配，后半句微调
+        },
+      ];
+      const res = highlightIssuesInHtml(html, issues, 3);
+      expect(res).toContain('<mark class="review-issue-highlight severity-suggestion" data-issue-id="ISS-103" data-chapter-seq="3"');
+      expect(res).toContain("根据防洪评价计算报告要求");
+    });
+
+    it("highlightIssuesInHtml: 避免重复包裹或破坏已有 mark 结构", () => {
+      const html = '<p>正常段落。<mark class="review-issue-highlight severity-warning" data-issue-id="ISS-1" data-chapter-seq="1" title="原有问题">已有高亮 3500 万元</mark> 剩余文字 3500 万元。</p>';
+      const issues = [
+        {
+          id: "ISS-2",
+          category: "重复核查",
+          severity: "error",
+          message: "外部投资",
+          quote: "3500 万元",
+        },
+      ];
+      const res = highlightIssuesInHtml(html, issues, 1);
+      // 原有 mark 结构未被破坏
+      expect(res).toContain('data-issue-id="ISS-1"');
+      // 剩余外部的 3500 万元被新标记包裹
+      expect(res).toContain('data-issue-id="ISS-2"');
+    });
+
+    it("highlightIssuesInHtml: 边界处理（空 html 或空 issues）", () => {
+      expect(highlightIssuesInHtml("", [])).toBe("");
+      expect(highlightIssuesInHtml("<p>测试</p>", [])).toBe("<p>测试</p>");
     });
   });
 });

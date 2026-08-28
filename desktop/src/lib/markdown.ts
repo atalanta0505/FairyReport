@@ -5,6 +5,8 @@
  * 支持各级标题（带锚点 ID）、粗体/斜体、代码、列表、表格、引用块、来源标签高亮徽章与反向 Markdown 序列化
  */
 
+import type { ReviewIssue } from "./engineApi";
+
 export interface SubHeading {
   id: string;
   level: number;
@@ -646,4 +648,226 @@ function cleanInlineHtml(html: string): string {
   str = unescapeHtml(str);
 
   return str;
+}
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * 提取审阅问题的多级定位特征候选词列表
+ */
+export function extractIssueCandidateKeys(issue: ReviewIssue): string[] {
+  const candidates: string[] = [];
+
+  // 1. 优先提取 issue.quote（去除首尾空白）
+  const quote = (issue.quote || "").trim();
+  if (quote && quote.length >= 2) {
+    return [quote];
+  }
+
+  // 2. 若无 quote 或长度 < 2，提取 issue.message 或 issue.location 中的引号包裹内容
+  const quoteRegex = /[“"「『]([^”"』」]+)[”"』」]/g;
+  if (issue.message) {
+    let match: RegExpExecArray | null;
+    while ((match = quoteRegex.exec(issue.message)) !== null) {
+      const q = match[1].trim();
+      if (q.length >= 2 && !candidates.includes(q)) {
+        candidates.push(q);
+      }
+    }
+  }
+  if (issue.location) {
+    quoteRegex.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = quoteRegex.exec(issue.location)) !== null) {
+      const q = match[1].trim();
+      if (q.length >= 2 && !candidates.includes(q)) {
+        candidates.push(q);
+      }
+    }
+  }
+  if (candidates.length > 0) {
+    return candidates;
+  }
+
+  // 3. 若仍无，提取 issue.message 中的核心数值/工程指标片段
+  if (issue.message) {
+    const metricRegex =
+      /(?:\d+(?:\.\d+)?\s*(?:万元|亿元|万m³|万立方米|km²|km|m²|m|人|亩|%|个|台|套|座|年|月|日|天|元|吨|kw|MW|GW|h|km\/h|m\/s))/gi;
+    let mMatch: RegExpExecArray | null;
+    while ((mMatch = metricRegex.exec(issue.message)) !== null) {
+      const val = mMatch[0].trim();
+      if (val.length >= 2 && !candidates.includes(val)) {
+        candidates.push(val);
+      }
+    }
+  }
+  if (candidates.length > 0) {
+    return candidates;
+  }
+
+  // 4. 若仍无，提取 issue.location 中的关键小节名或定位关键词
+  if (issue.location) {
+    const cleanLoc = issue.location
+      .replace(/^(?:第\s*[一二三四五六七八九十百零\d]+\s*章|\d+(?:\.\d+)*|[\s、：:])+/g, "")
+      .trim();
+    if (cleanLoc.length >= 2 && !candidates.includes(cleanLoc)) {
+      candidates.push(cleanLoc);
+    } else if (
+      issue.location.trim().length >= 2 &&
+      !candidates.includes(issue.location.trim())
+    ) {
+      candidates.push(issue.location.trim());
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * 构建针对标点与空白泛化的正则表达式
+ */
+export function buildGeneralizedRegex(cand: string): RegExp {
+  let pattern = "";
+  for (let i = 0; i < cand.length; i++) {
+    const ch = cand[i];
+    if (ch === "，" || ch === ",") {
+      pattern += "[，,]";
+    } else if (ch === "：" || ch === ":") {
+      pattern += "[：:]";
+    } else if (ch === "（" || ch === "(") {
+      pattern += "[（\\(]";
+    } else if (ch === "）" || ch === ")") {
+      pattern += "[）\\)]";
+    } else if (ch === "。" || ch === ".") {
+      pattern += "[。\\.]";
+    } else if (ch === "；" || ch === ";") {
+      pattern += "[；;]";
+    } else if (ch === "“" || ch === "”" || ch === '"') {
+      pattern += '(?:[“”"]|&quot;)';
+    } else if (ch === "‘" || ch === "’" || ch === "'") {
+      pattern += "(?:[‘’']|&#39;)";
+    } else if (ch === "「" || ch === "」") {
+      pattern += "[「」]";
+    } else if (ch === "『" || ch === "』") {
+      pattern += "[『』]";
+    } else if (/\s/.test(ch)) {
+      pattern += "(?:\\s|&nbsp;)+";
+    } else {
+      pattern += escapeRegExp(escapeHtml(ch));
+    }
+  }
+  return new RegExp(pattern, "i");
+}
+
+/**
+ * 审阅问题多级容错高亮匹配与标记注入
+ */
+export function highlightIssuesInHtml(
+  html: string,
+  issues: ReviewIssue[],
+  seq?: number,
+): string {
+  if (!html || !issues || !issues.length) return html;
+
+  let currentHtml = html;
+
+  for (const issue of issues) {
+    const candidates = extractIssueCandidateKeys(issue);
+    if (!candidates.length) continue;
+
+    const severity = issue.severity || "warning";
+    const cat = escapeHtml(issue.category || "审查问题");
+    const msg = escapeHtml(issue.message || "");
+    const issueId = escapeHtml(issue.id || "");
+    const chapterSeq = issue.chapterSeq || seq || 1;
+
+    let matched = false;
+
+    for (const cand of candidates) {
+      if (!cand || cand.length < 2) continue;
+
+      const parts = currentHtml.split(/(<[^>]+>)/g);
+      let inExistingMark = false;
+
+      for (let i = 0; i < parts.length; i++) {
+        if (i % 2 === 1) {
+          const tag = parts[i];
+          if (/^<mark\b[^>]*class=["'][^"']*review-issue-highlight/i.test(tag)) {
+            inExistingMark = true;
+          } else if (/^<\/mark>/i.test(tag)) {
+            inExistingMark = false;
+          }
+          continue;
+        }
+
+        if (inExistingMark || !parts[i]) continue;
+        const textChunk = parts[i];
+
+        // 级别 1: 直接精准子串匹配
+        const escapedCand = escapeHtml(cand);
+        if (textChunk.includes(escapedCand)) {
+          const markTag = `<mark class="review-issue-highlight severity-${severity}" data-issue-id="${issueId}" data-chapter-seq="${chapterSeq}" title="${cat}: ${msg}">${escapedCand}</mark>`;
+          parts[i] = textChunk.replace(escapedCand, markTag);
+          matched = true;
+          break;
+        }
+        if (textChunk.includes(cand)) {
+          const markTag = `<mark class="review-issue-highlight severity-${severity}" data-issue-id="${issueId}" data-chapter-seq="${chapterSeq}" title="${cat}: ${msg}">${escapeHtml(cand)}</mark>`;
+          parts[i] = textChunk.replace(cand, markTag);
+          matched = true;
+          break;
+        }
+
+        // 级别 2: 全半角标点与空白泛化匹配
+        const genRegex = buildGeneralizedRegex(cand);
+        const match = textChunk.match(genRegex);
+        if (match && match[0]) {
+          const matchedText = match[0];
+          const markTag = `<mark class="review-issue-highlight severity-${severity}" data-issue-id="${issueId}" data-chapter-seq="${chapterSeq}" title="${cat}: ${msg}">${matchedText}</mark>`;
+          parts[i] = textChunk.replace(genRegex, markTag);
+          matched = true;
+          break;
+        }
+
+        // 级别 3: 长句（>8字符）前缀特征滑动窗口匹配
+        if (cand.length > 8) {
+          let prefixMatched = false;
+          const maxLen = Math.min(12, cand.length);
+          for (let pLen = maxLen; pLen >= 8; pLen--) {
+            const prefix = cand.slice(0, pLen);
+            const prefixEscaped = escapeHtml(prefix);
+
+            if (textChunk.includes(prefixEscaped)) {
+              const markTag = `<mark class="review-issue-highlight severity-${severity}" data-issue-id="${issueId}" data-chapter-seq="${chapterSeq}" title="${cat}: ${msg}">${prefixEscaped}</mark>`;
+              parts[i] = textChunk.replace(prefixEscaped, markTag);
+              matched = true;
+              prefixMatched = true;
+              break;
+            }
+
+            const prefixGenRegex = buildGeneralizedRegex(prefix);
+            const pMatch = textChunk.match(prefixGenRegex);
+            if (pMatch && pMatch[0]) {
+              const matchedText = pMatch[0];
+              const markTag = `<mark class="review-issue-highlight severity-${severity}" data-issue-id="${issueId}" data-chapter-seq="${chapterSeq}" title="${cat}: ${msg}">${matchedText}</mark>`;
+              parts[i] = textChunk.replace(prefixGenRegex, markTag);
+              matched = true;
+              prefixMatched = true;
+              break;
+            }
+          }
+          if (prefixMatched) break;
+        }
+      }
+
+      if (matched) {
+        currentHtml = parts.join("");
+        break;
+      }
+    }
+  }
+
+  return currentHtml;
 }

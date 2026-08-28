@@ -12,6 +12,7 @@ import {
   extractOutlineHeadings,
   extractReferences,
   extractSubHeadings,
+  highlightIssuesInHtml,
   htmlToMarkdown,
   markdownToHtml,
   type ReferenceItem,
@@ -118,41 +119,7 @@ async function ensureStep4State() {
 function applyIssueHighlightsToHtml(html: string, seq: number): string {
   const chapterReview = projectStore.chapterReviews[seq];
   const issues = chapterReview?.issues || [];
-  if (!issues.length || !html) return html;
-
-  let currentHtml = html;
-  for (const issue of issues) {
-    let quote = (issue.quote || "").trim();
-    if (!quote || quote.length < 2) {
-      const m = (issue.message || "").match(/[“"「]([^”"」]+)[”"」]/);
-      if (m && m[1].trim().length >= 2) {
-        quote = m[1].trim();
-      }
-    }
-    if (!quote || quote.length < 2) continue;
-
-    const escapedQuote = escapeHtml(quote);
-    const severity = issue.severity || "warning";
-    const cat = escapeHtml(issue.category || "审查问题");
-    const msg = escapeHtml(issue.message || "");
-    const issueId = escapeHtml(issue.id || "");
-
-    const parts = currentHtml.split(/(<[^>]+>)/g);
-    let replaced = false;
-    for (let i = 0; i < parts.length; i += 2) {
-      if (!parts[i]) continue;
-      if (parts[i].includes(escapedQuote)) {
-        const markTag = `<mark class="review-issue-highlight severity-${severity}" data-issue-id="${issueId}" data-chapter-seq="${seq}" title="${cat}: ${msg}">${escapedQuote}</mark>`;
-        parts[i] = parts[i].replace(escapedQuote, markTag);
-        replaced = true;
-        break;
-      }
-    }
-    if (replaced) {
-      currentHtml = parts.join("");
-    }
-  }
-  return currentHtml;
+  return highlightIssuesInHtml(html, issues, seq);
 }
 
 function getUnwrittenPlaceholderHtml(seq: number, title: string): string {
@@ -944,12 +911,14 @@ async function locateIssueInCanvas(
   optionalChapterSeq?: number,
 ) {
   let targetSeq = optionalChapterSeq;
+  let issueId = "";
   let quote = "";
   let location = "";
   let message = "";
 
   if (issueOrLocation && typeof issueOrLocation === "object") {
     targetSeq = issueOrLocation.chapterSeq || targetSeq;
+    issueId = (issueOrLocation.id || "").trim();
     quote = (issueOrLocation.quote || "").trim();
     location = (issueOrLocation.location || "").trim();
     message = (issueOrLocation.message || "").trim();
@@ -985,15 +954,25 @@ async function locateIssueInCanvas(
   let targetEl: HTMLElement | null = null;
 
   if (canvasEl) {
-    // 递归/遍历候选元素：p, h1, h2, h3, h4, h5, h6, tr, li, blockquote, pre, td, th
+    // 优先级 1: 直接查找已高亮的 mark[data-issue-id] 元素
+    if (issueId) {
+      const markEl =
+        canvasEl.querySelector<HTMLElement>(`mark.review-issue-highlight[data-issue-id="${issueId}"]`) ||
+        document.querySelector<HTMLElement>(`mark.review-issue-highlight[data-issue-id="${issueId}"]`);
+      if (markEl) {
+        targetEl = markEl;
+      }
+    }
+
+    // 候选富文本容器
     const candidates = Array.from(
       canvasEl.querySelectorAll<HTMLElement>(
         "p, h1, h2, h3, h4, h5, h6, tr, li, blockquote, pre, td, th",
       ),
     );
 
-    // 匹配策略 A: quote 精确匹配或子串匹配
-    if (quote && quote.length >= 2) {
+    // 优先级 2: 按 quote 精确或前缀匹配富文本中的容器
+    if (!targetEl && quote && quote.length >= 2) {
       for (const el of candidates) {
         if (el.textContent && el.textContent.includes(quote)) {
           targetEl = el;
@@ -1001,9 +980,13 @@ async function locateIssueInCanvas(
         }
       }
       if (!targetEl && quote.length > 8) {
-        const shortQuote = quote.slice(0, 8);
+        const shortQuote = quote.slice(0, Math.min(12, quote.length));
+        const shorterQuote = quote.slice(0, 8);
         for (const el of candidates) {
-          if (el.textContent && el.textContent.includes(shortQuote)) {
+          if (
+            el.textContent &&
+            (el.textContent.includes(shortQuote) || el.textContent.includes(shorterQuote))
+          ) {
             targetEl = el;
             break;
           }
@@ -1011,10 +994,10 @@ async function locateIssueInCanvas(
       }
     }
 
-    // 匹配策略 B: location 标题或小节号匹配
+    // 优先级 3: 按 location 标题与小节编号匹配对应 DOM 标题或段落
     if (!targetEl && location) {
-      const cleanLoc = location.replace(/^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*/, "").trim();
-      const locNumMatch = location.match(/^\d+(?:\.\d+)*/);
+      const cleanLoc = location.replace(/^(?:第\s*[一二三四五六七八九十百零\d]+\s*章|\d+(?:\.\d+)*|[\s、：:])+/g, "").trim();
+      const locNumMatch = location.match(/\d+(?:\.\d+)*/);
       const locNum = locNumMatch ? locNumMatch[0] : null;
 
       // 优先匹配标题标签
@@ -1031,9 +1014,9 @@ async function locateIssueInCanvas(
         }
       }
       // 其次匹配段落
-      if (!targetEl) {
+      if (!targetEl && cleanLoc && cleanLoc.length >= 2) {
         for (const el of candidates) {
-          if (cleanLoc && el.textContent && el.textContent.includes(cleanLoc)) {
+          if (el.textContent && el.textContent.includes(cleanLoc)) {
             targetEl = el;
             break;
           }
@@ -1041,10 +1024,10 @@ async function locateIssueInCanvas(
       }
     }
 
-    // 匹配策略 C: message 核心关键词匹配
+    // 优先级 4: 按 message 核心关键词、引号片段或核心数值匹配相关段落
     if (!targetEl && message) {
-      const quoteInMsg = message.match(/[“"「]([^”"」]+)[”"」]/);
-      if (quoteInMsg && quoteInMsg[1].length >= 2) {
+      const quoteInMsg = message.match(/[“"「『]([^”"』」]+)[”"』」]/);
+      if (quoteInMsg && quoteInMsg[1].trim().length >= 2) {
         const kw = quoteInMsg[1].trim();
         for (const el of candidates) {
           if (el.textContent && el.textContent.includes(kw)) {
@@ -1053,9 +1036,28 @@ async function locateIssueInCanvas(
           }
         }
       }
+      if (!targetEl) {
+        const numMatches = message.match(
+          /(?:\d+(?:\.\d+)?\s*(?:万元|亿元|万m³|万立方米|km²|km|m²|m|人|亩|%|个|台|套|座|年|月|日|天|元|吨|kw|MW|GW|h))/gi,
+        );
+        if (numMatches) {
+          for (const numKw of numMatches) {
+            const kw = numKw.trim();
+            if (kw.length >= 2) {
+              for (const el of candidates) {
+                if (el.textContent && el.textContent.includes(kw)) {
+                  targetEl = el;
+                  break;
+                }
+              }
+              if (targetEl) break;
+            }
+          }
+        }
+      }
     }
 
-    // 如果是 td/th，提升为 tr
+    // 如果是 td/th 且非 mark，提升为 tr
     if (targetEl && (targetEl.tagName === "TD" || targetEl.tagName === "TH")) {
       targetEl = (targetEl.closest("tr") as HTMLElement) || targetEl;
     }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { fetch as pluginFetch } from "@tauri-apps/plugin-http";
 import * as engineApi from "../lib/engineApi";
+import { highlightIssuesInHtml, htmlToMarkdown, markdownToHtml } from "../lib/markdown";
 import { useProjectStore } from "../stores/project";
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
@@ -2028,6 +2029,103 @@ describe("Pinia useProjectStore", () => {
       expect(isWritten(2)).toBe(true);
       expect(getCompletedCount()).toBe(3);
       expect(getUnwrittenCount()).toBe(1);
+    });
+
+    it("V2-T27: 正文审阅问题持久化高亮与多级容错匹配机制", () => {
+      const store = useProjectStore();
+      store.outlineChapters = [{ seq: 1, title: "第一章 工程总投资与建设指标" }];
+      store.chapters = {
+        1: "# 第一章 工程总投资与建设指标\n\n本项目核准静态总投资为 3500 万元，建设工期为 18 个月。水库总库容为 1200 万m³。",
+      };
+      store.chapterReviews = {
+        1: {
+          status: "需补充",
+          score: 82,
+          summary: "存在部分数据需要核实",
+          issues: [
+            {
+              id: "ISS-WARN-1",
+              severity: "warning",
+              category: "数值自洽",
+              message: "核实静态总投资 3500 万元与预算表的差额",
+              quote: "3500 万元",
+              chapterSeq: 1,
+            },
+            {
+              id: "ISS-ERR-2",
+              severity: "error",
+              category: "工程指标",
+              message: "水库总库容指标「1200 万m³」防洪复核说明不足",
+              chapterSeq: 1,
+            },
+          ],
+        },
+      };
+
+      const rawHtml = markdownToHtml(store.chapters[1], 1);
+      const highlightedHtml = highlightIssuesInHtml(rawHtml, store.chapterReviews[1].issues || [], 1);
+
+      // 验证精准 quote 匹配
+      expect(highlightedHtml).toContain('class="review-issue-highlight severity-warning"');
+      expect(highlightedHtml).toContain('data-issue-id="ISS-WARN-1"');
+      expect(highlightedHtml).toContain('data-chapter-seq="1"');
+      expect(highlightedHtml).toContain('title="数值自洽: 核实静态总投资 3500 万元与预算表的差额"');
+
+      // 验证无 quote 时从 message 提取引号「1200 万m³」匹配
+      expect(highlightedHtml).toContain('class="review-issue-highlight severity-error"');
+      expect(highlightedHtml).toContain('data-issue-id="ISS-ERR-2"');
+    });
+
+    it("V2-T27: 正文与诊断卡片双向定位与呼吸波纹联动数据机制", () => {
+      const issues: engineApi.ReviewIssue[] = [
+        {
+          id: "ISS-NAV-01",
+          severity: "warning",
+          category: "合规性",
+          message: "缺少水土保持专项评价",
+          location: "第 2 章 2.3 水土保持方案",
+          chapterSeq: 2,
+        },
+      ];
+
+      const html = "<h2>2.3 水土保持方案</h2><p>本章叙述水土流失现状与防治措施。</p>";
+      const highlighted = highlightIssuesInHtml(html, issues, 2);
+
+      // 验证 location 小节匹配并生成 mark
+      expect(highlighted).toContain('data-issue-id="ISS-NAV-01"');
+      expect(highlighted).toContain('data-chapter-seq="2"');
+
+      // 验证模拟点击 mark 提取 issueId 和 chapterSeq
+      const match = highlighted.match(/data-issue-id="([^"]+)"\s+data-chapter-seq="(\d+)"/);
+      expect(match).not.toBeNull();
+      expect(match![1]).toBe("ISS-NAV-01");
+      expect(Number(match![2])).toBe(2);
+    });
+
+    it("V2-T27: 就地编辑 Markdown 反向保存防漂移与纯净性", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "防漂移测试", created_at: "2026-08-28T00:00:00Z" };
+      store.outlineChapters = [{ seq: 1, title: "第一章 概述" }];
+
+      // 富文本编辑器内带有 mark 高亮标签的内容
+      const canvasEditedHtml = `
+        <h1>第一章 概述</h1>
+        <p>本项目总投资为 <mark class="review-issue-highlight severity-warning" data-issue-id="ISS-10" data-chapter-seq="1" title="数据核实">3800 万元</mark>，工期调整为 20 个月。</p>
+      `;
+
+      // 验证 htmlToMarkdown 转换为纯净 Markdown（杜绝 mark 标签污染源码）
+      const cleanMd = htmlToMarkdown(canvasEditedHtml);
+      expect(cleanMd).not.toContain("<mark");
+      expect(cleanMd).not.toContain("review-issue-highlight");
+      expect(cleanMd).toContain("# 第一章 概述");
+      expect(cleanMd).toContain("本项目总投资为 3800 万元，工期调整为 20 个月。");
+
+      // 验证保存入库
+      mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+      await store.saveChapter(BASE_URL, 1, cleanMd);
+
+      expect(store.chapters[1]).toBe(cleanMd);
+      expect(store.chapters[1]).not.toContain("<mark");
     });
   });
 });
