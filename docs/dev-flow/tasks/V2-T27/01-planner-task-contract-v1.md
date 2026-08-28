@@ -1,9 +1,10 @@
 # 任务合同 V2-T27 v1 — 正文编辑与诊断批注的高亮持久联动与防漂移
 
-- 状态：READY_FOR_MAKER（待产品负责人批准）
+- 状态：ACCEPTED（已由独立 Checker 验收并通过全量 5 项 A 级门禁）
 - 依据：用户关于“step4中，左侧导航栏虽然标准了问题，但正文中完全没有任何持久化的高亮显示啊”的明确指令，逐个攻坚问题 4
-- 精确起始 SHA：`64f75188435bddb3a70095ec6523bcfe503328cc`
-- 工作树门禁：`git status --short` 必须干净
+- 精确起始 SHA：`6147d5bcdd9e3572c1c537311beecf8822d4f750`
+- 候选提交 SHA：`56138888a8834de5abd34d21a5f083081880cf5a`
+- 验收报告：`docs/dev-flow/tasks/V2-T27/rounds/01/checker-report.md`（PASS）
 
 ---
 
