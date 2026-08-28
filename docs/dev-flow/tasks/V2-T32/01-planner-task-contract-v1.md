@@ -1,9 +1,11 @@
 # 任务合同 V2-T32 v1 — Word 导出出版级排版与三线表、图表附录格式规范化
 
-- 状态：READY_FOR_MAKER（待产品负责人批准）
+- 状态：ACCEPTED（验收通过并锁定 SHA）
 - 依据：用户关于“Word 导出出版级排版与三线表、图表附录格式规范化，逐个攻克”的明确指示
 - 精确起始 SHA：`756aaf300539c39600e1cfeb76fa1cba9087c53d`
-- 工作树门禁：`git status --short` 必须干净
+- 锁定验收 SHA：`3198d1313dcaf72f72b6a908920460db3673e426`
+- 审查报告：`docs/dev-flow/tasks/V2-T32/rounds/01/checker-report.md`（PASS）
+- 工作树门禁：`git status --short` 干净
 
 ---
 
