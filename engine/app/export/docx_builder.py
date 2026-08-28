@@ -10,7 +10,8 @@ Markdown -> Word (.docx) 导出 — 移植自根目录 exporter.py（v1.0.5）�
 import re
 
 from docx import Document
-from docx.oxml.ns import qn
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls, qn
 from docx.shared import Pt
 
 from ..writing.refs import (
@@ -106,8 +107,49 @@ def md_to_docx(md_content: str, output_path: str, title: str = "") -> str:
     return output_path
 
 
+def _set_three_line_table_borders(table, has_header: bool = True):
+    """为 Word 表格应用中国工程咨询出版级标准三线表边框格式：
+    - 顶线 (Top): 1.5 pt (w:sz="12", color="334155")
+    - 底线 (Bottom): 1.5 pt (w:sz="12", color="334155")
+    - 栏目线 (Header bottom): 0.75 pt (w:sz="6", color="475569")
+    - 无左右外边框与纵向竖线 (Left/Right/InsideV: none)
+    - 无数据行内横线 (InsideH: none)
+    """
+    tblPr = table._tbl.tblPr
+    old_tblBorders = tblPr.find(qn('w:tblBorders'))
+    if old_tblBorders is not None:
+        tblPr.remove(old_tblBorders)
+
+    tblBorders = parse_xml(
+        r'<w:tblBorders %s>'
+        r'  <w:top w:val="single" w:sz="12" w:space="0" w:color="334155"/>'
+        r'  <w:bottom w:val="single" w:sz="12" w:space="0" w:color="334155"/>'
+        r'  <w:left w:val="none"/>'
+        r'  <w:right w:val="none"/>'
+        r'  <w:insideH w:val="none"/>'
+        r'  <w:insideV w:val="none"/>'
+        r'</w:tblBorders>' % nsdecls('w')
+    )
+    tblPr.append(tblBorders)
+
+    if len(table.rows) > 0 and has_header:
+        for cell in table.rows[0].cells:
+            tcPr = cell._tc.get_or_add_tcPr()
+            tcBorders = parse_xml(
+                r'<w:tcBorders %s>'
+                r'  <w:bottom w:val="single" w:sz="6" w:space="0" w:color="475569"/>'
+                r'  <w:top w:val="none"/>'
+                r'  <w:left w:val="none"/>'
+                r'  <w:right w:val="none"/>'
+                r'</w:tcBorders>' % nsdecls('w')
+            )
+            tcPr.append(tcBorders)
+            shd = parse_xml(r'<w:shd %s w:fill="F8FAFC"/>' % nsdecls('w'))
+            tcPr.append(shd)
+
+
 def _add_table(doc, table_lines: list):
-    """添加原生 Word 表格。"""
+    """添加原生 Word 出版级标准三线表格。"""
     rows = []
     for tl in table_lines:
         stripped = tl.strip()
@@ -120,15 +162,25 @@ def _add_table(doc, table_lines: list):
         return
 
     num_cols = max(len(r) for r in rows)
-    table = doc.add_table(rows=len(rows), cols=num_cols, style='Table Grid')
+    table = doc.add_table(rows=len(rows), cols=num_cols)
+    table.alignment = 1  # 居中对齐
+
+    has_header = len(rows) > 1
+    _set_three_line_table_borders(table, has_header=has_header)
 
     for ri, row_cells in enumerate(rows):
+        is_header = (ri == 0 and has_header)
         for ci, cell_text in enumerate(row_cells):
             if ci < num_cols:
                 cell = table.cell(ri, ci)
                 cell.paragraphs[0].clear()
-                run = cell.paragraphs[0].add_run(cell_text)
+                p = cell.paragraphs[0]
+                if is_header:
+                    p.alignment = 1  # 表头居中
+                run = p.add_run(cell_text)
                 run.font.size = Pt(10)
+                if is_header:
+                    run.bold = True
 
 
 def _add_formatted_paragraph(doc, text: str):

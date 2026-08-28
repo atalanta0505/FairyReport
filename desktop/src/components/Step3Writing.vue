@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
+  countContentChars,
   extractOutlineHeadings,
   extractReferences,
   extractSubHeadings,
@@ -133,7 +134,7 @@ const totalWordCount = computed(() => {
   let count = 0;
   for (const text of Object.values(projectStore.chapters)) {
     if (text) {
-      count += text.length;
+      count += countContentChars(text);
     }
   }
   return count;
@@ -158,7 +159,7 @@ const currentChapterText = computed({
 });
 
 const currentChapterWords = computed(() => {
-  return currentChapterText.value.length;
+  return countContentChars(currentChapterText.value);
 });
 
 const currentChapterReferences = computed<ReferenceItem[]>(() => {
@@ -426,7 +427,7 @@ function nextStep() {
             </div>
             <div class="stat-divider"></div>
             <div class="stat-item">
-              <span class="stat-label">总字数</span>
+              <span class="stat-label">总字数 (正文)</span>
               <span class="stat-val">{{ totalWordCount.toLocaleString() }} 字</span>
             </div>
           </div>
@@ -602,7 +603,7 @@ function nextStep() {
             </div>
             <div class="editor-meta-row">
               <span class="meta-item">
-                当前字数：<strong>{{ currentChapterWords.toLocaleString() }}</strong> 字
+                当前字数：<strong>{{ currentChapterWords.toLocaleString() }}</strong> 字 (正文)
               </span>
               <span class="meta-item-divider">·</span>
               <span class="meta-item status-text" :class="currentChapterStatus">
@@ -1942,22 +1943,31 @@ function nextStep() {
 .rich-rendered-editor :deep(table) {
   width: 100%;
   border-collapse: collapse;
-  margin: 16px 0;
+  margin: 18px 0;
   font-size: 10.5pt;
+  border-top: 2px solid #334155;
+  border-bottom: 2px solid #334155;
+  border-left: none;
+  border-right: none;
 }
 .rich-rendered-editor :deep(th),
 .rich-rendered-editor :deep(td) {
-  border: 1px solid #cbd5e1;
+  border: none;
   padding: 8px 12px;
   text-align: left;
   font-size: 10.5pt;
+  line-height: 1.5;
 }
 .rich-rendered-editor :deep(th) {
-  background: #f1f5f9;
+  background: #f8fafc;
   font-weight: 600;
   color: #1e293b;
+  border-bottom: 1px solid #475569;
 }
 .rich-rendered-editor :deep(tr:nth-child(even)) {
+  background: transparent;
+}
+.rich-rendered-editor :deep(tr:hover) {
   background: #f8fafc;
 }
 .rich-rendered-editor :deep(ul),

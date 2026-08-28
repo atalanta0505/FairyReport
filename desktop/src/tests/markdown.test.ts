@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGeneralizedRegex,
+  countContentChars,
+  countContentCharsExcludingTables,
   escapeHtml,
   extractIssueCandidateKeys,
   extractOutlineHeadings,
@@ -12,6 +14,7 @@ import {
   markdownToHtml,
   normalizeMarkdown,
   renderMarkdown,
+  stripMarkdownTables,
   unescapeHtml,
 } from "../lib/markdown";
 
@@ -655,6 +658,61 @@ describe("Markdown 解析与排版工具", () => {
     it("highlightIssuesInHtml: 边界处理（空 html 或空 issues）", () => {
       expect(highlightIssuesInHtml("", [])).toBe("");
       expect(highlightIssuesInHtml("<p>测试</p>", [])).toBe("<p>测试</p>");
+    });
+  });
+
+  describe("标准三线表剥离与纯正文字数统计 (stripMarkdownTables & countContentChars)", () => {
+    it("stripMarkdownTables 正确剥离表格结构行与数据", () => {
+      const md = [
+        "## 1.1 项目主要指标",
+        "本项目规划总投资为 5000 万元，建设期 2 年。",
+        "",
+        "| 指标名称 | 单位 | 数值 | 备注 |",
+        "| :--- | :---: | ---: | :--- |",
+        "| 建设用地 | 亩 | 120 | 国有划拨 |",
+        "| 建筑面积 | 万㎡ | 8.5 | 生产厂房 |",
+        "",
+        "各项指标均符合国家发改委产业投资指导目录要求。",
+      ].join("\n");
+
+      const stripped = stripMarkdownTables(md);
+      expect(stripped).not.toContain("| 指标名称");
+      expect(stripped).not.toContain("| :---");
+      expect(stripped).not.toContain("| 建设用地");
+      expect(stripped).not.toContain("| 建筑面积");
+      expect(stripped).toContain("## 1.1 项目主要指标");
+      expect(stripped).toContain("本项目规划总投资为 5000 万元，建设期 2 年。");
+      expect(stripped).toContain("各项指标均符合国家发改委产业投资指导目录要求。");
+    });
+
+    it("countContentChars 精准剥离标题行、Markdown 表格与来源标签统计纯正文字数", () => {
+      const md = [
+        "# 第一章 概述",
+        "## 1.1 项目概况",
+        "### 1.1.1 建设地点",
+        "本项目位于武汉市江夏区【源:立项批复.docx】。",
+        "",
+        "### 1.1.6 主要技术经济指标",
+        "| 序号 | 指标名称 | 单位 | 目标值 |",
+        "| :--- | :---: | ---: | --- |",
+        "| 1 | 总库容 | 万m³ | 1500 |",
+        "| 2 | 防洪标准 | 年一遇 | 100 |",
+        "",
+        "经科学论证，本项目符合国家重大基础设施建设规划。",
+      ].join("\n");
+
+      // 正文内容仅包含：
+      // "本项目位于武汉市江夏区。" (12 字符) + "经科学论证，本项目符合国家重大基础设施建设规划。" (24 字符) = 36 字符
+      const count = countContentChars(md);
+      expect(count).toBe(36);
+      expect(countContentCharsExcludingTables(md)).toBe(36);
+    });
+
+    it("countContentChars 边界处理（空字符串、纯表格、纯标题）", () => {
+      expect(countContentChars("")).toBe(0);
+      expect(countContentChars("   \n\t  ")).toBe(0);
+      expect(countContentChars("# 纯标题\n## 二级标题\n### 三级标题")).toBe(0);
+      expect(countContentChars("| 表头1 | 表头2 |\n|---|---|\n| 数据1 | 数据2 |")).toBe(0);
     });
   });
 });

@@ -134,3 +134,52 @@ def test_export_returns_path_and_size(client):
     # 落在 ENGINE_DATA_DIR/exports/
     exports_dir = os.path.join(settings.engine_data_dir, "exports")
     assert os.path.normpath(os.path.dirname(path)) == os.path.normpath(exports_dir)
+
+
+def test_export_standard_three_line_table_format(client):
+    """验证导出的 Word 表格符合标准三线表规范（加粗顶底线、细栏目线、无竖线与表头加粗底色）。"""
+    md_with_table = (
+        "# 第一章 概述\n\n"
+        "## 1.1 主要技术经济指标\n\n"
+        "| 指标名称 | 单位 | 规划值 | 备注 |\n"
+        "| :--- | :---: | ---: | :--- |\n"
+        "| 总投资 | 万元 | 5000 | 自筹与银行贷款 |\n"
+        "| 建设用地 | 亩 | 120 | 规划许可已办结 |\n"
+    )
+    resp = client.post("/export/docx", json={
+        "project": "three_line_table", "title": "可行性研究报告",
+        "chapters": {"1": md_with_table}, "include_refs": False,
+    })
+    assert resp.status_code == 200
+    path = resp.json()["path"]
+    assert os.path.exists(path)
+
+    doc = Document(path)
+    assert len(doc.tables) == 1
+    table = doc.tables[0]
+    assert len(table.rows) == 3
+    assert len(table.columns) == 4
+
+    # 验证表头文字与加粗
+    header_cell_0 = table.cell(0, 0)
+    assert header_cell_0.text == "指标名称"
+    assert len(header_cell_0.paragraphs[0].runs) > 0
+    assert header_cell_0.paragraphs[0].runs[0].bold is True
+
+    # 验证数据行
+    assert table.cell(1, 0).text == "总投资"
+    assert table.cell(1, 1).text == "万元"
+    assert table.cell(1, 2).text == "5000"
+
+    # 验证 XML 边框包含标准三线表属性 (top sz=12, bottom sz=12, tcBorders sz=6, shading F8FAFC)
+    tbl_xml = table._tbl.tblPr.xml
+    assert 'w:top w:val="single" w:sz="12"' in tbl_xml
+    assert 'w:bottom w:val="single" w:sz="12"' in tbl_xml
+    assert 'w:insideH w:val="none"' in tbl_xml
+    assert 'w:insideV w:val="none"' in tbl_xml
+
+    # 验证表头单元格底线与浅灰背景
+    header_tc_xml = header_cell_0._tc.tcPr.xml
+    assert 'w:bottom w:val="single" w:sz="6"' in header_tc_xml
+    assert 'w:fill="F8FAFC"' in header_tc_xml
+

@@ -8,6 +8,7 @@ import {
 } from "../lib/diff";
 import type * as engineApi from "../lib/engineApi";
 import {
+  countContentChars,
   escapeHtml,
   extractOutlineHeadings,
   extractReferences,
@@ -252,7 +253,7 @@ const unwrittenChaptersCount = computed(() => {
 const totalWordCount = computed(() => {
   let count = 0;
   for (const text of Object.values(projectStore.chapters)) {
-    if (text) count += text.length;
+    if (text) count += countContentChars(text);
   }
   return count;
 });
@@ -1135,8 +1136,8 @@ function copyFullBookMarkdown() {
           </div>
 
           <div class="meta-stat-pills">
-            <span class="meta-pill" title="全书总字数">
-              <strong>{{ totalWordCount.toLocaleString() }}</strong> 字
+            <span class="meta-pill" title="全书总字数（已排除表格与标题）">
+              <strong>{{ totalWordCount.toLocaleString() }}</strong> 字 (正文)
             </span>
             <span class="meta-pill" title="已完成编写章节数">
               <strong>{{ completedChaptersCount }} / {{ totalChapters }}</strong> 章已撰写
@@ -1376,7 +1377,7 @@ function copyFullBookMarkdown() {
             </div>
             <div class="stat-divider"></div>
             <div class="stat-item">
-              <span class="stat-label">总字数</span>
+              <span class="stat-label">总字数 (正文)</span>
               <span class="stat-val">{{ totalWordCount.toLocaleString() }} 字</span>
             </div>
           </div>
@@ -1515,7 +1516,7 @@ function copyFullBookMarkdown() {
                 </div>
                 <div class="header-right">
                   <span v-if="!isChapterWritten(ch.seq)" class="ch-word-tag tag-unwritten">待撰写 · 0 字</span>
-                  <span v-else class="ch-word-tag">{{ (projectStore.chapters[ch.seq] || '').length }} 字</span>
+                  <span v-else class="ch-word-tag">{{ countContentChars(projectStore.chapters[ch.seq] || '').toLocaleString() }} 字 (正文)</span>
                 </div>
               </div>
 
@@ -1633,7 +1634,7 @@ function copyFullBookMarkdown() {
             <div class="source-info">
               <span>📝 Markdown 原生标记源码模式</span>
               <span class="source-divider">·</span>
-              <span>全书共 <strong>{{ totalWordCount.toLocaleString() }}</strong> 字符</span>
+              <span>全书共 <strong>{{ totalWordCount.toLocaleString() }}</strong> 字符 (正文)</span>
             </div>
             <div class="source-actions">
               <button class="btn btn-outline btn-xs" @click="copyFullBookMarkdown">
@@ -1652,7 +1653,7 @@ function copyFullBookMarkdown() {
               <div class="source-card-header">
                 <span class="source-seq">第 {{ ch.seq }} 章</span>
                 <span class="source-title">{{ ch.title }}</span>
-                <span class="source-len">{{ (projectStore.chapters[ch.seq] || '').length }} 字符</span>
+                <span class="source-len">{{ countContentChars(projectStore.chapters[ch.seq] || '') }} 字符 (正文)</span>
               </div>
               <textarea
                 class="source-textarea"
@@ -1933,7 +1934,7 @@ function copyFullBookMarkdown() {
                     </p>
                   </div>
                   <div class="eval-card-footer">
-                    <span>字数：{{ (projectStore.chapters[ch.seq] || '').length }}</span>
+                    <span>字数：{{ countContentChars(projectStore.chapters[ch.seq] || '') }} (正文)</span>
                     <span>问题：{{ chapterIssuesCount[ch.seq] || 0 }} 处</span>
                     <button
                       class="btn btn-outline btn-xs"
@@ -2979,18 +2980,29 @@ function copyFullBookMarkdown() {
 .spec-typography table {
   width: 100%;
   border-collapse: collapse;
-  margin: 16px 0;
-  font-size: 13px;
+  margin: 18px 0;
+  font-size: 10.5pt;
+  border-top: 2px solid #334155;
+  border-bottom: 2px solid #334155;
+  border-left: none;
+  border-right: none;
 }
 .spec-typography th,
 .spec-typography td {
-  border: 1px solid #cbd5e1;
+  border: none;
   padding: 8px 12px;
   text-align: left;
+  font-size: 10.5pt;
+  line-height: 1.5;
 }
 .spec-typography th {
-  background: #f1f5f9;
+  background: #f8fafc;
   font-weight: 600;
+  color: #1e293b;
+  border-bottom: 1px solid #475569;
+}
+.spec-typography tr:hover {
+  background: #f8fafc;
 }
 
 .rich-rendered-editor {

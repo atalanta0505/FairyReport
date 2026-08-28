@@ -9,7 +9,10 @@ from engine.app.writing.writer import (
     _allocate_section_budgets,
     _build_section_quota_block,
     _count_chinese_chars,
+    _count_content_chars,
     _parse_outline_hierarchy,
+    _strip_markdown_headings,
+    _strip_markdown_tables,
     parse_tech_review_result,
 )
 
@@ -369,4 +372,62 @@ def test_writer_build_prev_context_natural_order_and_lock():
     idx_10 = context.find("## 第 10 章")
     assert idx_2 != -1 and idx_3 != -1 and idx_10 != -1
     assert idx_2 < idx_3 < idx_10
+
+
+def test_standard_three_line_table_rules_in_prompts_and_writer():
+    from engine.app.writing.prompts import _BASE_WRITING_PROMPT
+    from engine.app.writing.writer import _build_writing_system_prompt, ChapterWriter
+
+    # 1. _BASE_WRITING_PROMPT 硬约束检查
+    assert "标准三线表格强制规范" in _BASE_WRITING_PROMPT
+    assert "主要技术经济指标" in _BASE_WRITING_PROMPT
+    assert "建设规模方案比选" in _BASE_WRITING_PROMPT
+    assert "总投资估算构成与资金筹措" in _BASE_WRITING_PROMPT
+    assert "对齐分隔线如 `| :--- | :---: | ---: |`" in _BASE_WRITING_PROMPT
+
+    # 2. _build_writing_system_prompt 规则检查
+    sys_prompt = _build_writing_system_prompt(report_type="可行性研究报告", chapter_title="第五章 建设方案")
+    assert "标准三线表" in sys_prompt
+
+    # 3. ChapterWriter._build_chapter_write_args prompt 写作要求检查
+    writer = ChapterWriter(llm=None, report_type="可行性研究报告")
+    prompt, _ = writer._build_chapter_write_args(
+        chapter_title="第一章 概述",
+        outline_md="# 第一章 概述\n## 1.1 项目概况\n### 1.1.6 主要技术经济指标",
+        predecessor_chapters={},
+        rag_context="",
+        topic="水利枢纽",
+    )
+    assert "标准三线表格强制规范（最高优先级）" in prompt
+    assert "严禁全篇纯文字堆砌" in prompt
+
+
+def test_strip_markdown_tables_and_count_content_chars():
+    md = (
+        "# 第一章 概述\n\n"
+        "## 1.1 项目概况\n\n"
+        "### 1.1.1 建设地点\n\n"
+        "本项目位于湖北省武汉市江夏区。\n\n"
+        "### 1.1.6 主要技术经济指标\n\n"
+        "| 序号 | 指标名称 | 单位 | 目标值 |\n"
+        "| :--- | :---: | ---: | :--- |\n"
+        "| 1 | 总库容 | 万m³ | 1500 |\n"
+        "| 2 | 防洪标准 | 年一遇 | 100 |\n\n"
+        "各项规划指标均符合发改委与水利行业编制规范要求。"
+    )
+
+    stripped = _strip_markdown_tables(md)
+    assert "| 序号 |" not in stripped
+    assert "| :--- |" not in stripped
+    assert "| 1 |" not in stripped
+    assert "本项目位于湖北省武汉市江夏区。" in stripped
+    assert "各项规划指标均符合发改委与水利行业编制规范要求。" in stripped
+
+    # 正文：
+    # "本项目位于湖北省武汉市江夏区。" (15 中文/标点字符)
+    # "各项规划指标均符合发改委与水利行业编制规范要求。" (24 中文/标点字符)
+    # 共 15 + 24 = 39 字符
+    wc = _count_content_chars(md)
+    assert wc == 39
+
 

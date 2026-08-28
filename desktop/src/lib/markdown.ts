@@ -184,6 +184,36 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
 }
 
 /**
+ * 剥离 Markdown 中的表格行（| ... |），保留纯正文文本
+ */
+export function stripMarkdownTables(md: string): string {
+  if (!md || typeof md !== "string") return "";
+  return md.replace(/^\s*\|.*?\|\s*$/gm, "");
+}
+
+/**
+ * 统计 Markdown 纯正文字数（剥离标题行、Markdown 表格行、来源标签及前后空白）
+ */
+export function countContentChars(md: string): number {
+  if (!md || typeof md !== "string") return 0;
+  // 1. 去除标题行
+  let text = md.replace(/^#{1,6}\s+.*$/gm, "");
+  // 2. 剥离表格行
+  text = stripMarkdownTables(text);
+  // 3. 去除来源标签
+  text = text.replace(/【(?:源|材料|网|网络|标|标准|规|规程|法|法规)[:：][^】]+】/g, "");
+  text = text.replace(/\[Z(?::|：|-)?([a-zA-Z0-9_\-\u4e00-\u9fa5]*)\]/g, "");
+  // 4. 去除空白并统计有效正文字符数
+  const cleaned = text.replace(/\s+/g, "");
+  return cleaned.length;
+}
+
+/**
+ * 别名，兼容语义化调用
+ */
+export const countContentCharsExcludingTables = countContentChars;
+
+/**
  * 提取 Markdown 中的子标题列表（H1~H4），带锚点 ID
  */
 export function extractSubHeadings(
