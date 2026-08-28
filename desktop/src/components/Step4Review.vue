@@ -1500,9 +1500,6 @@ function copyFullBookMarkdown() {
                   第 {{ projectStore.activeRevision.seq }} 章
                 </span>
               </div>
-              <div v-if="projectStore.activeRevision" class="diff-instruction-summary">
-                <strong>修改指令：</strong>{{ projectStore.activeRevision.instruction }}
-              </div>
             </div>
 
             <div class="diff-header-stats">
@@ -3037,8 +3034,7 @@ function copyFullBookMarkdown() {
 }
 .diff-header-info {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
 }
 .diff-title-row {
   display: flex;
@@ -3057,10 +3053,6 @@ function copyFullBookMarkdown() {
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 4px;
-}
-.diff-instruction-summary {
-  font-size: 12px;
-  color: #475569;
 }
 
 .diff-header-stats {
