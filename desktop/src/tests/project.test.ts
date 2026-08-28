@@ -1988,5 +1988,46 @@ describe("Pinia useProjectStore", () => {
       expect(store.chapterReviews[1]?.status).toBe("通过");
       expect(store.chapterReviews[2]?.status).toBe("通过");
     });
+
+    it("V2-T26: 准确判定未写作章节并支持实时保存后状态动态联动", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "占位测试项目", created_at: "2026-08-28T00:00:00Z" };
+      store.outlineChapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 建设背景和必要性" },
+        { seq: 3, title: "第三章 建设方案" },
+        { seq: 4, title: "第四章 投资估算" },
+      ];
+      store.chapters = {
+        1: "# 第一章 概述\n已撰写内容",
+        2: "   \n  \t ", // 空白字符
+        3: "# 第三章 建设方案\n已撰写方案",
+        // 4 为 undefined
+      };
+
+      const isWritten = (seq: number) => {
+        const text = store.chapters[seq];
+        return !!(text && text.trim().length > 0);
+      };
+
+      const getCompletedCount = () => store.outlineChapters.filter((c) => isWritten(c.seq)).length;
+      const getUnwrittenCount = () => store.outlineChapters.filter((c) => !isWritten(c.seq)).length;
+
+      expect(isWritten(1)).toBe(true);
+      expect(isWritten(2)).toBe(false);
+      expect(isWritten(3)).toBe(true);
+      expect(isWritten(4)).toBe(false);
+
+      expect(getCompletedCount()).toBe(2);
+      expect(getUnwrittenCount()).toBe(2);
+
+      // 模拟第 2 章就地输入正文并落盘保存
+      mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+      await store.saveChapter(BASE_URL, 2, "# 第二章 建设背景和必要性\n用户在占位卡片处点击输入的排版正文");
+
+      expect(isWritten(2)).toBe(true);
+      expect(getCompletedCount()).toBe(3);
+      expect(getUnwrittenCount()).toBe(1);
+    });
   });
 });

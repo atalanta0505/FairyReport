@@ -155,14 +155,22 @@ function applyIssueHighlightsToHtml(html: string, seq: number): string {
   return currentHtml;
 }
 
+function getUnwrittenPlaceholderHtml(seq: number, title: string): string {
+  return `<div class="unwritten-chapter-placeholder"><div class="unwritten-icon">📝</div><div class="unwritten-title">第 ${seq} 章《${escapeHtml(title)}》暂未生成正文</div><div class="unwritten-desc">本章节大纲已就绪，当前内容为空。您可直接在此处点击输入排版正文，或返回【步骤 3 报告写作】进行 AI 一键撰写。</div></div>`;
+}
+
 // ── 同步排版正文到各章节 contenteditable DOM ──
 function syncAllChaptersHtml() {
   for (const ch of projectStore.outlineChapters) {
     const el = document.getElementById(`chapter-canvas-${ch.seq}`);
     if (el) {
       const text = projectStore.chapters[ch.seq] || "";
-      const rawHtml = markdownToHtml(text, ch.seq, outlineHeadings.value);
-      el.innerHTML = applyIssueHighlightsToHtml(rawHtml, ch.seq);
+      if (!text.trim()) {
+        el.innerHTML = getUnwrittenPlaceholderHtml(ch.seq, ch.title);
+      } else {
+        const rawHtml = markdownToHtml(text, ch.seq, outlineHeadings.value);
+        el.innerHTML = applyIssueHighlightsToHtml(rawHtml, ch.seq);
+      }
     }
   }
 }
@@ -261,11 +269,17 @@ watch(viewMode, (mode) => {
 // ── 全书统计与计算属性 ──
 const totalChapters = computed(() => projectStore.outlineChapters.length);
 
+function isChapterWritten(seq: number): boolean {
+  const text = projectStore.chapters[seq];
+  return !!(text && text.trim().length > 0);
+}
+
 const completedChaptersCount = computed(() => {
-  return projectStore.outlineChapters.filter((ch) => {
-    const text = projectStore.chapters[ch.seq];
-    return text && text.trim().length > 0;
-  }).length;
+  return projectStore.outlineChapters.filter((ch) => isChapterWritten(ch.seq)).length;
+});
+
+const unwrittenChaptersCount = computed(() => {
+  return projectStore.outlineChapters.filter((ch) => !isChapterWritten(ch.seq)).length;
 });
 
 const totalWordCount = computed(() => {
@@ -697,8 +711,29 @@ function openSubheadingIssuesDrawer(seq: number, sub: SubHeading, e?: Event) {
 }
 
 // ── 就地排版编辑输入 (contenteditable 防抖 300ms 自动落盘) ──
+function onChapterFocus(seq: number, e: FocusEvent) {
+  const target = e.currentTarget as HTMLElement;
+  if (!isChapterWritten(seq) && target.querySelector(".unwritten-chapter-placeholder")) {
+    target.innerHTML = "";
+  }
+}
+
+function onChapterBlur(seq: number, e: FocusEvent) {
+  const target = e.currentTarget as HTMLElement;
+  const currentText = (projectStore.chapters[seq] || "").trim();
+  if (!currentText && !target.innerText.trim()) {
+    const ch = projectStore.outlineChapters.find((c) => c.seq === seq);
+    const title = ch ? ch.title : `第 ${seq} 章`;
+    target.innerHTML = getUnwrittenPlaceholderHtml(seq, title);
+  }
+}
+
 function onChapterInput(seq: number, e: Event) {
-  const target = e.target as HTMLElement;
+  const target = e.currentTarget as HTMLElement;
+  const placeholderEl = target.querySelector(".unwritten-chapter-placeholder");
+  if (placeholderEl && target.innerText.trim()) {
+    placeholderEl.remove();
+  }
   const html = target.innerHTML;
   const md = htmlToMarkdown(html);
 
@@ -1104,6 +1139,9 @@ function copyFullBookMarkdown() {
             <span class="meta-pill" title="已完成编写章节数">
               <strong>{{ completedChaptersCount }} / {{ totalChapters }}</strong> 章已撰写
             </span>
+            <span v-if="unwrittenChaptersCount > 0" class="meta-pill meta-pill-unwritten" title="待撰写章节数">
+              待撰写 <strong>{{ unwrittenChaptersCount }}</strong> 章
+            </span>
             <span class="meta-pill" title="已审阅章节数">
               <strong>{{ reviewedChaptersCount }} / {{ totalChapters }}</strong> 章已体检
             </span>
@@ -1355,6 +1393,7 @@ function copyFullBookMarkdown() {
               'is-active': activeChapterSeq === ch.seq,
               'has-review': !!projectStore.chapterReviews[ch.seq],
               'has-warning': (chapterIssuesCount[ch.seq] || 0) > 0 || (chapterGapsCount[ch.seq] || 0) > 0,
+              'is-unwritten-node': !isChapterWritten(ch.seq),
             }"
           >
             <!-- 章节卡片头部 -->
@@ -1369,9 +1408,17 @@ function copyFullBookMarkdown() {
               </div>
 
               <div class="row-right">
+                <!-- 待撰写徽标 -->
+                <span
+                  v-if="!isChapterWritten(ch.seq)"
+                  class="badge-unwritten"
+                  title="该章节大纲已就绪，暂未生成正文"
+                >
+                  待撰写
+                </span>
                 <!-- 预警角标 -->
                 <span
-                  v-if="(chapterIssuesCount[ch.seq] || 0) > 0"
+                  v-else-if="(chapterIssuesCount[ch.seq] || 0) > 0"
                   class="warning-badge-pill"
                   :title="`第 ${ch.seq} 章存在 ${chapterIssuesCount[ch.seq]} 处待优化诊断，点击定位问题`"
                   @click.stop="openChapterIssuesDrawer(ch.seq, $event)"
@@ -1456,6 +1503,7 @@ function copyFullBookMarkdown() {
               :key="ch.seq"
               :id="`full-chapter-anchor-${ch.seq}`"
               class="full-book-chapter-block"
+              :class="{ 'is-unwritten-block': !isChapterWritten(ch.seq) }"
             >
               <!-- 标准化章标题栏 (全书连贯预览标准化呈现章标题与字数标签) -->
               <div class="chapter-block-header">
@@ -1464,7 +1512,8 @@ function copyFullBookMarkdown() {
                   <h3 class="ch-title">{{ ch.title }}</h3>
                 </div>
                 <div class="header-right">
-                  <span class="ch-word-tag">{{ (projectStore.chapters[ch.seq] || '').length }} 字</span>
+                  <span v-if="!isChapterWritten(ch.seq)" class="ch-word-tag tag-unwritten">待撰写 · 0 字</span>
+                  <span v-else class="ch-word-tag">{{ (projectStore.chapters[ch.seq] || '').length }} 字</span>
                 </div>
               </div>
 
@@ -1472,10 +1521,12 @@ function copyFullBookMarkdown() {
               <div
                 :id="`chapter-canvas-${ch.seq}`"
                 class="rich-rendered-editor spec-typography"
-                :class="{ 'is-empty-chapter': !(projectStore.chapters[ch.seq] || '').trim() }"
+                :class="{ 'is-empty-chapter': !isChapterWritten(ch.seq) }"
                 contenteditable="true"
                 :data-seq="ch.seq"
                 @input="onChapterInput(ch.seq, $event)"
+                @focus="onChapterFocus(ch.seq, $event)"
+                @blur="onChapterBlur(ch.seq, $event)"
                 data-placeholder="本章节暂未生成内容。可在此处直接输入排版文字，或返回步骤 3 自动写作..."
               ></div>
             </div>
@@ -2153,6 +2204,11 @@ function copyFullBookMarkdown() {
 .meta-pill strong {
   color: #0f172a;
 }
+.meta-pill.meta-pill-unwritten {
+  color: #64748b;
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
 
 /* 顶部中间 Tab */
 .header-center-tabs {
@@ -2615,6 +2671,16 @@ function copyFullBookMarkdown() {
 .chapter-tree-node.is-active {
   background: rgba(59, 130, 246, 0.06);
 }
+.chapter-tree-node.is-unwritten-node {
+  opacity: 0.78;
+}
+.chapter-tree-node.is-unwritten-node:hover,
+.chapter-tree-node.is-active.is-unwritten-node {
+  opacity: 1;
+}
+.chapter-tree-node.is-unwritten-node .ch-title-text {
+  color: #64748b;
+}
 .chapter-tree-node.has-warning {
   /* 平铺树下保持轻量提示 */
 }
@@ -2673,6 +2739,18 @@ function copyFullBookMarkdown() {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.badge-unwritten {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 1px 6px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 .warning-badge-pill {
   font-size: 10px;
@@ -2854,6 +2932,12 @@ function copyFullBookMarkdown() {
   border-radius: 4px;
   font-weight: 500;
 }
+.chapter-block-header .ch-word-tag.tag-unwritten {
+  color: #94a3b8;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  font-style: normal;
+}
 
 /* 10.5pt 工程咨询出版级排版规范 */
 .spec-typography {
@@ -2926,6 +3010,44 @@ function copyFullBookMarkdown() {
   background: #f8fafc;
   border: 1px dashed #cbd5e1;
   border-radius: 6px;
+}
+
+/* 未编写章节占位引导卡片 */
+.unwritten-chapter-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 24px;
+  background: #f8fafc;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 8px;
+  margin: 8px 0;
+  cursor: text;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+.unwritten-chapter-placeholder:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+.unwritten-icon {
+  font-size: 28px;
+  margin-bottom: 10px;
+  line-height: 1;
+}
+.unwritten-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+.unwritten-desc {
+  font-size: 13px;
+  color: #64748b;
+  max-width: 580px;
+  line-height: 1.6;
 }
 
 /* Step 4 正文审阅问题持久化高亮与批注标记 */
