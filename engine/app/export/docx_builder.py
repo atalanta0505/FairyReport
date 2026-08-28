@@ -132,7 +132,36 @@ def md_to_docx(md_content: str, output_path: str, title: str = "") -> str:
                 p.paragraph_format.first_line_indent = Pt(0)
                 run = p.add_run(f"${display_formulas[key]}$")
                 _format_run(run, font_name='Times New Roman', east_asia='仿宋', font_size=Pt(11), italic=True)
-            i += 1
+        # ── Mermaid 流程图代码块检测 ──
+        if stripped.startswith('```mermaid'):
+            mermaid_lines = []
+            j = i + 1
+            while j < len(lines):
+                nl = lines[j]
+                if nl.strip().startswith('```'):
+                    j += 1
+                    break
+                mermaid_lines.append(nl)
+                j += 1
+            mermaid_code = "\n".join(mermaid_lines)
+            _add_mermaid_flow_table(doc, mermaid_code)
+            i = j
+            continue
+
+        # ── 通用代码块处理 ──
+        if stripped.startswith('```'):
+            code_lines = []
+            j = i + 1
+            while j < len(lines):
+                nl = lines[j]
+                if nl.strip().startswith('```'):
+                    j += 1
+                    break
+                code_lines.append(nl)
+                j += 1
+            if code_lines:
+                _add_blockquote(doc, "\n".join(code_lines))
+            i = j
             continue
 
         # ── 表格检测 ──
@@ -332,6 +361,187 @@ def _set_three_line_table_borders(table, has_header: bool = True):
             tcPr.append(tcBorders)
             shd = parse_xml(r'<w:shd %s w:fill="F1F5F9"/>' % nsdecls('w'))
             tcPr.append(shd)
+
+
+def _clean_mermaid_label(label: str) -> str:
+    """清理 Mermaid 节点标签中的多余引号与转义符。"""
+    s = label.strip()
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+        s = s[1:-1]
+    return s.strip().replace('<br>', ' ').replace('<br/>', ' ').replace('\\n', ' ')
+
+
+def _parse_mermaid_node_token(token: str) -> tuple[str, str, str]:
+    """解析节点 ID、标签与形状。返回 (id, label, shape_type)。"""
+    t = token.strip()
+    if not t:
+        return ("", "", "")
+    # 胶囊 ([text])
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\s*\(\[\s*(.*?)\s*\]\)$', t)
+    if m:
+        return (m.group(1), _clean_mermaid_label(m.group(2)), "capsule")
+    # 数据库/圆柱 [(text)]
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\s*\[\(\s*(.*?)\s*\)\]$', t)
+    if m:
+        return (m.group(1), _clean_mermaid_label(m.group(2)), "storage")
+    # 圆形 ((text))
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\s*\(\(\s*(.*?)\s*\)\)$', t)
+    if m:
+        return (m.group(1), _clean_mermaid_label(m.group(2)), "circle")
+    # 菱形决策 {text}
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\s*\{\s*(.*?)\s*\}$', t)
+    if m:
+        return (m.group(1), _clean_mermaid_label(m.group(2)), "decision")
+    # 平行四边形 [/text/] 或 [\text\]
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\s*\[[/\\]\s*(.*?)\s*[/\\]\]$', t)
+    if m:
+        return (m.group(1), _clean_mermaid_label(m.group(2)), "io")
+    # 子程序 [[text]]
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\s*\[\[\s*(.*?)\s*\]\]$', t)
+    if m:
+        return (m.group(1), _clean_mermaid_label(m.group(2)), "subroutine")
+    # 圆角矩形 (text)
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\s*\(\s*(.*?)\s*\)$', t)
+    if m:
+        return (m.group(1), _clean_mermaid_label(m.group(2)), "process")
+    # 标准矩形 [text]
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)\s*\[\s*(.*?)\s*\]$', t)
+    if m:
+        return (m.group(1), _clean_mermaid_label(m.group(2)), "process")
+    # 纯 ID
+    m = re.match(r'^([a-zA-Z0-9_\-\u4e00-\u9fa5]+)$', t)
+    if m:
+        return (m.group(1), m.group(1), "process")
+    return (t, t, "process")
+
+
+def _parse_mermaid_to_topology(mermaid_code: str):
+    """解析 Mermaid 流程图代码为节点与流转关系字典。"""
+    lines = mermaid_code.strip().split('\n')
+    nodes = {}  # id -> {label, shape, in: [(pred_id, lbl)], out: [(succ_id, lbl)]}
+    edges = []  # (from_id, to_id, label)
+
+    edge_pattern = re.compile(
+        r'(?:==>\|[^|]+\||==\s*[^=>|]+?\s*==>|==>|-\.->\|[^|]+\||-\.\s*[^.\->|]+?\s*\.->|-\.->|\.->|-->\|[^|]+\||--\s*[^->|]+?\s*-->|-->|===\|[^|]+\||===|-\.-\|[^|]+\||-\.-|---\|[^|]+\||--\s*[^->|]+?\s*---|---)'
+    )
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('%%') or stripped.startswith('graph') or stripped.startswith('flowchart') or stripped.startswith('subgraph') or stripped == 'end' or stripped.startswith('classDef') or stripped.startswith('style') or stripped.startswith('class '):
+            continue
+
+        matches = list(edge_pattern.finditer(stripped))
+        if not matches:
+            nid, nlbl, nshape = _parse_mermaid_node_token(stripped)
+            if nid:
+                if nid not in nodes:
+                    nodes[nid] = {"label": nlbl or nid, "shape": nshape, "in": [], "out": []}
+                elif nlbl and nlbl != nid:
+                    nodes[nid]["label"] = nlbl
+            continue
+
+        segments = []
+        operators = []
+        last_idx = 0
+        for m in matches:
+            segments.append(stripped[last_idx:m.start()].strip())
+            operators.append(m.group(0))
+            last_idx = m.end()
+        segments.append(stripped[last_idx:].strip())
+
+        parsed_ids = []
+        for seg in segments:
+            nid, nlbl, nshape = _parse_mermaid_node_token(seg)
+            if not nid:
+                nid = seg.strip()
+                nlbl = seg.strip()
+                nshape = "process"
+            if nid not in nodes:
+                nodes[nid] = {"label": nlbl or nid, "shape": nshape, "in": [], "out": []}
+            elif nlbl and nlbl != nid:
+                nodes[nid]["label"] = nlbl
+            parsed_ids.append(nid)
+
+        for i in range(len(operators)):
+            u = parsed_ids[i]
+            v = parsed_ids[i + 1]
+            op = operators[i]
+            lbl_m = re.search(r'\|([^|]+)\|', op) or re.search(r'--\s*([^->|]+?)\s*-->', op) or re.search(r'==\s*([^=>|]+?)\s*==>', op)
+            edge_lbl = lbl_m.group(1).strip() if lbl_m else ""
+            edges.append((u, v, edge_lbl))
+            if u in nodes and v in nodes:
+                nodes[u]["out"].append((v, edge_lbl))
+                nodes[v]["in"].append((u, edge_lbl))
+
+    return nodes, edges
+
+
+def _add_mermaid_flow_table(doc: Document, mermaid_code: str):
+    """把 Mermaid 流程图转换为符合国家标准规范的出版级【工艺/工程流程步骤与拓扑关系对照表】。"""
+    nodes, edges = _parse_mermaid_to_topology(mermaid_code)
+    if not nodes:
+        return
+
+    # 表格居中题注
+    caption_p = doc.add_paragraph()
+    caption_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    caption_p.paragraph_format.space_before = Pt(8)
+    caption_p.paragraph_format.space_after = Pt(4)
+    caption_p.paragraph_format.first_line_indent = Pt(0)
+    caption_p.paragraph_format.keep_with_next = True
+    c_run = caption_p.add_run("【表: 工艺/工程流程步骤与拓扑关系对照表】")
+    _format_run(c_run, font_name='Times New Roman', east_asia='黑体', font_size=Pt(10.5), bold=True)
+
+    # 构造 Markdown 三线表格数据
+    table_lines = [
+        "| 序号 | 工序/环节名称 | 环节类型 | 前置/输入工序 | 承接/输出工序 | 流转说明与控制要点 |",
+        "| :---: | :--- | :---: | :--- | :--- | :--- |"
+    ]
+
+    shape_type_names = {
+        "capsule": "起始/终止",
+        "storage": "存储/设施",
+        "circle": "集散节点",
+        "decision": "决策/判定",
+        "io": "输入/输出",
+        "subroutine": "子系统/分部",
+        "process": "主体工序",
+    }
+
+    seq = 1
+    for nid, data in nodes.items():
+        name = data["label"] or nid
+        stype = shape_type_names.get(data["shape"], "工序环节")
+
+        # 前置工序
+        if data["in"]:
+            in_names = []
+            for pred_id, lbl in data["in"]:
+                p_name = nodes.get(pred_id, {}).get("label", pred_id)
+                in_names.append(f"{p_name}" + (f" ({lbl})" if lbl else ""))
+            in_str = "、".join(in_names)
+        else:
+            in_str = "— (初始环节)"
+
+        # 输出工序
+        if data["out"]:
+            out_names = []
+            notes = []
+            for succ_id, lbl in data["out"]:
+                s_name = nodes.get(succ_id, {}).get("label", succ_id)
+                out_names.append(f"{s_name}" + (f" ({lbl})" if lbl else ""))
+                if lbl:
+                    notes.append(f"至【{s_name}】：{lbl}")
+            out_str = "、".join(out_names)
+            notes_str = "；".join(notes) if notes else "按设计规程平稳流转"
+        else:
+            out_str = "— (最终归宿)"
+            notes_str = "完成该阶段工艺技术指标"
+
+        table_lines.append(f"| {seq} | {name} | {stype} | {in_str} | {out_str} | {notes_str} |")
+        seq += 1
+
+    _add_table(doc, table_lines)
 
 
 def _add_table(doc: Document, table_lines: list):

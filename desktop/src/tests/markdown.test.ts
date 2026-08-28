@@ -263,6 +263,14 @@ describe("Markdown 解析与排版工具", () => {
       expect(md).toContain("> 重点指示第一条\n> 重点指示第二条");
       expect(md).toContain("```rust\nfn main() {\n    println!(\"hello\");\n}\n```");
     });
+
+    it("Mermaid 流程图容器反序列化为 mermaid 代码块", () => {
+      const mdCode = "graph TD\n  A[入料] --> B[粉碎] --> C[(成品仓)]";
+      const html = markdownToHtml(`\`\`\`mermaid\n${mdCode}\n\`\`\``);
+      const restoredMd = htmlToMarkdown(html);
+      expect(restoredMd).toContain("```mermaid");
+      expect(restoredMd).toContain("A[入料] --> B[粉碎] --> C[(成品仓)]");
+    });
   });
 
   describe("Markdown 预处理与标题断行规范化 (normalizeMarkdown)", () => {

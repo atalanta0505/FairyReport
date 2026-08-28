@@ -299,3 +299,52 @@ def test_export_standard_three_line_table_format(client):
     assert 'w:tblHeader' in table.rows[0]._tr.trPr.xml
 
 
+def test_export_mermaid_flow_chart_to_table(client):
+    """验证 Mermaid 流程图在 Word 导出时规范转换为出版级标准三线对照表。"""
+    md_with_mermaid = (
+        "# 第三章 生产工艺与工程技术方案\n"
+        "## 3.1 工艺技术流程\n"
+        "本项目采用全自动化水处理净化工序：\n"
+        "```mermaid\n"
+        "graph TD\n"
+        "  A[原水进入] --> B[混凝反应沉淀池]\n"
+        "  B --> C{在线水质监测}\n"
+        "  C -->|指标达标| D[超滤膜过滤]\n"
+        "  C -->|浑浊超标| E[加药二次深化处理]\n"
+        "  E --> D\n"
+        "  D --> F[(5000m³ 高位清水储罐)]\n"
+        "```\n"
+        "上述工序严格遵循《给水排水工程通用规范》执行。\n"
+    )
+    resp = client.post("/export/docx", json={
+        "project": "mermaid_export", "title": "水厂扩建工程可行性研究报告",
+        "chapters": {"1": md_with_mermaid}, "include_refs": False,
+    })
+    assert resp.status_code == 200, resp.text
+    path = resp.json()["path"]
+    assert os.path.exists(path)
+
+    doc = Document(path)
+    assert len(doc.tables) >= 1
+    table = doc.tables[0]
+
+    # 验证题注存在
+    assert any("【表: 工艺/工程流程步骤与拓扑关系对照表】" in p.text for p in doc.paragraphs)
+
+    # 验证表头字段
+    headers = [table.cell(0, c).text.strip() for c in range(len(table.columns))]
+    assert "工序/环节名称" in headers
+    assert "前置/输入工序" in headers
+    assert "承接/输出工序" in headers
+    assert "流转说明与控制要点" in headers
+
+    # 验证数据行中包含原水、沉淀池、检测、储罐等关键流程
+    all_table_text = " ".join(cell.text for row in table.rows for cell in row.cells)
+    assert "原水进入" in all_table_text
+    assert "混凝反应沉淀池" in all_table_text
+    assert "在线水质监测" in all_table_text
+    assert "超滤膜过滤" in all_table_text
+    assert "5000m³ 高位清水储罐" in all_table_text
+
+
+

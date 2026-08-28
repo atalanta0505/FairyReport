@@ -145,10 +145,57 @@ function syncAllChaptersHtml() {
   }
 }
 
-// ── 审阅高亮标记与来源内联标签点击联动 ──
+// ── 审阅高亮标记与来源内联标签及流程图卡片点击联动 ──
 function handleCanvasClick(e: MouseEvent) {
   const target = e.target as HTMLElement | null;
   if (!target) return;
+
+  // Mermaid 切换视图与复制代码工具栏交互
+  const toggleBtn = target.closest(".mermaid-btn-toggle-view") as HTMLElement | null;
+  if (toggleBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    const container = toggleBtn.closest(".mermaid-container") as HTMLElement | null;
+    if (container) {
+      const svgWrapper = container.querySelector(".mermaid-svg-wrapper") as HTMLElement | null;
+      const codeWrapper = container.querySelector(".mermaid-code-wrapper") as HTMLElement | null;
+      const btnText = toggleBtn.querySelector(".btn-text");
+      const btnIcon = toggleBtn.querySelector(".btn-icon");
+
+      if (svgWrapper && codeWrapper) {
+        const isSvgVisible = svgWrapper.style.display !== "none";
+        if (isSvgVisible) {
+          svgWrapper.style.display = "none";
+          codeWrapper.style.display = "block";
+          if (btnText) btnText.textContent = "源码模式";
+          if (btnIcon) btnIcon.textContent = "💻";
+        } else {
+          svgWrapper.style.display = "flex";
+          codeWrapper.style.display = "none";
+          if (btnText) btnText.textContent = "矢量拓扑";
+          if (btnIcon) btnIcon.textContent = "👁️";
+        }
+      }
+    }
+    return;
+  }
+
+  const copyBtn = target.closest(".mermaid-btn-copy") as HTMLElement | null;
+  if (copyBtn) {
+    e.stopPropagation();
+    e.preventDefault();
+    const container = copyBtn.closest(".mermaid-container") as HTMLElement | null;
+    const code = container?.getAttribute("data-mermaid-code") || "";
+    if (code) {
+      navigator.clipboard.writeText(code).then(() => {
+        showMsg("已复制 Mermaid 流程图源码至剪贴板", "success");
+      }).catch(() => {
+        showMsg("复制失败，请手动选择复制", "error");
+      });
+    }
+    return;
+  }
+
   const mark = target.closest(".review-issue-highlight") as HTMLElement | null;
   if (mark) {
     const issueId = mark.getAttribute("data-issue-id");
@@ -4454,5 +4501,111 @@ function copyFullBookMarkdown() {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ── Mermaid 流程图出版级卡片样式 ── */
+.mermaid-container {
+  margin: 18px 0;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+.mermaid-container:hover {
+  border-color: #94a3b8;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+.mermaid-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 12px;
+  user-select: none;
+}
+.mermaid-tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mermaid-icon {
+  font-size: 15px;
+}
+.mermaid-title {
+  font-weight: 600;
+  color: #0f766e;
+}
+.mermaid-meta {
+  font-size: 11px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+.mermaid-fallback-badge {
+  font-size: 11px;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+.mermaid-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mermaid-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #334155;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.mermaid-btn:hover {
+  background: #f0f9ff;
+  border-color: #0284c7;
+  color: #0284c7;
+}
+.mermaid-svg-wrapper {
+  padding: 20px 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: #ffffff;
+  overflow-x: auto;
+}
+.mermaid-svg-wrapper svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-code-wrapper {
+  padding: 12px 16px;
+  background: #0f172a;
+  color: #f8fafc;
+  overflow-x: auto;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.mermaid-code-wrapper pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+.mermaid-code-wrapper code {
+  color: #38bdf8;
+  background: transparent;
 }
 </style>

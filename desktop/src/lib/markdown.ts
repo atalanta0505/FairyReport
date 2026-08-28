@@ -6,6 +6,9 @@
  */
 
 import type { ReviewIssue } from "./engineApi";
+import { renderMermaidToHtml } from "./mermaid";
+
+export { renderMermaidToHtml };
 
 export interface SubHeading {
   id: string;
@@ -493,16 +496,24 @@ export function markdownToHtml(
     if (trimmed.startsWith("```")) {
       const lang = trimmed.slice(3).trim();
       i++;
-      const codeLines: string[] = [];
+      const rawCodeLines: string[] = [];
       while (i < lines.length && !lines[i].trim().startsWith("```")) {
-        codeLines.push(escapeHtml(lines[i]));
+        rawCodeLines.push(lines[i]);
         i++;
       }
       if (i < lines.length && lines[i].trim().startsWith("```")) {
         i++; // 跳过结束 ```
       }
+
+      if (lang.toLowerCase() === "mermaid") {
+        const mermaidCode = rawCodeLines.join("\n");
+        htmlParts.push(renderMermaidToHtml(mermaidCode));
+        continue;
+      }
+
+      const escapedLines = rawCodeLines.map((l) => escapeHtml(l));
       const langClass = lang ? ` class="language-${escapeHtml(lang)}"` : "";
-      htmlParts.push(`<pre><code${langClass}>${codeLines.join("\n")}</code></pre>`);
+      htmlParts.push(`<pre><code${langClass}>${escapedLines.join("\n")}</code></pre>`);
       continue;
     }
 
@@ -611,6 +622,22 @@ export function htmlToMarkdown(html: string): string {
   }
 
   let text = html.replace(/\r\n/g, "\n");
+
+  // 0. Mermaid 流程图卡片还原：<div class="mermaid-container" data-mermaid-code="...">...</div> -> ```mermaid\n...\n```
+  text = text.replace(
+    /<div[^>]*\bclass="[^"]*\bmermaid-container\b[^"]*"[^>]*\bdata-mermaid-code="([^"]*)"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi,
+    (_match, encodedCode) => {
+      const code = unescapeHtml(encodedCode).trim();
+      return `\n\n\`\`\`mermaid\n${code}\n\`\`\`\n\n`;
+    }
+  );
+  text = text.replace(
+    /<div[^>]*\bdata-mermaid-code="([^"]*)"[^>]*>[\s\S]*?<\/div>/gi,
+    (_match, encodedCode) => {
+      const code = unescapeHtml(encodedCode).trim();
+      return `\n\n\`\`\`mermaid\n${code}\n\`\`\`\n\n`;
+    }
+  );
 
   // 1. 来源引用语义化标签还原：<span class="inline-ref-tag type-material" data-ref-type="material" data-ref-title="...">【源:...】</span> -> 【源:...】
   text = text.replace(/<span[^>]*class="[^"]*(?:inline-ref-tag|ref-badge)[^"]*"[^>]*>(?:🏷️\s*)?(【[^】]+】)<\/span>/gi, "$1");
