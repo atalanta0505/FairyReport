@@ -1938,5 +1938,55 @@ describe("Pinia useProjectStore", () => {
       expect(store.chapters[1]).toContain("修订后包含深化合规与投资估算的内容...");
       expect(store.activeRevision).toBeNull();
     });
+
+    it("V2-T24: runFullBookReview 直接以指定模式执行全书审阅并维护真实耗时秒数", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "直启审阅项目", created_at: "2026-08-28T00:00:00Z" };
+      store.outlineChapters = [
+        { seq: 1, title: "第一章 概述" },
+        { seq: 2, title: "第二章 建设方案" },
+      ];
+      store.chapters = {
+        1: "第一章正文内容...",
+        2: "第二章正文内容...",
+      };
+      store.chapterReviews = {};
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/writing/review_stream")) {
+          return mockSSEResponse([
+            '{"type": "stage", "stage": "reasoning", "message": "国家发改委投资项目与工程咨询专业论证中..."}',
+            JSON.stringify({
+              type: "done",
+              review: {
+                status: "通过",
+                score: 90,
+                summary: "合规",
+                issues: [],
+              },
+              raw: "{}",
+            }),
+          ]);
+        }
+        if (u.includes("/reviews/") || u.includes("/full_review")) {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      const res = await store.runFullBookReview(
+        BASE_URL,
+        { api_key: "sk-test", base_url: "http://api", model: "m" },
+        false,
+        "fast",
+      );
+
+      expect(res.health_status).toBe("达标");
+      expect(store.batchReviewing).toBe(false);
+      expect(store.reviewProgress).toBeNull();
+      expect(store.chapterReviews[1]?.status).toBe("通过");
+      expect(store.chapterReviews[2]?.status).toBe("通过");
+    });
   });
 });

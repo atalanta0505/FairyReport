@@ -104,7 +104,7 @@ def test_pure_chinese_reasoning_constraint_in_prompts():
         NUMERICAL_REVIEW_SYSTEM_PROMPT,
         _BASE_WRITING_PROMPT,
     )
-    expected_rule = "内部构思与推理推演过程必须 100% 使用纯中文进行水利与工程咨询专业论证"
+    expected_rule = "内部构思与推理推演过程必须 100% 使用纯中文进行国家发改委投资项目与工程咨询专业论证"
     assert expected_rule in FAST_REVIEW_SYSTEM_PROMPT
     assert expected_rule in FULL_EXPERT_REVIEW_SYSTEM_PROMPT
     assert expected_rule in COMPLIANCE_REVIEW_SYSTEM_PROMPT
