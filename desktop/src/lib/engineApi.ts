@@ -812,7 +812,7 @@ export interface ReviseParagraphRequest {
 
 export type ReviseStreamProgress =
   | { type: "stage"; stage: string; message: string }
-  | { type: "thought"; thought: string }
+  | { type: "thought"; thought: string; chunk?: string }
   | { type: "chunk"; chunk: string }
   | { type: "done"; revised_text: string };
 
@@ -883,10 +883,12 @@ export async function reviseChapterStream(
           return false;
         }
         if (parsed.type === "thought") {
+          const th = parsed.thought || parsed.chunk || "";
           if (onProgress) {
             onProgress({
               type: "thought",
-              thought: parsed.thought || "",
+              thought: th,
+              chunk: th,
             });
           }
           return false;

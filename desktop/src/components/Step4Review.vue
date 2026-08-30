@@ -50,12 +50,14 @@ let revisionTimer: ReturnType<typeof setInterval> | null = null;
 
 const revisionStages = [
   { id: "locate", title: "锁定问题段落", desc: "精准提取缺陷段落与专家修改建议" },
-  { id: "refine", title: "局部智能重构", desc: "依据发改委与行业规程深化工艺参数与方案" },
+  { id: "refine", title: "局部智能重构", desc: "依据行业规程与编制规范深化工艺参数与方案" },
   { id: "replace", title: "原位无缝替换", desc: "原位更新排版正文，自动清除问题高亮" },
 ];
 
 const saveDebounceTimers: Record<number, ReturnType<typeof setTimeout>> = {};
 const editorCanvasRef = ref<HTMLElement | null>(null);
+const reviewThoughtBodyRef = ref<HTMLElement | null>(null);
+const revisionThoughtBodyRef = ref<HTMLElement | null>(null);
 
 const outlineHeadings = computed(() => extractOutlineHeadings(projectStore.outlineMd));
 
@@ -330,13 +332,42 @@ watch(
   },
 );
 
+watch(
+  () => projectStore.reviewProgress?.thoughtText,
+  () => {
+    if (reviewThoughtBodyRef.value) {
+      nextTick(() => {
+        if (reviewThoughtBodyRef.value) {
+          reviewThoughtBodyRef.value.scrollTop = reviewThoughtBodyRef.value.scrollHeight;
+        }
+      });
+    }
+  },
+);
+
+watch(
+  () => projectStore.revisionProgress?.thoughtText,
+  () => {
+    if (revisionThoughtBodyRef.value) {
+      nextTick(() => {
+        if (revisionThoughtBodyRef.value) {
+          revisionThoughtBodyRef.value.scrollTop = revisionThoughtBodyRef.value.scrollHeight;
+        }
+      });
+    }
+  },
+);
+
 // ── 排版正文就地输入与 300ms 自动落盘 ──
 function onEditorInput(e: Event) {
   const target = e.target as HTMLElement | null;
   if (!target || !currentChapter.value) return;
   const seq = currentChapter.value.seq;
   const md = htmlToMarkdown(target.innerHTML);
-  projectStore.chapters[seq] = md;
+  projectStore.chapters = {
+    ...projectStore.chapters,
+    [seq]: md,
+  };
 
   if (saveDebounceTimers[seq]) {
     clearTimeout(saveDebounceTimers[seq]);
@@ -680,9 +711,9 @@ async function handleRunFullBookReview(forceAll = false) {
   }, 1000);
 
   try {
-    showMsg("🚀 已启动全书专家审阅，正在按发改委标准逐章深度体检...", "info");
+    showMsg("🚀 已启动全书专家审阅，正在按行业规程与工程编制标准逐章深度体检...", "info");
     await projectStore.runFullBookReview(engine.baseUrl, llmConfig, forceAll, "all");
-    showMsg("全书专家审阅完成！已自动汇总发改委质检台账。", "success");
+    showMsg("全书专家审阅完成！已自动汇总专家诊断总台账。", "success");
     syncEditorContent();
   } catch (err: any) {
     showMsg(`审阅失败: ${err.message}`, "error");
@@ -713,7 +744,7 @@ async function handleReviewSingleChapter(seq: number) {
   }
 
   try {
-    showMsg(`正在对第 ${seq} 章执行发改委高水准专家质检...`, "info");
+    showMsg(`正在对第 ${seq} 章执行高标准专家诊断质检...`, "info");
     await projectStore.runChapterReview(engine.baseUrl, seq, "all", llmConfig);
     showMsg(`第 ${seq} 章审阅完成！`, "success");
     syncEditorContent();
@@ -792,7 +823,7 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
   let instruction = customInstruction;
   if (!instruction) {
     if (issues.length > 0) {
-      instruction = `请依据国家发改委投资项目编制规程重点修复以下问题：\n${issues
+      instruction = `请依据投资项目编制规程与行业工程规范重点修复以下问题：\n${issues
         .map(
           (i, idx) =>
             `${idx + 1}. [${i.dimension || i.category || "规范"}] ${i.description || i.message} (建议: ${
@@ -802,7 +833,7 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
         .join("\n")}`;
     } else {
       instruction =
-        "请依据国家发改委投资项目高质量编制标准，进一步深化工程参数论述与规范表格排版。";
+        "请依据投资项目高质量编制规范与行业工程规程，进一步深化工程参数论述与规范表格排版。";
     }
   }
 
@@ -1105,7 +1136,7 @@ onUnmounted(() => {
               class="btn btn-outline"
               :disabled="!isChapterWritten(currentChapter?.seq || 1) || projectStore.reviewingSeq === currentChapter?.seq"
               @click="handleReviewSingleChapter(currentChapter?.seq || 1)"
-              title="针对本章执行发改委高水准专家质检"
+              title="针对本章执行高标准专家诊断质检"
             >
               🔍 审阅本章
             </button>
@@ -1168,7 +1199,7 @@ onUnmounted(() => {
                     <strong>⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
                   </div>
                   <div class="hb-desc">
-                    已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照国家发改委投资项目编制规程进行系统体检
+                    已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照投资项目编制规程与行业规范进行系统体检
                   </div>
                 </div>
               </div>
@@ -1198,11 +1229,11 @@ onUnmounted(() => {
                     {{ showReviewThoughtDetails ? '收起 ▲' : '展开 ▼' }}
                   </button>
                 </div>
-                <div v-show="showReviewThoughtDetails" class="review-thought-body">
+                <div v-show="showReviewThoughtDetails" ref="reviewThoughtBodyRef" class="review-thought-body">
                   <pre v-if="projectStore.reviewProgress?.thoughtText">{{ projectStore.reviewProgress.thoughtText }}</pre>
                   <div v-else class="review-thought-placeholder">
                     <span class="placeholder-spinner">🔍</span>
-                    <span>思维推演中 (纯中文)... AI 专家正在对照国家发改委与行业编制规程深度核查章节参数指标与数据自洽性...</span>
+                    <span>思维推演中 (纯中文)... AI 专家正在对照投资项目编制规程与行业规范深度核查章节参数指标与数据自洽性...</span>
                   </div>
                 </div>
               </div>
@@ -1263,11 +1294,11 @@ onUnmounted(() => {
                     {{ showRevisionThoughtDetails ? '收起 ▲' : '展开 ▼' }}
                   </button>
                 </div>
-                <div v-show="showRevisionThoughtDetails" class="review-thought-body">
+                <div v-show="showRevisionThoughtDetails" ref="revisionThoughtBodyRef" class="review-thought-body">
                   <pre v-if="projectStore.revisionProgress?.thoughtText">{{ projectStore.revisionProgress.thoughtText }}</pre>
                   <div v-else class="review-thought-placeholder">
                     <span class="placeholder-spinner">⚡</span>
-                    <span>思维推演中 (纯中文)... AI 专家正在对照国家发改委与行业编制规程重构论述与关键技术参数...</span>
+                    <span>思维推演中 (纯中文)... AI 专家正在对照投资项目编制规程与行业规范重构论述与关键技术参数...</span>
                   </div>
                 </div>
               </div>
@@ -1280,7 +1311,7 @@ onUnmounted(() => {
           <!-- 纯净出版级排版正文画布 — 单章聚焦 + contenteditable 就地编辑 -->
           <div class="writing-canvas">
             <div class="canvas-spec-bar">
-              <span class="spec-tag">📖 国家发改委与行业规程出版级排版 (10.5pt)</span>
+              <span class="spec-tag">📖 行业规程与工程编制出版级排版 (10.5pt)</span>
               <span class="spec-tip">
                 支持直接在排版文字上点击输入修改，300ms 自动落盘。点击黄色高亮诊断标记可联动右侧修改建议或一键局部精准修复。
               </span>
@@ -1306,7 +1337,7 @@ onUnmounted(() => {
             <div class="ref-drawer-panel diagnostic-drawer-panel" @click.stop>
               <div class="drawer-header">
                 <div class="drawer-title-box">
-                  <h4>📋 国家发改委标准专家诊断总台账</h4>
+                  <h4>📋 投资项目编制规范专家诊断总台账</h4>
                   <span class="drawer-sub">第 {{ currentChapter?.seq }} 章：{{ currentChapter?.title }} · 全书累计 {{ allIssues.length }} 项建议</span>
                 </div>
                 <button class="drawer-close-btn" @click="showDiagnosticDrawer = false">✕</button>
@@ -1408,7 +1439,7 @@ onUnmounted(() => {
 
                     <div class="issue-sug-box">
                       <span class="sug-icon">💡</span>
-                      <span class="sug-text"><strong>优化建议：</strong>{{ issue.suggestion || '请根据国家发改委投资项目编制规范补充详实论证。' }}</span>
+                      <span class="sug-text"><strong>优化建议：</strong>{{ issue.suggestion || '请根据投资项目编制规范与行业规程补充详实论证。' }}</span>
                     </div>
                   </div>
 
@@ -1419,7 +1450,7 @@ onUnmounted(() => {
                     <div class="empty-icon">🟢</div>
                     <div class="empty-title">当前暂无审阅诊断问题</div>
                     <div class="empty-desc">
-                      符合国家发改委投资项目编制规程，或者请点击上方「🔍 审阅本章」执行深度体检。
+                      符合投资项目编制规程与行业规范，或者请点击上方「🔍 审阅本章」执行深度体检。
                     </div>
                   </div>
                 </div>

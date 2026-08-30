@@ -586,7 +586,7 @@ def _stream_review(writer: ChapterWriter, llm: LLMClient, req: ReviewRequest):
         elif mode == "technical":
             stage_msg = "🛠️ 正在进行技术方案可行性与工艺路线专项审校..."
         else:
-            stage_msg = "🔍 正在对照国家发改委规程与工程底稿进行全维度专家逐句诊断..."
+            stage_msg = "🔍 正在对照行业编制规程与工程底稿进行全维度专家逐句诊断..."
 
         yield _sse_event(json.dumps({
             "type": "stage",

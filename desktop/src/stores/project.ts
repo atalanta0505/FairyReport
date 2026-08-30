@@ -1151,7 +1151,11 @@ export const useProjectStore = defineStore("project", () => {
           writing_hint: hint || "",
         },
         (chunk) => {
-          chapters.value[seq] = (chapters.value[seq] || "") + chunk;
+          const cur = chapters.value[seq] || "";
+          chapters.value = {
+            ...chapters.value,
+            [seq]: cur + chunk,
+          };
           if (targetName) {
             saveChaptersToLocal(targetName, chapters.value);
           }
@@ -1398,14 +1402,44 @@ export const useProjectStore = defineStore("project", () => {
 
     const targetName = currentProject.value?.name;
 
+    reviewProgress.value = {
+      currentSeq: seq,
+      currentTitle: chapterTitle,
+      currentIndex: 1,
+      totalTarget: 1,
+      percent: 50,
+      elapsedSeconds: 0,
+      thoughtText: "",
+      completedIssuesCount: 0,
+    };
+
+    if (reviewProgressTimer) {
+      clearInterval(reviewProgressTimer);
+    }
+    const startTime = Date.now();
+    reviewProgressTimer = setInterval(() => {
+      if (reviewProgress.value) {
+        reviewProgress.value.elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+      }
+    }, 1000);
+
     try {
-      const res = await engineApi.streamChapterReview(baseUrl, {
-        chapter_text: targetText,
-        report_type: reportType.value,
-        chapter_title: chapterTitle,
-        mode,
-        llm_config: llmConfig,
-      });
+      const res = await engineApi.streamChapterReview(
+        baseUrl,
+        {
+          chapter_text: targetText,
+          report_type: reportType.value,
+          chapter_title: chapterTitle,
+          mode,
+          llm_config: llmConfig,
+        },
+        (progress) => {
+          if (!reviewProgress.value) return;
+          if (progress.type === "thought") {
+            reviewProgress.value.thoughtText += progress.chunk;
+          }
+        },
+      );
 
       const reviewRes = {
         ...res.review,
@@ -1422,7 +1456,12 @@ export const useProjectStore = defineStore("project", () => {
       error.value = (e as Error).message;
       throw e;
     } finally {
+      if (reviewProgressTimer) {
+        clearInterval(reviewProgressTimer);
+        reviewProgressTimer = null;
+      }
       reviewingSeq.value = null;
+      reviewProgress.value = null;
     }
   }
 
@@ -2004,7 +2043,7 @@ export const useProjectStore = defineStore("project", () => {
       const summary = `全书共 ${outlineChapters.value.length} 章（已审阅 ${totalTarget} 章），发现 ${allIssues.length} 处待优化问题与 ${allGaps.length} 处资料缺口。整体合规与数据自洽达标度为 ${complianceRate}%，健康评估状态为「${healthStatus}」。`;
 
       const generalSuggestions = [
-        "1. 严格对照发改委与行业工程编制规程，核对前后章节投资估算与建设规模数据自洽性；",
+        "1. 严格对照行业工程编制规程与投资项目规范，核对前后章节投资估算与建设规模数据自洽性；",
         "2. 补充完善缺失的附表、附图与前置审批支撑性底稿；",
         "3. 针对高亮批注与数据疑点小节进行专项润色与 AI 修订。",
       ];

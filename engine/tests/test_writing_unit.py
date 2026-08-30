@@ -121,7 +121,7 @@ def test_pure_chinese_reasoning_constraint_in_prompts():
 
     # 1. 核心防御常量硬性规范核验
     assert "【思考链与语言规范（最高优先级·纯中文绝对纯化防线）】" in REASONING_CHINESE_DEFENSE_PROMPT
-    assert "100% 使用规范中文进行国家发改委投资项目与工程咨询专业论证" in REASONING_CHINESE_DEFENSE_PROMPT
+    assert "100% 使用规范中文进行投资项目与工程咨询专业论证" in REASONING_CHINESE_DEFENSE_PROMPT
     assert "绝对禁止夹杂任何英文思考句子、英文短语或英文分析单词" in REASONING_CHINESE_DEFENSE_PROMPT
     assert "'Okay', 'Let me', 'First', 'Next', 'I should', 'We need to'" in REASONING_CHINESE_DEFENSE_PROMPT
 
@@ -436,8 +436,8 @@ def test_standard_three_line_table_rules_in_prompts_and_writer():
     from engine.app.writing.prompts import _BASE_WRITING_PROMPT
     from engine.app.writing.writer import _build_writing_system_prompt, ChapterWriter
 
-    # 1. _BASE_WRITING_PROMPT 发改委 12 项规定动作三线表格检查
-    assert "发改委通用大纲 12 项规定动作标准三线表格强制规范" in _BASE_WRITING_PROMPT
+    # 1. _BASE_WRITING_PROMPT 12 项规定动作三线表格检查
+    assert "通用大纲 12 项规定动作标准三线表格强制规范" in _BASE_WRITING_PROMPT
     assert "主要技术经济指标表" in _BASE_WRITING_PROMPT
     assert "建设规模方案比选表" in _BASE_WRITING_PROMPT
     assert "场址方案比选表" in _BASE_WRITING_PROMPT
@@ -454,7 +454,7 @@ def test_standard_three_line_table_rules_in_prompts_and_writer():
 
     # 2. _build_writing_system_prompt 规则检查
     sys_prompt = _build_writing_system_prompt(report_type="可行性研究报告", chapter_title="第五章 建设方案")
-    assert "发改委 12 项规定动作标准三线表" in sys_prompt
+    assert "12 项规定动作标准三线表" in sys_prompt
 
     # 3. ChapterWriter._build_chapter_write_args prompt 写作要求检查
     writer = ChapterWriter(llm=None, report_type="可行性研究报告")
@@ -465,7 +465,7 @@ def test_standard_three_line_table_rules_in_prompts_and_writer():
         rag_context="",
         topic="水利枢纽",
     )
-    assert "发改委 12 项规定动作标准三线表格强制规范（最高优先级）" in prompt
+    assert "12 项规定动作标准三线表格强制规范（最高优先级）" in prompt
     assert "严禁全篇纯文字堆砌" in prompt
     assert "内容深度与充实展开（极重要）" in prompt
     assert "全面展开实质性工程分析、技术论证" in prompt

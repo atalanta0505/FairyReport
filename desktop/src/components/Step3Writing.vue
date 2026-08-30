@@ -389,12 +389,21 @@ watch(
   },
 );
 
-// 富文本就地输入处理：提取 HTML 转换为 Markdown 防抖落盘
+// 富文本就地输入处理：提取 HTML 转换为 Markdown 立即更新响应式状态并防抖落盘
 function onEditorInput(e: Event) {
   const target = e.target as HTMLElement;
   const html = target.innerHTML;
   const md = htmlToMarkdown(html);
 
+  // 1. 实时更新响应式 store，字数统计与状态 0ms 实时跳动
+  if (projectStore.selectedChapterSeq) {
+    projectStore.chapters = {
+      ...projectStore.chapters,
+      [projectStore.selectedChapterSeq]: md,
+    };
+  }
+
+  // 2. 300ms 防抖持久化落盘
   if (saveDebounceTimer) {
     clearTimeout(saveDebounceTimer);
   }
@@ -811,7 +820,7 @@ function nextStep() {
           <!-- 单栏排版就地可编辑画布区 -->
           <div class="writing-canvas">
             <div class="canvas-spec-bar">
-              <span class="spec-tag">📖 国家发改委与行业规程出版级排版 (10.5pt)</span>
+              <span class="spec-tag">📖 行业规程与工程编制出版级排版 (10.5pt)</span>
               <span class="spec-tip">
                 支持直接在排版文字上点击输入、改字与润色，流式打字机实时排版，300ms 自动落盘。
               </span>

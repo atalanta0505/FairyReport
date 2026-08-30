@@ -2074,7 +2074,7 @@ describe("Pinia useProjectStore", () => {
         const u = String(url);
         if (u.includes("/writing/review_stream")) {
           return mockSSEResponse([
-            '{"type": "stage", "stage": "reasoning", "message": "国家发改委投资项目与工程咨询专业论证中..."}',
+            '{"type": "stage", "stage": "reasoning", "message": "投资项目与工程咨询专业论证中..."}',
             JSON.stringify({
               type: "done",
               review: {
