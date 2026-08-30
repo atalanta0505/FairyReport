@@ -640,6 +640,65 @@ def review_stream(req: ReviewRequest):
     )
 
 
+def _stream_revise(writer: ChapterWriter, llm: LLMClient, req: ReviseRequest):
+    try:
+        yield _sse_event(json.dumps({
+            "type": "stage",
+            "stage": "locate",
+            "message": "统筹专家诊断意见与修改清单...",
+        }, ensure_ascii=False))
+
+        prompt, system = writer._build_modify_args(
+            req.chapter_text,
+            req.instruction,
+            chapter_budget=req.chapter_budget,
+            report_type=req.report_type,
+            chapter_title=req.chapter_title,
+        )
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+
+        yield _sse_event(json.dumps({
+            "type": "stage",
+            "stage": "reasoning",
+            "message": "AI 专家正在推演深度重构方案...",
+        }, ensure_ascii=False))
+
+        raw_buffer = ""
+        for chunk in llm.chat_stream_iter(messages, temperature=0.35):
+            if chunk.startswith('{"type": "thought"'):
+                yield _sse_event(chunk)
+            else:
+                raw_buffer += chunk
+                yield _sse_event(json.dumps({
+                    "type": "chunk",
+                    "chunk": chunk,
+                }, ensure_ascii=False))
+
+        normalized = normalize_chapter_markdown(raw_buffer)
+
+        yield _sse_event(json.dumps({
+            "type": "done",
+            "revised_text": normalized,
+            "raw": raw_buffer,
+        }, ensure_ascii=False))
+        yield "data: [DONE]\n\n"
+    except LLMError as e:
+        yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}, ensure_ascii=False))
+    except Exception as e:
+        yield _sse_event(json.dumps({"error": str(e), "status": 500}, ensure_ascii=False))
+
+
+@router.post("/writing/revise_stream")
+def revise_stream(req: ReviseRequest):
+    """流式 AI 智能修订：返回 SSE 事件流 (stage / thought / chunk / done)。"""
+    llm = _make_llm(req.llm_config)
+    writer = ChapterWriter(llm, report_type=req.report_type)
+    return StreamingResponse(
+        _stream_revise(writer, llm, req),
+        media_type="text/event-stream",
+    )
+
+
 @router.post("/writing/revise")
 def revise(req: ReviseRequest):
     """按指令修订章节 → 修订文本。"""

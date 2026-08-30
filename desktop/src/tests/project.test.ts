@@ -1382,6 +1382,40 @@ describe("Pinia useProjectStore", () => {
       );
     });
 
+    it("engineApi.reviseChapterStream: 发送流式修订请求并透传 thought 与 revised_text", async () => {
+      const ssePayload =
+        'data: {"type": "stage", "stage": "reasoning", "message": "深度推演中..."}\n\n' +
+        'data: {"type": "thought", "thought": "正在对照标准补充工艺指标"}\n\n' +
+        'data: {"type": "done", "revised_text": "# 第一章 概述\\n流式修订完成。"}\n\n' +
+        "data: [DONE]\n\n";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => ssePayload,
+      } as any);
+
+      const thoughts: string[] = [];
+      const res = await engineApi.reviseChapterStream(
+        BASE_URL,
+        {
+          chapter_text: "# 第一章 概述\n原正文...",
+          instruction: "深化论证",
+          llm_config: { api_key: "sk-test", base_url: "http://api", model: "m" },
+        },
+        (p) => {
+          if (p.type === "thought") thoughts.push(p.thought);
+        },
+      );
+
+      expect(res.revised_text).toBe("# 第一章 概述\n流式修订完成。");
+      expect(thoughts).toContain("正在对照标准补充工艺指标");
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${BASE_URL}/writing/revise_stream`,
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
     it("engineApi.reviseParagraph: 发送局部段落精准修订请求并返回重构段落", async () => {
       mockFetch.mockResolvedValueOnce(
         jsonResponse({ revised_paragraph: "修改后的精准工艺参数段落内容。" }),

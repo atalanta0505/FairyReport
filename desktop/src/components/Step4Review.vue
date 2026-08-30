@@ -45,6 +45,7 @@ let reviewTimer: ReturnType<typeof setInterval> | null = null;
 // ── 修订动态心跳与计时器 ──
 const revisionElapsedSeconds = ref<number>(0);
 const revisionStageIndex = ref<number>(0);
+const showRevisionThoughtDetails = ref<boolean>(true);
 let revisionTimer: ReturnType<typeof setInterval> | null = null;
 
 const revisionStages = [
@@ -788,33 +789,37 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
   }
 
   const issues = projectStore.chapterReviews[targetSeq]?.issues || [];
+  let instruction = customInstruction;
+  if (!instruction) {
+    if (issues.length > 0) {
+      instruction = `请依据国家发改委投资项目编制规程重点修复以下问题：\n${issues
+        .map(
+          (i, idx) =>
+            `${idx + 1}. [${i.dimension || i.category || "规范"}] ${i.description || i.message} (建议: ${
+              i.suggestion || "完善论述"
+            })`
+        )
+        .join("\n")}`;
+    } else {
+      instruction =
+        "请依据国家发改委投资项目高质量编制标准，进一步深化工程参数论述与规范表格排版。";
+    }
+  }
 
   revisionElapsedSeconds.value = 0;
   revisionStageIndex.value = 0;
   if (revisionTimer) clearInterval(revisionTimer);
   revisionTimer = setInterval(() => {
     revisionElapsedSeconds.value += 1;
-    if (revisionElapsedSeconds.value % 2 === 0 && revisionStageIndex.value < revisionStages.length - 1) {
+    if (revisionElapsedSeconds.value % 3 === 0 && revisionStageIndex.value < revisionStages.length - 1) {
       revisionStageIndex.value += 1;
     }
   }, 1000);
 
   try {
-    if (issues.length > 0 && !customInstruction) {
-      showMsg(`⚡ 正在对第 ${targetSeq} 章全部 ${issues.length} 处建议执行外科手术式修补...`, "info");
-      const issuesCopy = [...issues];
-      for (const issue of issuesCopy) {
-        await projectStore.runParagraphRevision(engine.baseUrl, targetSeq, issue, llmConfig);
-      }
-      showMsg(`🎉 第 ${targetSeq} 章全部问题已完成精准修补，正文已更新！`, "success");
-    } else {
-      const instruction =
-        customInstruction ||
-        "请依据国家发改委投资项目高质量编制标准，进一步深化工程参数论述与规范表格排版。";
-      showMsg(`正在对第 ${targetSeq} 章执行 AI 智能重构修订...`, "info");
-      await projectStore.runChapterRevision(engine.baseUrl, targetSeq, instruction, llmConfig);
-      showMsg(`第 ${targetSeq} 章 AI 修订完成！正文已更新。`, "success");
-    }
+    showMsg(`⚡ 正在对第 ${targetSeq} 章执行流式 AI 智能重构修订...`, "info");
+    await projectStore.runChapterRevisionStream(engine.baseUrl, targetSeq, instruction, llmConfig);
+    showMsg(`🎉 第 ${targetSeq} 章 AI 修订完成！正文已更新并自动销号。`, "success");
     syncEditorContent();
   } catch (err: any) {
     showMsg(`修订失败: ${err.message}`, "error");
@@ -1084,7 +1089,7 @@ onUnmounted(() => {
                     ? "⚡ 正在专家深度质检中..."
                     : currentChapterReview
                     ? currentChapterIssuesCount === 0
-                      ? "🟢 发改委标准达标 ✓"
+                      ? "🟢 已修改 ✓"
                       : `🟡 存在 ${currentChapterIssuesCount} 处待核建议`
                     : isChapterWritten(currentChapter?.seq || 1)
                     ? "⏳ 待专家审阅"
@@ -1213,10 +1218,10 @@ onUnmounted(() => {
                 <span class="radar-pulse"></span>
                 <div class="hb-title-box">
                   <div class="hb-main-title">
-                    <strong>⚡ AI 智能修订重构中：第 {{ projectStore.revisingSeq }} 章（{{ revisionStages[revisionStageIndex]?.title || '重构方案论述' }}）· 已耗时 {{ revisionElapsedSeconds }}s</strong>
+                    <strong>⚡ AI 智能修订重构中：第 {{ projectStore.revisingSeq }} 章（{{ revisionStages[revisionStageIndex]?.title || '局部智能重构' }}）· 已耗时 {{ projectStore.revisionProgress?.elapsedSeconds ?? revisionElapsedSeconds }}s</strong>
                   </div>
                   <div class="hb-desc">
-                    {{ revisionStages[revisionStageIndex]?.desc || '统筹上下文逻辑与专家诊断建议，执行段落级出版重构' }}
+                    {{ projectStore.revisionProgress?.message || revisionStages[revisionStageIndex]?.desc || '统筹上下文逻辑与专家诊断建议，流式执行工程出版级精准重构' }}
                   </div>
                 </div>
               </div>
@@ -1238,6 +1243,31 @@ onUnmounted(() => {
                       <span v-else>{{ stIdx + 1 }}</span>
                     </div>
                     <span class="stepper-label">{{ st.title }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 实时 AI 修订思考推演窗 -->
+            <div class="review-thought-stream-wrapper">
+              <div class="review-thought-card">
+                <div class="review-thought-header" @click="showRevisionThoughtDetails = !showRevisionThoughtDetails">
+                  <div class="review-thought-title">
+                    <span class="review-thought-icon">🧠</span>
+                    <span>🧠 AI 专家修订推演过程 (纯中文) <span v-if="projectStore.revisionProgress?.thoughtText">({{ projectStore.revisionProgress.thoughtText.length }} 字符)</span></span>
+                    <span class="thinking-wave">
+                      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                    </span>
+                  </div>
+                  <button class="review-thought-toggle-btn" type="button">
+                    {{ showRevisionThoughtDetails ? '收起 ▲' : '展开 ▼' }}
+                  </button>
+                </div>
+                <div v-show="showRevisionThoughtDetails" class="review-thought-body">
+                  <pre v-if="projectStore.revisionProgress?.thoughtText">{{ projectStore.revisionProgress.thoughtText }}</pre>
+                  <div v-else class="review-thought-placeholder">
+                    <span class="placeholder-spinner">⚡</span>
+                    <span>思维推演中 (纯中文)... AI 专家正在对照国家发改委与行业编制规程重构论述与关键技术参数...</span>
                   </div>
                 </div>
               </div>

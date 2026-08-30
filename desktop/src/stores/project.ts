@@ -351,6 +351,14 @@ export interface ReviewProgress {
   completedIssuesCount: number;
 }
 
+export interface ChapterRevisionProgress {
+  seq: number;
+  stage: string;
+  message: string;
+  elapsedSeconds: number;
+  thoughtText: string;
+}
+
 export const useProjectStore = defineStore("project", () => {
   const currentStep = ref<number>(getStoredStep());
   const projects = ref<ProjectOut[]>([]);
@@ -389,6 +397,8 @@ export const useProjectStore = defineStore("project", () => {
   let reviewProgressTimer: ReturnType<typeof setInterval> | null = null;
   const revisingSeq = ref<number | null>(null);
   const revisingIssueId = ref<string | null>(null);
+  const revisionProgress = ref<ChapterRevisionProgress | null>(null);
+  let revisionProgressTimer: ReturnType<typeof setInterval> | null = null;
   const chapterSnapshots = ref<Record<number, string>>({});
   const activeRevision = ref<{
     seq: number;
@@ -1546,11 +1556,13 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
-  async function runChapterRevision(
+  /** 流式 AI 智能修订：支持 SSE 实时透传思考推演过程与更新正文 */
+  async function runChapterRevisionStream(
     baseUrl: string,
     seq: number,
     instruction: string,
     llmConfig: engineApi.LLMConfig,
+    onThoughtChunk?: (thought: string) => void,
   ): Promise<string> {
     const targetUrl = baseUrl || lastBaseUrl.value;
     const originalText = chapters.value[seq] || "";
@@ -1571,19 +1583,52 @@ export const useProjectStore = defineStore("project", () => {
     const titles = outlineChapters.value.find((c) => c.seq === seq);
     const chapterTitle = titles?.title || `第 ${seq} 章`;
 
+    revisionProgress.value = {
+      seq,
+      stage: "locate",
+      message: "AI 专家正在统筹修改意见与缺陷清单...",
+      elapsedSeconds: 0,
+      thoughtText: "",
+    };
+
+    if (revisionProgressTimer) {
+      clearInterval(revisionProgressTimer);
+    }
+    const startTime = Date.now();
+    revisionProgressTimer = setInterval(() => {
+      if (revisionProgress.value) {
+        revisionProgress.value.elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+      }
+    }, 1000);
+
     try {
-      const res = await engineApi.reviseChapter(targetUrl, {
-        chapter_text: originalText,
-        instruction,
-        llm_config: llmConfig,
-        chapter_title: chapterTitle,
-        report_type: reportType.value,
-      });
+      const res = await engineApi.reviseChapterStream(
+        targetUrl,
+        {
+          chapter_text: originalText,
+          instruction,
+          llm_config: llmConfig,
+          chapter_title: chapterTitle,
+          report_type: reportType.value,
+        },
+        (progress) => {
+          if (!revisionProgress.value) return;
+          if (progress.type === "stage") {
+            revisionProgress.value.stage = progress.stage;
+            revisionProgress.value.message = progress.message;
+          } else if (progress.type === "thought") {
+            revisionProgress.value.thoughtText += progress.thought;
+            if (onThoughtChunk) {
+              onThoughtChunk(progress.thought);
+            }
+          }
+        },
+      );
 
       chapters.value[seq] = res.revised_text;
       await saveChapter(targetUrl, seq, res.revised_text, true);
 
-      // 修订完成清空已修复问题列表
+      // 修订完成清空已修复问题列表并标记通过
       if (chapterReviews.value[seq]) {
         chapterReviews.value[seq].issues = [];
         chapterReviews.value[seq].status = "通过";
@@ -1603,8 +1648,22 @@ export const useProjectStore = defineStore("project", () => {
       error.value = (e as Error).message;
       throw e;
     } finally {
+      if (revisionProgressTimer) {
+        clearInterval(revisionProgressTimer);
+        revisionProgressTimer = null;
+      }
       revisingSeq.value = null;
+      revisionProgress.value = null;
     }
+  }
+
+  async function runChapterRevision(
+    baseUrl: string,
+    seq: number,
+    instruction: string,
+    llmConfig: engineApi.LLMConfig,
+  ): Promise<string> {
+    return runChapterRevisionStream(baseUrl, seq, instruction, llmConfig);
   }
 
   async function applyRevision(baseUrl?: string, seq?: number): Promise<void> {
@@ -2047,6 +2106,7 @@ export const useProjectStore = defineStore("project", () => {
     runAllChaptersReview,
     stopBatchReview,
     runChapterRevision,
+    runChapterRevisionStream,
     runParagraphRevision,
     undoChapterRevision,
     removeChapterIssue,
@@ -2057,6 +2117,7 @@ export const useProjectStore = defineStore("project", () => {
     saveFullBookReview,
     deleteFullBookReview,
     runFullBookReview,
+    revisionProgress,
   };
 });
 

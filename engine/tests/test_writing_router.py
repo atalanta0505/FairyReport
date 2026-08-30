@@ -264,6 +264,30 @@ def test_revise_returns_text(client):
     assert resp.json()["revised_text"] == "修订后完整章节"
 
 
+def test_revise_stream_returns_sse_events(client):
+    _set_llm(LLMStub(content="流式修订后完整章节"))
+    resp = client.post("/writing/revise_stream", json={
+        "chapter_text": "原文章节", "instruction": "补充数据",
+        "llm_config": LLM_CONFIG,
+    })
+    assert resp.status_code == 200, resp.text
+    assert "text/event-stream" in resp.headers["content-type"]
+    text = resp.text
+    assert "data: " in text
+    assert "[DONE]" in text
+    assert "流式修订后完整章节" in text
+
+
+def test_revise_paragraph_endpoint(client):
+    _set_llm(LLMStub(content="修订后单一精准段落"))
+    resp = client.post("/writing/revise-paragraph", json={
+        "paragraph_text": "原文段落", "instruction": "优化参数",
+        "llm_config": LLM_CONFIG,
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["revised_paragraph"] == "修订后单一精准段落"
+
+
 # ── hints ──
 def test_hints_save_and_get(client):
     resp = client.post("/writing/hints", json={

@@ -595,7 +595,8 @@ class ChapterWriter:
         return normalize_chapter_markdown(res)
 
     def modify_paragraph(self, paragraph_content: str, instruction: str,
-                         chapter_title: str = "", topic: str = "") -> str:
+                         chapter_title: str = "", topic: str = "",
+                         report_type: str = "") -> str:
         """针对单一/局部段落进行外科手术式精准重构与修改（毫秒级响应，零副作用）。"""
         prompt = (
             f"## 待修改段落原文\n{paragraph_content}\n\n"

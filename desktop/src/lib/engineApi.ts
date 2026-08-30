@@ -810,7 +810,13 @@ export interface ReviseParagraphRequest {
   report_type?: string;
 }
 
-/** 针对章节执行 AI 定向修改与润色 */
+export type ReviseStreamProgress =
+  | { type: "stage"; stage: string; message: string }
+  | { type: "thought"; thought: string }
+  | { type: "chunk"; chunk: string }
+  | { type: "done"; revised_text: string };
+
+/** 针对章节执行 AI 定向修改与润色（非流式） */
 export async function reviseChapter(
   baseUrl: string,
   req: ReviseChapterRequest,
@@ -823,6 +829,183 @@ export async function reviseChapter(
       body: JSON.stringify(req),
     },
   );
+}
+
+/** 针对章节执行流式 AI 定向修改与润色（SSE 流式透传思考推演过程） */
+export async function reviseChapterStream(
+  baseUrl: string,
+  req: ReviseChapterRequest,
+  onProgress?: (progress: ReviseStreamProgress) => void,
+): Promise<{ revised_text: string }> {
+  const url = joinUrl(baseUrl, "/writing/revise_stream");
+  const resp = await pluginFetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify(req),
+  });
+
+  if (!resp.ok) {
+    let errDetail = `HTTP ${resp.status}`;
+    try {
+      const errJson = await resp.json();
+      errDetail = errJson.detail || errJson.message || errDetail;
+    } catch {
+      // ignore
+    }
+    throw new EngineApiError(resp.status, `AI智能修订失败: ${errDetail}`);
+  }
+
+  let finalRevisedText = "";
+  let rawBuffer = "";
+
+  const processContent = (content: string): boolean => {
+    if (content === "[DONE]") return true;
+    if (content.startsWith("{") && content.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed.error) {
+          throw new EngineApiError(
+            parsed.status || 500,
+            parsed.error || "智能修订服务异常",
+          );
+        }
+        if (parsed.type === "stage") {
+          if (onProgress) {
+            onProgress({
+              type: "stage",
+              stage: parsed.stage,
+              message: parsed.message,
+            });
+          }
+          return false;
+        }
+        if (parsed.type === "thought") {
+          if (onProgress) {
+            onProgress({
+              type: "thought",
+              thought: parsed.thought || "",
+            });
+          }
+          return false;
+        }
+        if (parsed.type === "chunk") {
+          rawBuffer += parsed.chunk || "";
+          if (onProgress) {
+            onProgress({
+              type: "chunk",
+              chunk: parsed.chunk || "",
+            });
+          }
+          return false;
+        }
+        if (parsed.type === "done") {
+          finalRevisedText = parsed.revised_text || rawBuffer;
+          if (onProgress) {
+            onProgress({
+              type: "done",
+              revised_text: finalRevisedText,
+            });
+          }
+          return true;
+        }
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          !(err instanceof SyntaxError) &&
+          err.message !== "Unexpected token"
+        ) {
+          throw err;
+        }
+      }
+    }
+    rawBuffer += content;
+    if (onProgress) {
+      onProgress({ type: "chunk", chunk: content });
+    }
+    return false;
+  };
+
+  if (resp.body && typeof resp.body.getReader === "function") {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      let eventEndIndex: number;
+      while ((eventEndIndex = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, eventEndIndex);
+        buffer = buffer.slice(eventEndIndex + 2);
+
+        if (!rawEvent.trim()) continue;
+
+        const lines = rawEvent.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data:")) {
+            const content = line.slice(5).replace(/^\s/, "");
+            const isDone = processContent(content);
+            if (isDone) break;
+          }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      const lines = buffer.trim().split("\n");
+      for (const line of lines) {
+        if (line.startsWith("data:")) {
+          const content = line.slice(5).replace(/^\s/, "");
+          processContent(content);
+        }
+      }
+    }
+  } else if (typeof resp.text === "function") {
+    const fullText = await resp.text();
+    const blocks = fullText.split("\n\n");
+    for (const block of blocks) {
+      const trimmed = block.trim();
+      if (trimmed.startsWith("data:")) {
+        const content = trimmed.slice(5).replace(/^\s/, "");
+        const isDone = processContent(content);
+        if (isDone) break;
+      }
+    }
+    if (!finalRevisedText && fullText.trim()) {
+      if (fullText.trim().startsWith("{")) {
+        try {
+          const directObj = JSON.parse(fullText);
+          if (directObj.revised_text) {
+            finalRevisedText = directObj.revised_text;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (!finalRevisedText) {
+        finalRevisedText = rawBuffer || fullText;
+      }
+    }
+  } else if (typeof resp.json === "function") {
+    try {
+      const data = await resp.json();
+      finalRevisedText = data.revised_text || rawBuffer;
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!finalRevisedText) {
+    finalRevisedText = rawBuffer;
+  }
+
+  return { revised_text: finalRevisedText };
 }
 
 /** 针对局部段落执行外科手术式精准修订（毫秒级响应，零副作用） */
