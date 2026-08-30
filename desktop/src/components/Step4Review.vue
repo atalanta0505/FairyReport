@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type * as engineApi from "../lib/engineApi";
 import {
+  assignGlobalRefNumbers,
+  convertRefsToNumberedCitations,
   countContentChars,
   escapeHtml,
   extractOutlineHeadings,
@@ -287,14 +289,30 @@ function getUnwrittenPlaceholderHtml(seq: number, title: string): string {
   return `<div class="unwritten-chapter-placeholder"><div class="unwritten-icon">📝</div><div class="unwritten-title">第 ${seq} 章《${escapeHtml(title)}》暂未生成正文</div><div class="unwritten-desc">本章节大纲已就绪，当前内容为空。您可直接在此处点击输入排版正文，或返回【步骤 3 报告写作】进行 AI 一键撰写。</div></div>`;
 }
 
+// ── 引用视图模式（语义标签视图 vs 学术编号 [1][2]... 视图）──
+const refViewMode = ref<"semantic" | "numbered">("semantic");
+
+function toggleRefViewMode() {
+  refViewMode.value = refViewMode.value === "semantic" ? "numbered" : "semantic";
+  syncEditorContent();
+  showMsg(`已切换为${refViewMode.value === "semantic" ? "「🏷️ 语义标签视图」" : "「🔢 学术与规程编号视图 [1][2]...」"}`, "info");
+}
+
 // ── 同步排版正文到单章 contenteditable DOM ──
 function syncEditorContent() {
   if (!editorCanvasRef.value || !currentChapter.value) return;
   const seq = currentChapter.value.seq;
-  const text = projectStore.chapters[seq] || "";
+  let text = projectStore.chapters[seq] || "";
   if (!text.trim()) {
     editorCanvasRef.value.innerHTML = getUnwrittenPlaceholderHtml(seq, currentChapter.value.title);
   } else {
+    if (refViewMode.value === "numbered") {
+      const { labelToNumber } = assignGlobalRefNumbers(
+        projectStore.chapters,
+        projectStore.outlineChapters.map((c) => c.seq)
+      );
+      text = convertRefsToNumberedCitations(text, labelToNumber);
+    }
     const rawHtml = markdownToHtml(text, seq, outlineHeadings.value);
     editorCanvasRef.value.innerHTML = applyIssueHighlightsToHtml(rawHtml, seq);
   }
@@ -789,6 +807,22 @@ async function handleFixSingleIssue(issue: engineApi.ReviewIssue) {
   }
 
   const seq = issue.chapterSeq || projectStore.selectedChapterSeq;
+  revisionElapsedSeconds.value = 0;
+  if (revisionTimer) clearInterval(revisionTimer);
+  revisionTimer = setInterval(() => {
+    revisionElapsedSeconds.value += 1;
+  }, 1000);
+
+  projectStore.revisingSeq = seq;
+  projectStore.revisingIssueId = issue.id || issue.quote || "single";
+  projectStore.revisionProgress = {
+    seq,
+    stage: "refine",
+    message: `正在修复问题「${issue.dimension || issue.category || "规范"}」：${issue.description || issue.message}`,
+    elapsedSeconds: 0,
+    thoughtText: `AI 专家正在分析该项修改建议：「${issue.suggestion || issue.description || "完善论述与参数自洽性"}」，执行外科手术式段落精准重构与原位替换...`,
+  };
+
   try {
     showMsg(`⚡ 正在对问题「${issue.dimension || issue.category || "规范"}」执行外科手术式精准修补...`, "info");
     await projectStore.runParagraphRevision(engine.baseUrl, seq, issue, llmConfig);
@@ -796,6 +830,14 @@ async function handleFixSingleIssue(issue: engineApi.ReviewIssue) {
     syncEditorContent();
   } catch (err: any) {
     showMsg(`修复失败: ${err.message}`, "error");
+  } finally {
+    if (revisionTimer) {
+      clearInterval(revisionTimer);
+      revisionTimer = null;
+    }
+    projectStore.revisingSeq = null;
+    projectStore.revisingIssueId = null;
+    projectStore.revisionProgress = null;
   }
 }
 
@@ -819,23 +861,7 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
     return;
   }
 
-  const issues = projectStore.chapterReviews[targetSeq]?.issues || [];
-  let instruction = customInstruction;
-  if (!instruction) {
-    if (issues.length > 0) {
-      instruction = `请依据投资项目编制规程与行业工程规范重点修复以下问题：\n${issues
-        .map(
-          (i, idx) =>
-            `${idx + 1}. [${i.dimension || i.category || "规范"}] ${i.description || i.message} (建议: ${
-              i.suggestion || "完善论述"
-            })`
-        )
-        .join("\n")}`;
-    } else {
-      instruction =
-        "请依据投资项目高质量编制规范与行业工程规程，进一步深化工程参数论述与规范表格排版。";
-    }
-  }
+  const currentIssues = [...(projectStore.chapterReviews[targetSeq]?.issues || [])];
 
   revisionElapsedSeconds.value = 0;
   revisionStageIndex.value = 0;
@@ -848,10 +874,37 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
   }, 1000);
 
   try {
-    showMsg(`⚡ 正在对第 ${targetSeq} 章执行流式 AI 智能重构修订...`, "info");
-    await projectStore.runChapterRevisionStream(engine.baseUrl, targetSeq, instruction, llmConfig);
-    showMsg(`🎉 第 ${targetSeq} 章 AI 修订完成！正文已更新并自动销号。`, "success");
-    syncEditorContent();
+    if (currentIssues.length > 0 && !customInstruction) {
+      const totalIssues = currentIssues.length;
+      showMsg(`⚡ 已启动按序号逐项流水线智能修订（共 ${totalIssues} 项）...`, "info");
+
+      for (let idx = 0; idx < totalIssues; idx++) {
+        const issue = currentIssues[idx];
+        const issueTitle = `[${issue.dimension || issue.category || "规范"}] ${issue.description || issue.message}`;
+        showMsg(`⚡ 正在按序号修复 (${idx + 1}/${totalIssues})：${issueTitle}...`, "info");
+
+        projectStore.revisingSeq = targetSeq;
+        projectStore.revisingIssueId = issue.id || String(idx);
+        projectStore.revisionProgress = {
+          seq: targetSeq,
+          stage: "refine",
+          message: `正在按序号修复 (${idx + 1}/${totalIssues})：${issueTitle}`,
+          elapsedSeconds: revisionElapsedSeconds.value,
+          thoughtText: `AI 专家正在分析第 ${idx + 1} 项修改建议：「${issue.suggestion || issue.description || issue.message}」，对照投资项目编制规程执行外科手术式段落精准重构...`,
+        };
+
+        await projectStore.runParagraphRevision(engine.baseUrl, targetSeq, issue, llmConfig);
+        syncEditorContent();
+      }
+
+      showMsg(`🎉 第 ${targetSeq} 章共 ${totalIssues} 项问题已全部按序号修复完毕！正文已原位更新并自动销号。`, "success");
+    } else {
+      let instruction = customInstruction || "请依据投资项目高质量编制规范与行业工程规程，进一步深化工程参数论述与规范表格排版。";
+      showMsg(`⚡ 正在对第 ${targetSeq} 章执行流式 AI 智能重构修订...`, "info");
+      await projectStore.runChapterRevisionStream(engine.baseUrl, targetSeq, instruction, llmConfig);
+      showMsg(`🎉 第 ${targetSeq} 章 AI 修订完成！正文已更新并自动销号。`, "success");
+      syncEditorContent();
+    }
   } catch (err: any) {
     showMsg(`修订失败: ${err.message}`, "error");
   } finally {
@@ -859,6 +912,9 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
       clearInterval(revisionTimer);
       revisionTimer = null;
     }
+    projectStore.revisingSeq = null;
+    projectStore.revisingIssueId = null;
+    projectStore.revisionProgress = null;
   }
 }
 
@@ -1176,6 +1232,15 @@ onUnmounted(() => {
               title="打开全高右侧参考资料来源抽屉"
             >
               📚 参考资料 ({{ currentChapterReferences.length }})
+            </button>
+
+            <button
+              class="btn btn-outline"
+              :class="{ active: refViewMode === 'numbered' }"
+              @click="toggleRefViewMode"
+              :title="refViewMode === 'semantic' ? '点击切换为规范学术与工程规程数字上标编号 [1][2]... 视图' : '点击切换为语义化参考资料标签 【源:...】 视图'"
+            >
+              {{ refViewMode === 'semantic' ? '🏷️ 语义标签视图' : '🔢 学术编号 [1][2]' }}
             </button>
 
             <button

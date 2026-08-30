@@ -108,7 +108,7 @@ TECH_CHAPTER_KEYWORDS = [
 # 提示词资产（中文原文不改写，大模型思考链纯中文绝对纯化硬防线）
 # ═══════════════════════════════════════════════════════════════
 
-REASONING_CHINESE_DEFENSE_PROMPT = """【思考链与语言规范（最高优先级·纯中文绝对纯化防线）】：如果模型输出内部思维推演过程（reasoning_content / thought），该思考推演过程必须 100% 使用规范中文进行投资项目与工程咨询专业论证，绝对禁止夹杂任何英文思考句子、英文短语或英文分析单词（法定国家标准代码如 GB/T、ISO 及法定工程量纲单位符号如 m³、kW·h、% 除外）！严禁出现 'Okay', 'Let me', 'First', 'Next', 'I should', 'We need to' 等任何英文构思句式！"""
+REASONING_CHINESE_DEFENSE_PROMPT = """【思考链与语言规范（最高优先级·纯中文绝对纯化防线）】：如果模型输出内部思维推演过程（reasoning_content / thought），该思考推演过程必须 100% 使用国家通用规范简体中文进行投资项目与工程咨询专业论证，绝对禁止输出繁体字或未经转简的标题标签，绝对禁止夹杂任何英文思考句子、英文短语或英文分析单词（法定国家标准代码如 GB/T、ISO 及法定工程量纲单位符号如 m³、kW·h、% 除外）！严禁出现 'Okay', 'Let me', 'First', 'Next', 'I should', 'We need to' 等任何英文构思句式！"""
 
 # ── 大纲生成（移自 outline.py）──
 _OUTLINE_BASE_PROMPT = f"""\

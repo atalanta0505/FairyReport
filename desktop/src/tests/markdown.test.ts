@@ -3,6 +3,9 @@ import {
   buildGeneralizedRegex,
   countContentChars,
   countContentCharsExcludingTables,
+  assignGlobalRefNumbers,
+  convertRefsToNumberedCitations,
+  generateBibliographySection,
   escapeHtml,
   extractIssueCandidateKeys,
   extractOutlineHeadings,
@@ -866,6 +869,83 @@ describe("Markdown 解析与排版工具", () => {
       expect(highlighted).toContain('data-issue-id="ISSUE-VAL-1"');
       expect(highlighted).toContain("review-issue-highlight");
       expect(highlighted).toContain("5800万元");
+    });
+  });
+
+  describe("全书全局引用编号与参考文献总清单体系", () => {
+    it("assignGlobalRefNumbers: 按章节顺序赋全局唯一编号并跨章复用", () => {
+      const chapters: Record<number, string> = {
+        1: "本项目依据【源:立项批复文件.docx】进行立项，符合【标:GB 30486—2013】标准。",
+        2: "工艺要求符合【标:GB 30486—2013】与【网:生态环境部通知】。\n【网:生态环境部通知】\nhttps://mee.gov.cn/notice/1",
+        3: "再次依据【源:立项批复文件.docx】核定。",
+      };
+
+      const { labelToNumber, refEntries } = assignGlobalRefNumbers(chapters, [1, 2, 3]);
+
+      // 全书共 3 个独立参考资料，分别赋 1, 2, 3 号
+      expect(labelToNumber["【源:立项批复文件.docx】"]).toBe(1);
+      expect(labelToNumber["【标:GB 30486—2013】"]).toBe(2);
+      expect(labelToNumber["【网:生态环境部通知】"]).toBe(3);
+
+      expect(refEntries.length).toBe(3);
+      expect(refEntries[0].number).toBe(1);
+      expect(refEntries[0].count).toBe(2); // 第 1 章与第 3 章各 1 次
+      expect(refEntries[1].number).toBe(2);
+      expect(refEntries[1].count).toBe(2); // 第 1 章与第 2 章各 1 次
+      expect(refEntries[2].number).toBe(3);
+      expect(refEntries[2].url).toBe("https://mee.gov.cn/notice/1");
+    });
+
+    it("convertRefsToNumberedCitations: 将正文中的语义标签转换为 [1][2] 编号", () => {
+      const text = "本项目依据【源:立项批复文件.docx】进行立项，符合【标:GB 30486—2013】标准。";
+      const labelToNumber = {
+        "【源:立项批复文件.docx】": 1,
+        "【标:GB 30486—2013】": 2,
+      };
+      const converted = convertRefsToNumberedCitations(text, labelToNumber);
+      expect(converted).toBe("本项目依据[1]进行立项，符合[2]标准。");
+    });
+
+    it("generateBibliographySection: 生成 GB/T 7714 规范的参考文献总表", () => {
+      const refEntries = [
+        {
+          number: 1,
+          label: "【源:立项批复文件.docx】",
+          title: "立项批复文件.docx",
+          name: "立项批复文件.docx",
+          type: "material" as const,
+          typeLabel: "项目资料",
+          count: 2,
+          raw: "【源:立项批复文件.docx】",
+        },
+        {
+          number: 2,
+          label: "【标:GB 30486—2013】",
+          title: "GB 30486—2013 制革及毛皮加工工业水污染物排放标准",
+          name: "GB 30486—2013",
+          type: "standard" as const,
+          typeLabel: "标准规范",
+          count: 2,
+          raw: "【标:GB 30486—2013】",
+        },
+        {
+          number: 3,
+          label: "【网:生态环境部通知】",
+          title: "生态环境部关于发布2023年重点区域执行通知",
+          name: "生态环境部通知",
+          type: "web" as const,
+          typeLabel: "联网检索",
+          count: 1,
+          raw: "【网:生态环境部通知】",
+          url: "https://mee.gov.cn/notice/1",
+        },
+      ];
+
+      const bib = generateBibliographySection(refEntries);
+      expect(bib).toContain("# 参考文献");
+      expect(bib).toContain("[1] [项目资料] 立项批复文件.docx.");
+      expect(bib).toContain("[2] [标准规范] GB 30486—2013 制革及毛皮加工工业水污染物排放标准.");
+      expect(bib).toContain("[3] [联网检索] 生态环境部关于发布2023年重点区域执行通知. 访问网址: https://mee.gov.cn/notice/1");
     });
   });
 });

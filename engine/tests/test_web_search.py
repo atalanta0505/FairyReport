@@ -119,6 +119,15 @@ def test_clean_title_bracket_escaping_and_truncation():
     assert "_中国政府网" not in cleaned
 
 
+def test_clean_title_traditional_chinese_and_agency_suffix():
+    raw = "製革及毛皮加工工業水污染物排放標準中華人民共和國生態環境部"
+    cleaned = clean_title(raw)
+    assert "制革及毛皮加工工业水污染物排放标准" in cleaned
+    assert "製" not in cleaned and "業" not in cleaned and "標" not in cleaned and "準" not in cleaned
+    assert "中華人民共和國生態環境部" not in cleaned
+    assert "生态环境部" not in cleaned
+
+
 def test_clean_snippet_stripping_and_truncation():
     raw = "<p>本方案<b>明确</b>了十四五时期节能减排的主要目标与重点任务。</p>"
     cleaned = clean_snippet(raw, max_len=30)

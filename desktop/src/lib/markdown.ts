@@ -1004,3 +1004,167 @@ export function highlightIssuesInHtml(
 
   return currentHtml;
 }
+
+export interface GlobalRefEntry {
+  number: number;
+  label: string;
+  title: string;
+  name: string;
+  type: "material" | "standard" | "web" | "other";
+  typeLabel: string;
+  count: number;
+  raw: string;
+  url?: string;
+  firstChapterSeq?: number;
+}
+
+/**
+ * 遍历全书所有章节正文，按照首次出现先后顺序为所有引用标签赋予唯一的全局数字编号 [1], [2], [3]...
+ * 跨章重复出现的同一参考资料共享相同编号。
+ */
+export function assignGlobalRefNumbers(
+  chapters: Record<number, string>,
+  outlineSeqs?: number[]
+): {
+  labelToNumber: Record<string, number>;
+  refEntries: GlobalRefEntry[];
+} {
+  const labelToNumber: Record<string, number> = {};
+  const refEntries: GlobalRefEntry[] = [];
+  const seenLabels = new Set<string>();
+
+  const seqs = outlineSeqs || Object.keys(chapters).map(Number).sort((a, b) => a - b);
+
+  let currentNumber = 1;
+
+  for (const seq of seqs) {
+    const text = chapters[seq];
+    if (!text || typeof text !== "string") continue;
+
+    // 匹配 【源:...】 / 【材料:...】 / 【标:...】 / 【网:...】 / 【规:...】
+    const bracketRegex = /【(源|材料|网|网络|标|标准|规|规程|法|法规)[:：]\s*([^】]+)】/g;
+    let m: RegExpExecArray | null;
+    while ((m = bracketRegex.exec(text)) !== null) {
+      const rawTag = m[0];
+      const prefix = m[1];
+      const content = m[2].trim();
+      if (!content) continue;
+
+      let type: "material" | "standard" | "web" | "other" = "material";
+      let typeLabel = "项目底稿";
+      let url: string | undefined = undefined;
+
+      if (prefix.startsWith("网")) {
+        type = "web";
+        typeLabel = "百度联网";
+        const escapedTitle = content.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const urlPattern = new RegExp(`【(?:网|网络)[:：]\\s*${escapedTitle}】\\s*\\n?\\s*(https?:\\/\\/[^\\s\\n>"]+)`);
+        const urlMatch = text.match(urlPattern);
+        if (urlMatch) url = urlMatch[1].trim();
+      } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
+        type = "standard";
+        typeLabel = "国标规程";
+      } else {
+        if (/规程|规范|标准|GB|SL|NB|DL|定额|导则|通则|法/i.test(content)) {
+          type = "standard";
+          typeLabel = "国标规程";
+        } else {
+          type = "material";
+          typeLabel = "项目底稿";
+        }
+      }
+
+      if (seenLabels.has(rawTag)) {
+        const existing = refEntries.find((e) => e.raw === rawTag);
+        if (existing) {
+          existing.count += 1;
+          if (!existing.url && url) existing.url = url;
+        }
+      } else {
+        seenLabels.add(rawTag);
+        labelToNumber[rawTag] = currentNumber;
+        refEntries.push({
+          number: currentNumber,
+          label: rawTag,
+          title: content,
+          name: content,
+          type,
+          typeLabel,
+          count: 1,
+          raw: rawTag,
+          url,
+          firstChapterSeq: seq,
+        });
+        currentNumber++;
+      }
+    }
+
+    // 匹配 [Z] 或 [Z-1]
+    const citationRegex = /\[Z(?::|：|-)?([a-zA-Z0-9_\-\u4e00-\u9fa5]*)\]/g;
+    while ((m = citationRegex.exec(text)) !== null) {
+      const rawTag = m[0];
+      const suffix = m[1] ? m[1].trim() : "";
+      const title = suffix ? `标准规范依据 [Z-${suffix}]` : "通用领域行业规程库 [Z]";
+      if (seenLabels.has(rawTag)) {
+        const existing = refEntries.find((e) => e.raw === rawTag);
+        if (existing) existing.count += 1;
+      } else {
+        seenLabels.add(rawTag);
+        labelToNumber[rawTag] = currentNumber;
+        refEntries.push({
+          number: currentNumber,
+          label: rawTag,
+          title,
+          name: title,
+          type: "standard",
+          typeLabel: "国标规程",
+          count: 1,
+          raw: rawTag,
+          firstChapterSeq: seq,
+        });
+        currentNumber++;
+      }
+    }
+  }
+
+  return { labelToNumber, refEntries };
+}
+
+/**
+ * 将正文中的语义标签替换为标准学术/规程数字上标编号 [1], [2]...
+ */
+export function convertRefsToNumberedCitations(
+  md: string,
+  labelToNumber: Record<string, number>
+): string {
+  if (!md || typeof md !== "string") return "";
+  let result = md;
+  for (const [label, num] of Object.entries(labelToNumber)) {
+    result = result.replaceAll(label, `[${num}]`);
+  }
+  return result;
+}
+
+/**
+ * 根据全书全局引用清单，生成符合 GB/T 7714-2015 格式的《全书参考文献总清单》Markdown 段落
+ */
+export function generateBibliographySection(refEntries: GlobalRefEntry[]): string {
+  if (!refEntries || refEntries.length === 0) {
+    return "# 参考文献\n\n（全书未引用外部参考资料）\n";
+  }
+
+  const lines: string[] = ["# 参考文献", "", "> 依据 GB/T 7714—2015 信息与文献 参考文献著录规则 自动汇总生成", ""];
+
+  for (const item of refEntries) {
+    if (item.type === "standard") {
+      lines.push(`[${item.number}] [标准规范] ${item.title}.`);
+    } else if (item.type === "web") {
+      const urlPart = item.url ? ` 访问网址: ${item.url}` : "";
+      lines.push(`[${item.number}] [联网检索] ${item.title}.${urlPart}`);
+    } else {
+      lines.push(`[${item.number}] [项目资料] ${item.title}.`);
+    }
+  }
+
+  return lines.join("\n") + "\n";
+}
