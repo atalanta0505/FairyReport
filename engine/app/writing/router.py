@@ -733,6 +733,62 @@ def revise_paragraph(req: ReviseParagraphRequest):
     return {"revised_paragraph": revised}
 
 
+def _stream_revise_paragraph(writer: ChapterWriter, llm: LLMClient, req: ReviseParagraphRequest):
+    try:
+        yield _sse_event(json.dumps({
+            "type": "stage",
+            "stage": "locate",
+            "message": "AI 专家正在锁定目标段落并对照投资项目编制规程...",
+        }, ensure_ascii=False))
+
+        prompt, system = writer._build_paragraph_modify_args(
+            req.paragraph_text,
+            req.instruction,
+            chapter_title=req.chapter_title,
+            report_type=req.report_type,
+        )
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+
+        yield _sse_event(json.dumps({
+            "type": "stage",
+            "stage": "reasoning",
+            "message": "AI 专家正在推演段落精准重构与合规表述方案...",
+        }, ensure_ascii=False))
+
+        raw_buffer = ""
+        for chunk in llm.chat_stream_iter(messages, temperature=0.3):
+            if chunk.startswith('{"type": "thought"'):
+                yield _sse_event(chunk)
+            else:
+                raw_buffer += chunk
+                yield _sse_event(json.dumps({
+                    "type": "chunk",
+                    "chunk": chunk,
+                }, ensure_ascii=False))
+
+        yield _sse_event(json.dumps({
+            "type": "done",
+            "revised_paragraph": raw_buffer.strip(),
+        }, ensure_ascii=False))
+        yield "data: [DONE]\n\n"
+    except LLMError as e:
+        yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}, ensure_ascii=False))
+    except Exception as e:
+        yield _sse_event(json.dumps({"error": str(e), "status": 500}, ensure_ascii=False))
+
+
+@router.post("/writing/revise_paragraph_stream")
+@router.post("/writing/revise-paragraph-stream")
+def revise_paragraph_stream(req: ReviseParagraphRequest):
+    """流式单段落精准重构：返回 SSE 事件流 (stage / thought / chunk / done)。"""
+    llm = _make_llm(req.llm_config)
+    writer = ChapterWriter(llm, report_type=req.report_type)
+    return StreamingResponse(
+        _stream_revise_paragraph(writer, llm, req),
+        media_type="text/event-stream",
+    )
+
+
 @router.post("/writing/hints")
 def save_hint_endpoint(req: HintSaveRequest):
     """保存章节提示（本地，不需 llm_config）。"""

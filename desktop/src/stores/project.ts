@@ -1545,13 +1545,37 @@ export const useProjectStore = defineStore("project", () => {
     try {
       let newChapterText = originalText;
       if (targetParagraph) {
-        const res = await engineApi.reviseParagraph(targetUrl, {
-          paragraph_text: targetParagraph,
-          instruction,
-          llm_config: llmConfig,
-          chapter_title: chapterTitle,
-          report_type: reportType.value,
-        });
+        let res: { revised_paragraph: string };
+        try {
+          res = await engineApi.streamParagraphRevision(
+            targetUrl,
+            {
+              paragraph_text: targetParagraph,
+              instruction,
+              llm_config: llmConfig,
+              chapter_title: chapterTitle,
+              report_type: reportType.value,
+            },
+            (event) => {
+              if (!revisionProgress.value) return;
+              if (event.type === "stage" && event.message) {
+                revisionProgress.value.message = event.message;
+              } else if (event.type === "thought") {
+                const chunk = event.thought || event.chunk || "";
+                revisionProgress.value.thoughtText += chunk;
+              }
+            },
+          );
+        } catch {
+          // fallback to non-stream if stream endpoint encounters issues
+          res = await engineApi.reviseParagraph(targetUrl, {
+            paragraph_text: targetParagraph,
+            instruction,
+            llm_config: llmConfig,
+            chapter_title: chapterTitle,
+            report_type: reportType.value,
+          });
+        }
         if (res && res.revised_paragraph) {
           newChapterText = originalText.replace(targetParagraph, res.revised_paragraph);
         }

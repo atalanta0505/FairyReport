@@ -29,6 +29,7 @@ from ..writing.refs import (
     global_assign_ref_numbers,
     merge_global_refs,
 )
+from ..writing.writer import normalize_chapter_markdown
 
 # ── LaTeX 公式正则 ──
 _LATEX_DISPLAY = re.compile(r'\$\$(.+?)\$\$', re.DOTALL)
@@ -818,9 +819,19 @@ def _parse_inline_formatting(text: str) -> list:
 
 def _parse_md_line(line: str):
     """解析 Markdown 行为 (level, text, is_heading)。"""
-    match = re.match(r'^(#{1,6})\s+(.*)', line)
+    stripped = line.strip()
+    match = re.match(r'^(#{1,6})\s+(.*)', stripped)
     if match:
         return len(match.group(1)), match.group(2).strip(), True
+    # 兼容无 # 前缀的规范多级数字标题（如 2.3.1 宏观层面必要性、第2章 项目建设背景）
+    num_match = re.match(r'^(\d+(?:\.\d+){1,4})\s+([^\n:：。]{2,30})$', stripped)
+    if num_match:
+        dot_count = num_match.group(1).count('.')
+        level = min(dot_count + 1, 4)
+        return level, stripped, True
+    ch_match = re.match(r'^(第[一二三四五六七八九十百零\d]+章)\s+([^\n:：。]{2,30})$', stripped)
+    if ch_match:
+        return 1, stripped, True
     return 0, line, False
 
 
@@ -875,6 +886,7 @@ def generate_report_ref(chapters: dict, output_path: str, refs: list = None):
         if content:
             body_parts.append(_strip_ref_section(content))
     full_body = "\n\n".join(body_parts)
+    full_body = normalize_chapter_markdown(full_body)
     _, numbering = global_assign_ref_numbers(full_body)
 
     ref_content = format_ref_appendix(global_refs, numbering)
@@ -905,6 +917,7 @@ def build_merged_md(chapters: dict, include_refs: bool = True) -> str:
         if content:
             body_parts.append(_strip_ref_section(content))
     full_body = "\n\n".join(body_parts)
+    full_body = normalize_chapter_markdown(full_body)
 
     if not include_refs:
         return full_body

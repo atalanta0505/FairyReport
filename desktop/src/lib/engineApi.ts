@@ -1025,6 +1025,167 @@ export async function reviseParagraph(
   );
 }
 
+/** 流式单段落精准重构（SSE 透传阶段、实时思考流与重构内容） */
+export async function streamParagraphRevision(
+  baseUrl: string,
+  req: ReviseParagraphRequest,
+  onProgress?: (event: ReviseStreamProgress) => void,
+): Promise<{ revised_paragraph: string }> {
+  const resp = await pluginFetch(joinUrl(baseUrl, "/writing/revise_paragraph_stream"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!resp.ok) {
+    let msg = `引擎错误 ${resp.status}`;
+    try {
+      const j = await resp.json();
+      msg = j.detail || j.message || msg;
+    } catch {
+      /* ignore */
+    }
+    throw new EngineApiError(resp.status, msg);
+  }
+
+  let finalRevisedParagraph = "";
+  let rawBuffer = "";
+
+  const processContent = (content: string): boolean => {
+    if (content === "[DONE]") return true;
+    if (content.startsWith("{") && content.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed.error) {
+          throw new EngineApiError(
+            parsed.status || 500,
+            parsed.error || "段落精准修订服务异常",
+          );
+        }
+        if (parsed.type === "stage") {
+          if (onProgress) {
+            onProgress({
+              type: "stage",
+              stage: parsed.stage,
+              message: parsed.message,
+            });
+          }
+          return false;
+        }
+        if (parsed.type === "thought") {
+          const th = parsed.thought || parsed.chunk || "";
+          if (onProgress) {
+            onProgress({
+              type: "thought",
+              thought: th,
+              chunk: th,
+            });
+          }
+          return false;
+        }
+        if (parsed.type === "chunk") {
+          rawBuffer += parsed.chunk || "";
+          if (onProgress) {
+            onProgress({
+              type: "chunk",
+              chunk: parsed.chunk || "",
+            });
+          }
+          return false;
+        }
+        if (parsed.type === "done") {
+          finalRevisedParagraph = parsed.revised_paragraph || rawBuffer;
+          if (onProgress) {
+            onProgress({
+              type: "done",
+              revised_text: finalRevisedParagraph,
+            });
+          }
+          return true;
+        }
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          !(err instanceof SyntaxError) &&
+          err.message !== "Unexpected token"
+        ) {
+          throw err;
+        }
+      }
+    }
+    return false;
+  };
+
+  if (resp.body && typeof (resp.body as any).getReader === "function") {
+    const reader = (resp.body as any).getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let isDone = false;
+
+    while (!isDone) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data:")) {
+          const content = line.slice(5).replace(/^\s/, "");
+          isDone = processContent(content);
+          if (isDone) break;
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      const lines = buffer.trim().split("\n");
+      for (const line of lines) {
+        if (line.startsWith("data:")) {
+          const content = line.slice(5).replace(/^\s/, "");
+          processContent(content);
+        }
+      }
+    }
+  } else if (typeof resp.text === "function") {
+    const fullText = await resp.text();
+    let hasSseData = false;
+    const blocks = fullText.split("\n\n");
+    for (const block of blocks) {
+      const trimmed = block.trim();
+      if (trimmed.startsWith("data:")) {
+        hasSseData = true;
+        const content = trimmed.slice(5).replace(/^\s/, "");
+        const isDone = processContent(content);
+        if (isDone) break;
+      }
+    }
+    if (!hasSseData && fullText.trim().startsWith("{")) {
+      try {
+        const directObj = JSON.parse(fullText);
+        if (directObj.revised_paragraph) {
+          finalRevisedParagraph = directObj.revised_paragraph;
+        }
+      } catch {
+        // ignore
+      }
+    }
+  } else if (typeof resp.json === "function") {
+    try {
+      const data = await resp.json();
+      finalRevisedParagraph = data.revised_paragraph || rawBuffer;
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!finalRevisedParagraph) {
+    finalRevisedParagraph = rawBuffer;
+  }
+
+  return { revised_paragraph: finalRevisedParagraph };
+}
+
 /** 获取项目持久化专家审阅诊断数据 */
 export async function getProjectReviews(
   baseUrl: string,

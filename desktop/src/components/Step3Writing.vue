@@ -153,11 +153,12 @@ const currentChapter = computed(() => {
 
 const currentChapterText = computed({
   get: () => {
-    const seq = projectStore.selectedChapterSeq;
+    const seq = currentChapter.value?.seq || projectStore.selectedChapterSeq || 1;
     return projectStore.chapters[seq] || "";
   },
   set: (val: string) => {
-    projectStore.saveChapter(engine.baseUrl, projectStore.selectedChapterSeq, val);
+    const seq = currentChapter.value?.seq || projectStore.selectedChapterSeq || 1;
+    projectStore.saveChapter(engine.baseUrl, seq, val);
   },
 });
 
@@ -740,7 +741,7 @@ function nextStep() {
             </div>
             <div class="editor-meta-row">
               <span class="meta-item">
-                当前字数：<strong>{{ currentChapterWords.toLocaleString() }}</strong> 字 (正文)
+                本章字数：<strong>{{ currentChapterWords.toLocaleString() }}</strong> 字 (正文)
               </span>
               <span class="meta-item-divider">·</span>
               <span class="meta-item status-text" :class="currentChapterStatus">

@@ -4,6 +4,7 @@ import type * as engineApi from "../lib/engineApi";
 import {
   countContentChars,
   escapeHtml,
+  extractIssueCandidateKeys,
   extractOutlineHeadings,
   extractReferences,
   extractSubHeadings,
@@ -126,13 +127,43 @@ const currentChapterWords = computed(() => {
   return countContentChars(currentChapterText.value);
 });
 
+function findIssueTextPosition(text: string, issue: engineApi.ReviewIssue): number {
+  if (!text) return 999999;
+  const candidates = extractIssueCandidateKeys(issue);
+  for (const cand of candidates) {
+    if (!cand || cand.length < 2) continue;
+    const idx = text.indexOf(cand);
+    if (idx !== -1) return idx;
+    const cleanCand = cand.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+    if (cleanCand.length >= 4) {
+      const cleanText = text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+      const cleanIdx = cleanText.indexOf(cleanCand);
+      if (cleanIdx !== -1) return cleanIdx;
+    }
+  }
+  if (issue.location) {
+    const locKey = issue.location.replace(/^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*/, "").trim();
+    if (locKey.length >= 2) {
+      const idx = text.indexOf(locKey);
+      if (idx !== -1) return idx;
+    }
+  }
+  return 999999;
+}
+
 const currentChapterReview = computed<engineApi.ExpertReviewResult | null>(() => {
   if (!currentChapter.value) return null;
   return projectStore.chapterReviews[currentChapter.value.seq] || null;
 });
 
 const currentChapterIssues = computed<engineApi.ReviewIssue[]>(() => {
-  return currentChapterReview.value?.issues || [];
+  const issues = [...(currentChapterReview.value?.issues || [])];
+  const text = currentChapterText.value;
+  return issues.sort((a, b) => {
+    const posA = findIssueTextPosition(text, a);
+    const posB = findIssueTextPosition(text, b);
+    return posA - posB;
+  });
 });
 
 const currentChapterIssuesCount = computed(() => {
@@ -743,6 +774,12 @@ async function handleReviewSingleChapter(seq: number) {
     return;
   }
 
+  reviewElapsedSeconds.value = 0;
+  if (reviewTimer) clearInterval(reviewTimer);
+  reviewTimer = setInterval(() => {
+    reviewElapsedSeconds.value += 1;
+  }, 1000);
+
   try {
     showMsg(`正在对第 ${seq} 章执行高标准专家诊断质检...`, "info");
     await projectStore.runChapterReview(engine.baseUrl, seq, "all", llmConfig);
@@ -753,6 +790,11 @@ async function handleReviewSingleChapter(seq: number) {
     showDiagnosticDrawer.value = true;
   } catch (err: any) {
     showMsg(`单章审阅失败: ${err.message}`, "error");
+  } finally {
+    if (reviewTimer) {
+      clearInterval(reviewTimer);
+      reviewTimer = null;
+    }
   }
 }
 
@@ -1145,7 +1187,7 @@ onUnmounted(() => {
             </div>
             <div class="editor-meta-row">
               <span class="meta-item">
-                当前字数：<strong>{{ currentChapterWords.toLocaleString() }}</strong> 字 (正文)
+                本章字数：<strong>{{ currentChapterWords.toLocaleString() }}</strong> 字 (正文)
               </span>
               <span class="meta-item-divider">·</span>
               <span

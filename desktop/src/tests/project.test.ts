@@ -1564,7 +1564,7 @@ describe("Pinia useProjectStore", () => {
 
       mockFetch.mockImplementation(async (url) => {
         const u = String(url);
-        if (u.includes("/writing/revise-paragraph")) {
+        if (u.includes("/writing/revise-paragraph") || u.includes("/writing/revise_paragraph_stream")) {
           return jsonResponse({ revised_paragraph: "段落二：工艺参数已详实补充吨耗电0.45kWh及98%回收率。" });
         }
         if (u.includes("/chapters/1")) {

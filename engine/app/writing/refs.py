@@ -35,17 +35,21 @@ def strip_fabricated_labels(chapter_text: str, rag_context: str) -> str:
 
 
 def _extract_url_for_label(label: str, rag_context: str) -> str:
-    """从 rag_context 提取网页标签对应的真实 URL。"""
+    """从 rag_context 提取网页标签对应的真实完整 URL。"""
     if not rag_context:
         return ""
     title_match = re.match(r"【网:(.+?)】", label)
     if not title_match:
         return ""
     title = re.escape(title_match.group(1).strip())
-    pattern = rf"【网:{title}】\s*\n\s*(https?://\S+)"
+    pattern = rf"【网:{title}】[^\n]*\n?\s*(https?://[^\s\)]+)"
     m = re.search(pattern, rag_context)
     if m:
         return m.group(1).strip()
+    pattern_fallback = rf"{title}[^\n]*\s+(https?://[^\s\)]+)"
+    m2 = re.search(pattern_fallback, rag_context)
+    if m2:
+        return m2.group(1).strip()
     return ""
 
 

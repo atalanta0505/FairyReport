@@ -410,7 +410,16 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         return f"{title_part}\n\n{clean_rest}" if clean_rest else title_part
     cleaned = re.sub(pattern_punct, _repl_punct, cleaned, flags=re.MULTILINE)
 
-    # 6. 确保标题与正文之间有空行（如 ### 1.1 标题\n正文 -> ### 1.1 标题\n\n正文）
+    # 6. 多级数字节标题与正文粘连拆分（例如：2.3.1 宏观层面必要性 从宏观层面看... 或 ### 2.3.1 宏观层面必要性 从宏观层面看...）
+    pattern_numbered_heading = r'^(#{1,6}\s+)?(\d+(?:\.\d+){1,4}\s+[\u4e00-\u9fa5a-zA-Z0-9（）\(\)\/\-]{2,25}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{10,})$'
+    def _repl_num_heading(m):
+        prefix = m.group(1) or "### "
+        h_text = m.group(2).strip()
+        body_text = m.group(3).strip()
+        return f"{prefix.strip()} {h_text}\n\n{body_text}"
+    cleaned = re.sub(pattern_numbered_heading, _repl_num_heading, cleaned, flags=re.MULTILINE)
+
+    # 7. 确保标题与正文之间有空行（如 ### 1.1 标题\n正文 -> ### 1.1 标题\n\n正文）
     cleaned = re.sub(r'^(#{1,6}\s+[^\n]+)\n(?!\n|#{1,6}\s)', r'\1\n\n', cleaned, flags=re.MULTILINE)
 
     return cleaned
@@ -598,6 +607,23 @@ class ChapterWriter:
                          chapter_title: str = "", topic: str = "",
                          report_type: str = "") -> str:
         """针对单一/局部段落进行外科手术式精准重构与修改（毫秒级响应，零副作用）。"""
+        prompt, system = self._build_paragraph_modify_args(
+            paragraph_content,
+            instruction,
+            chapter_title=chapter_title,
+            topic=topic,
+            report_type=report_type,
+        )
+        res = self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_MODIFY,
+                            frequency_penalty=FREQUENCY_PENALTY,
+                            presence_penalty=PRESENCE_PENALTY,
+                            top_p=TOP_P)
+        return res.strip()
+
+    def _build_paragraph_modify_args(self, paragraph_content: str, instruction: str,
+                                     chapter_title: str = "", topic: str = "",
+                                     report_type: str = "") -> tuple:
+        """返回单段落外科手术式重构修改的 (prompt, system)。"""
         prompt = (
             f"## 待修改段落原文\n{paragraph_content}\n\n"
             f"## 专家修改意见\n{instruction}\n\n"
@@ -611,11 +637,7 @@ class ChapterWriter:
             "2. 仅返回修改后的目标段落正文本身，严禁输出任何引言、解释、前后说明或无关废话；\n"
             "3. 如果原文包含 Markdown 格式（如列表、粗体、小标题），请严格保留相符的排版结构。"
         )
-        res = self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_MODIFY,
-                            frequency_penalty=FREQUENCY_PENALTY,
-                            presence_penalty=PRESENCE_PENALTY,
-                            top_p=TOP_P)
-        return res.strip()
+        return prompt, system
 
     def _build_modify_args(self, original_content: str, instruction: str,
                            chapter_budget: int,
