@@ -14,9 +14,12 @@ import { useProjectStore } from "../stores/project";
 const engine = useEngineStore();
 const projectStore = useProjectStore();
 
-const exporting = ref(false);
-const exportResultPath = ref("");
-const exportResultSize = ref(0);
+const exportingDocx = ref(false);
+const exportingMd = ref(false);
+const exportDocxResultPath = ref("");
+const exportDocxResultSize = ref(0);
+const exportMdResultPath = ref("");
+const exportMdResultSize = ref(0);
 const exportError = ref("");
 const toastMessage = ref("");
 const toastType = ref<"success" | "error" | "info">("info");
@@ -112,9 +115,9 @@ async function handleExportDocx() {
     return;
   }
 
-  exporting.value = true;
+  exportingDocx.value = true;
   exportError.value = "";
-  exportResultPath.value = "";
+  exportDocxResultPath.value = "";
 
   try {
     const res = await engineApi.exportDocx(engine.baseUrl, {
@@ -124,14 +127,52 @@ async function handleExportDocx() {
       include_refs: true,
     });
 
-    exportResultPath.value = res.path;
-    exportResultSize.value = res.size_bytes;
-    showMsg("🎉 Word 成果报告导出成功！已自动完成全书引用学术编号与文末参考文献章生成。", "success");
+    exportDocxResultPath.value = res.path;
+    exportDocxResultSize.value = res.size_bytes;
+    showMsg("🎉 Word (.docx) 成果报告导出成功！已自动完成全书引用学术编号与文末参考文献章生成。", "success");
   } catch (err: any) {
     exportError.value = err.message || "导出失败";
-    showMsg(`导出失败: ${exportError.value}`, "error");
+    showMsg(`Word 导出失败: ${exportError.value}`, "error");
   } finally {
-    exporting.value = false;
+    exportingDocx.value = false;
+  }
+}
+
+// ── 一键导出 Markdown (.md) ──
+async function handleExportMd() {
+  if (!engine.baseUrl) {
+    showMsg("本地引擎未就绪", "error");
+    return;
+  }
+  if (!projectStore.currentProject) {
+    showMsg("未选中项目", "error");
+    return;
+  }
+  if (writtenChaptersCount.value === 0) {
+    showMsg("全书尚无章节正文，请先在步骤 3 写作或步骤 4 审阅中完善内容", "error");
+    return;
+  }
+
+  exportingMd.value = true;
+  exportError.value = "";
+  exportMdResultPath.value = "";
+
+  try {
+    const res = await engineApi.exportMd(engine.baseUrl, {
+      project: projectStore.currentProject.name,
+      title: projectStore.currentProject.name,
+      chapters: projectStore.chapters,
+      include_refs: true,
+    });
+
+    exportMdResultPath.value = res.path;
+    exportMdResultSize.value = res.size_bytes;
+    showMsg("🎉 Markdown (.md) 成果文件导出成功！已自动完成全书引用学术编号与文末参考文献章生成。", "success");
+  } catch (err: any) {
+    exportError.value = err.message || "导出失败";
+    showMsg(`Markdown 导出失败: ${exportError.value}`, "error");
+  } finally {
+    exportingMd.value = false;
   }
 }
 
@@ -188,7 +229,7 @@ async function openExportFolder() {
     </div>
 
     <div class="step5-grid">
-      <!-- 左侧：全书概览与一键导出卡片 -->
+      <!-- 左侧：全书概览与双格式导出卡片 -->
       <div class="export-main-col">
         <!-- 统计面板 -->
         <div class="stats-card">
@@ -213,7 +254,7 @@ async function openExportFolder() {
           </div>
         </div>
 
-        <!-- 核心导出操作卡片 -->
+        <!-- 1. Word 文档 (.docx) 导出卡片 -->
         <div class="action-card">
           <div class="action-card-header">
             <div class="action-card-title">
@@ -224,46 +265,91 @@ async function openExportFolder() {
           </div>
 
           <p class="action-desc">
-            系统将在导出时自动扫描全书正文，将所有参考资料标签（项目底稿、国家与行业规程标准、权威联网）按其在全书首次出现的先后顺序统一编号为 <code>[1]</code>、<code>[2]</code>、<code>[3]</code>...，并在报告文末自动作为最后一章生成符合学术期刊与国家标准著录格式的《参考文献》章。
+            依据投资项目编制规程排版标准，将全书引用按首次出现顺序编号为 <code>[1]</code>、<code>[2]</code>...，并在文末生成独立《参考文献》章（学术标准著录格式）。
           </p>
 
           <div class="action-buttons-row">
             <button
               class="btn btn-primary btn-lg"
-              :disabled="exporting || writtenChaptersCount === 0"
+              :disabled="exportingDocx || writtenChaptersCount === 0"
               @click="handleExportDocx"
             >
-              <span v-if="exporting" class="spinner-inline"></span>
-              {{ exporting ? '⚡ 正在执行全书引用排序与 Word 文档排版导出...' : '🚀 一键导出 Word 报告 (.docx)' }}
-            </button>
-
-            <button class="btn btn-outline" @click="copyFullMarkdown">
-              📋 复制全书 Markdown（含学术编号）
+              <span v-if="exportingDocx" class="spinner-inline"></span>
+              {{ exportingDocx ? '⚡ 正在生成 Word 文档...' : '🚀 一键导出 Word 报告 (.docx)' }}
             </button>
           </div>
 
-          <!-- 导出成功结果卡片 -->
-          <div v-if="exportResultPath" class="export-success-box">
+          <!-- Word 导出成功结果卡片 -->
+          <div v-if="exportDocxResultPath" class="export-success-box">
             <div class="success-top">
               <span class="success-icon">🎉</span>
               <div class="success-info">
-                <strong>Word 成果报告导出成功！</strong>
-                <div class="success-path" :title="exportResultPath">{{ exportResultPath }}</div>
+                <strong>Word 报告已成功导出！</strong>
+                <div class="success-path" :title="exportDocxResultPath">{{ exportDocxResultPath }}</div>
                 <div class="success-meta">
-                  文件大小：{{ (exportResultSize / 1024).toFixed(1) }} KB · 全书引用已按首次出现顺序编号
+                  文件大小：{{ (exportDocxResultSize / 1024).toFixed(1) }} KB · 全书引用已按首次出现顺序编号
                 </div>
               </div>
             </div>
             <div class="success-actions">
               <button class="btn btn-secondary btn-sm" @click="openExportFolder">
-                📂 打开成果导出文件夹
+                📂 打开导出文件夹
               </button>
             </div>
           </div>
+        </div>
 
-          <div v-if="exportError" class="export-error-box">
-            ⚠️ 导出错误：{{ exportError }}
+        <!-- 2. Markdown 报告 (.md) 导出卡片 -->
+        <div class="action-card">
+          <div class="action-card-header">
+            <div class="action-card-title">
+              <span class="action-icon">📝</span>
+              <span>Markdown 纯文本报告 (.md)</span>
+            </div>
+            <span class="badge-secondary">通用排版格式</span>
           </div>
+
+          <p class="action-desc">
+            导出全书合并后的 Markdown 终稿文件，正文引用已统一替换为 <code>[1]</code>、<code>[2]</code>... 学术编号，文末附带规范的《参考文献》总表。
+          </p>
+
+          <div class="action-buttons-row">
+            <button
+              class="btn btn-secondary btn-lg"
+              :disabled="exportingMd || writtenChaptersCount === 0"
+              @click="handleExportMd"
+            >
+              <span v-if="exportingMd" class="spinner-inline"></span>
+              {{ exportingMd ? '⚡ 正在生成 Markdown 文件...' : '💾 一键导出 Markdown 报告 (.md)' }}
+            </button>
+
+            <button class="btn btn-outline" @click="copyFullMarkdown">
+              📋 复制全书 Markdown 源码
+            </button>
+          </div>
+
+          <!-- MD 导出成功结果卡片 -->
+          <div v-if="exportMdResultPath" class="export-success-box">
+            <div class="success-top">
+              <span class="success-icon">🎉</span>
+              <div class="success-info">
+                <strong>Markdown 文件已成功导出！</strong>
+                <div class="success-path" :title="exportMdResultPath">{{ exportMdResultPath }}</div>
+                <div class="success-meta">
+                  文件大小：{{ (exportMdResultSize / 1024).toFixed(1) }} KB · 纯文本 UTF-8 编码
+                </div>
+              </div>
+            </div>
+            <div class="success-actions">
+              <button class="btn btn-secondary btn-sm" @click="openExportFolder">
+                📂 打开导出文件夹
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="exportError" class="export-error-box">
+          ⚠️ 导出错误：{{ exportError }}
         </div>
       </div>
 

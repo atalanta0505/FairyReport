@@ -1154,3 +1154,25 @@ export async function exportDocx(
   );
 }
 
+export interface ExportMdRequest {
+  project: string;
+  title: string;
+  chapters: Record<string | number, string>;
+  include_refs?: boolean;
+}
+
+/** 导出全书 Markdown .md 成果文件（包含顺序编号与末尾参考文献章） */
+export async function exportMd(
+  baseUrl: string,
+  req: ExportMdRequest,
+): Promise<{ path: string; size_bytes: number; content: string }> {
+  return request<{ path: string; size_bytes: number; content: string }>(
+    baseUrl,
+    "/export/md",
+    {
+      method: "POST",
+      body: JSON.stringify(req),
+    },
+  );
+}
+

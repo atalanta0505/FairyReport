@@ -68,3 +68,43 @@ def export_docx(req: ExportDocxRequest):
 
     size = os.path.getsize(out_path)
     return {"path": out_path, "size_bytes": size}
+
+
+class ExportMdRequest(BaseModel):
+    project: str = ""
+    title: str = ""
+    chapters: dict = Field(default_factory=dict)
+    include_refs: bool = True
+
+
+@router.post("/md")
+def export_md(req: ExportMdRequest):
+    """合并章节 markdown 导出 .md 成果文件；chapters 空/非法 → 422。"""
+    if not req.chapters or not isinstance(req.chapters, dict):
+        raise HTTPException(status_code=422, detail="chapters 不能为空")
+    for k, v in req.chapters.items():
+        if not isinstance(v, str):
+            raise HTTPException(status_code=422, detail=f"chapter {k} 内容必须为字符串")
+
+    try:
+        final_md = build_merged_md(req.chapters, include_refs=req.include_refs)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"合并失败：{e}")
+
+    if not final_md.strip():
+        raise HTTPException(status_code=422, detail="合并后内容为空")
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fname = f"{_safe_filename(req.project)}_{stamp}.md"
+    out_path = os.path.join(_exports_dir(), fname)
+
+    try:
+        with open(out_path, "w", encoding="utf-8") as f:
+            if req.title:
+                f.write(f"# {req.title}\n\n")
+            f.write(final_md)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"md 导出失败：{e}")
+
+    size = os.path.getsize(out_path)
+    return {"path": out_path, "size_bytes": size, "content": final_md}

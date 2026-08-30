@@ -238,6 +238,32 @@ def test_export_returns_path_and_size(client):
     assert os.path.normpath(os.path.dirname(path)) == os.path.normpath(exports_dir)
 
 
+def test_export_md_success(client):
+    """验证 /export/md 能够正确生成包含学术编号与参考文献章的 .md 文件。"""
+    ch1 = "# 第一章 概况\n正文【源:doc1.docx】与【标:GB50016】测试。"
+    ch2 = "# 第二章 建设条件\n正文【源:doc1.docx】再次引用与【网:国家生态部】测试。"
+    resp = client.post("/export/md", json={
+        "project": "md_test",
+        "title": "项目可行性研究报告",
+        "chapters": {"1": ch1, "2": ch2},
+        "include_refs": True,
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert os.path.exists(data["path"])
+    assert data["path"].endswith(".md")
+    assert data["size_bytes"] > 0
+    with open(data["path"], "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "# 项目可行性研究报告" in content
+    assert "[1]" in content
+    assert "[2]" in content
+    assert "[3]" in content
+    assert "# 参考文献" in content
+    assert "GB/T 7714" in content
+    assert "doc1.docx" in content
+
+
 def test_export_standard_three_line_table_format(client):
     """验证导出的 Word 表格符合标准三线表规范（加粗顶底线、细栏目线、无竖线、淡灰表头、cantSplit 与 tblHeader）。"""
     md_with_table = (

@@ -231,6 +231,8 @@ def merge_global_refs(chapters: dict) -> list:
     ):
         ch_text = chapters.get(ch_key, "")
         refs = _parse_ref_section(ch_text)
+        if not refs:
+            refs = extract_chapter_refs(ch_text)
         for ref in refs:
             key = (ref["name"], ref["type"])
             if key not in seen:
