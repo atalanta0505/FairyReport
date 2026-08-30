@@ -7,6 +7,8 @@ POST /export/docx {project, title, chapters{seq: md}, include_refs 默认 true}
 """
 import os
 import re
+import subprocess
+import sys
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
@@ -108,3 +110,43 @@ def export_md(req: ExportMdRequest):
 
     size = os.path.getsize(out_path)
     return {"path": out_path, "size_bytes": size, "content": final_md}
+
+
+class OpenExportFolderRequest(BaseModel):
+    path: str = ""
+    project: str = ""
+
+
+@router.post("/open-folder")
+def open_export_folder_endpoint(req: OpenExportFolderRequest = None):
+    """在系统资源管理器中打开导出成果文件夹（若传入 path 则直接定位并高亮选中该文件）。"""
+    exports_dir = _exports_dir()
+    target_path = req.path.strip() if req and req.path else ""
+
+    if target_path and os.path.exists(target_path):
+        try:
+            if os.name == "nt":
+                # Windows 下使用 explorer.exe /select,"<file_path>" 精确高亮选中导出的文件
+                norm_p = os.path.normpath(target_path)
+                subprocess.Popen(f'explorer.exe /select,"{norm_p}"')
+                return {"path": target_path}
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", target_path])
+                return {"path": target_path}
+            else:
+                subprocess.Popen(["xdg-open", os.path.dirname(target_path)])
+                return {"path": target_path}
+        except Exception:
+            pass
+
+    # fallback: 直接打开 exports 目录
+    try:
+        if os.name == "nt":
+            os.startfile(exports_dir)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", exports_dir])
+        else:
+            subprocess.Popen(["xdg-open", exports_dir])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"打开导出文件夹失败: {e}")
+    return {"path": exports_dir}

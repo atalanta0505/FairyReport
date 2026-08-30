@@ -1337,3 +1337,24 @@ export async function exportMd(
   );
 }
 
+export interface OpenExportFolderRequest {
+  path?: string;
+  project?: string;
+}
+
+/** 在系统资源管理器中打开导出文件夹（或高亮选中导出的成果文件） */
+export async function openExportFolder(
+  baseUrl: string,
+  filePath?: string,
+  projectName?: string,
+): Promise<{ path: string }> {
+  return request<{ path: string }>(
+    baseUrl,
+    "/export/open-folder",
+    {
+      method: "POST",
+      body: JSON.stringify({ path: filePath || "", project: projectName || "" }),
+    },
+  );
+}
+

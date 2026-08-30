@@ -353,6 +353,20 @@ def check_chapter_word_limit(content: str, report_type: str, chapter_title: str,
     return False, wc, budget, ""
 
 
+_REPORT_TITLE_KEYWORDS = (
+    "必要性", "可行性", "合理性", "衔接性", "符合性", "适当性", "适应性", "可靠性", "安全性", "经济性", "合规性",
+    "立项背景", "建设背景", "项目背景", "行业背景", "政策背景", "前期进展", "工作进展", "审批情况",
+    "建设条件", "选址方案", "规划选址", "建设规模", "产品方案", "技术方案", "工艺方案", "工程方案",
+    "总图布置", "设备方案", "节能评估", "环境保护", "环境影响", "水土保持", "劳动安全", "消防安全",
+    "组织机构", "劳动定员", "实施进度", "工程进度", "投资估算", "资金筹措", "财务评价", "经济评价",
+    "社会效益", "生态效益", "环境效益", "风险分析", "防范对策", "招标方案", "结论建议", "编制依据",
+    "背景", "进展", "情况", "分析", "评价", "方案", "选址", "条件", "保障", "规模", "指标",
+    "概算", "估算", "预测", "规划", "目标", "措施", "对策", "建议", "结论", "论述", "研究",
+    "内容", "概况", "要求", "依据", "原则", "构想", "说明", "安排", "计划", "总结", "表",
+    "体系", "定位", "布局", "工艺", "设备", "工程", "效益", "风险", "基础", "现状", "需求"
+)
+
+
 def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
     """章节 Markdown 规范化清洗：
     1. 还原 CRLF 为 LF
@@ -361,7 +375,8 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
     4. 标题与加粗/引用/表格粘连拆解
     5. 若传入骨架，提取骨架中的各级标题，无条件在已知标题边界处截断并插入双换行
     6. 通用单行标题紧连中文/标点断行保护
-    7. 确保每个标题行下方强制空一行（若紧跟非空正文行且未空行，补空行）
+    7. 彻底拆解多级数字节标题与正文粘连（无空格、有标点、无标点紧连正文等各种形态）
+    8. 确保每个标题行下方强制空一行（若紧跟非空正文行且未空行，补空行）
     """
     if not text or not isinstance(text, str):
         return ""
@@ -410,14 +425,34 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         return f"{title_part}\n\n{clean_rest}" if clean_rest else title_part
     cleaned = re.sub(pattern_punct, _repl_punct, cleaned, flags=re.MULTILINE)
 
-    # 6. 多级数字节标题与正文粘连拆分（例如：2.3.1 宏观层面必要性 从宏观层面看... 或 ### 2.3.1 宏观层面必要性 从宏观层面看...）
-    pattern_numbered_heading = r'^(#{1,6}\s+)?(\d+(?:\.\d+){1,4}\s+[\u4e00-\u9fa5a-zA-Z0-9（）\(\)\/\-]{2,25}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{10,})$'
-    def _repl_num_heading(m):
+    # 6. 多级数字节标题与正文粘连拆分（例如：2.3.1 宏观层面必要性从宏观层面看...）
+    # 6.1 有空格或标点连接：2.3.1 宏观层面必要性 从宏观层面看... / 2.3.1 宏观层面必要性：从宏观层面看...
+    pattern_num_punct = r'^(#{1,6}\s*)?(\d+(?:\.\d+)+)\s+([^\n.:：。—\-\u2014\u2013\s]{2,25}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$'
+    def _repl_num_punct(m):
         prefix = m.group(1) or "### "
-        h_text = m.group(2).strip()
-        body_text = m.group(3).strip()
-        return f"{prefix.strip()} {h_text}\n\n{body_text}"
-    cleaned = re.sub(pattern_numbered_heading, _repl_num_heading, cleaned, flags=re.MULTILINE)
+        num_part = m.group(2).strip()
+        h_text = m.group(3).strip()
+        body_text = m.group(4).strip()
+        return f"{prefix.strip()} {num_part} {h_text}\n\n{body_text}"
+    cleaned = re.sub(pattern_num_punct, _repl_num_punct, cleaned, flags=re.MULTILINE)
+
+    # 6.2 无空格无标点粘连：2.3.1 宏观层面必要性从宏观层面看，本项目...
+    pattern_num_dense = r'^(#{1,6}\s*)?(\d+(?:\.\d+)+)\s*([^\n]{4,120})$'
+    def _repl_num_dense(m):
+        prefix = m.group(1) or "### "
+        num_part = m.group(2).strip()
+        rest = m.group(3).strip()
+        for kw in _REPORT_TITLE_KEYWORDS:
+            kw_idx = rest.find(kw)
+            if 0 <= kw_idx <= 25:
+                end_pos = kw_idx + len(kw)
+                if end_pos < len(rest):
+                    h_text = rest[:end_pos].strip()
+                    body_text = rest[end_pos:].lstrip(':：。—-\u2014\u2013，, \t').strip()
+                    if body_text:
+                        return f"{prefix.strip()} {num_part} {h_text}\n\n{body_text}"
+        return m.group(0)
+    cleaned = re.sub(pattern_num_dense, _repl_num_dense, cleaned, flags=re.MULTILINE)
 
     # 7. 确保标题与正文之间有空行（如 ### 1.1 标题\n正文 -> ### 1.1 标题\n\n正文）
     cleaned = re.sub(r'^(#{1,6}\s+[^\n]+)\n(?!\n|#{1,6}\s)', r'\1\n\n', cleaned, flags=re.MULTILINE)

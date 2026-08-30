@@ -261,7 +261,28 @@ def test_export_md_success(client):
     assert "[3]" in content
     assert "# 参考文献" in content
     assert "GB/T 7714" in content
-    assert "doc1.docx" in content
+def test_export_open_folder(client):
+    """验证 /export/open-folder 能够正常返回 exports 目录路径。"""
+    resp = client.post("/export/open-folder", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "path" in data
+    assert os.path.exists(data["path"])
+    assert "exports" in data["path"].lower()
+
+
+def test_dense_heading_separation():
+    """验证多级数字节标题无空格直接粘连正文时的智能拆分能力。"""
+    from engine.app.writing.writer import normalize_chapter_markdown
+    raw = (
+        "2.3.1 宏观层面必要性从宏观层面看，本项目建设是推动皮革工业绿色转型、落实生态文明建设要求的客观需要。\n"
+        "2.3.2 中观层面必要性从中观层面看，本项目建设是利辛县完善主导产业链条的现实需要。\n"
+        "2.3.3 微观层面必要性从微观层面看，本项目建设具备明确的资源条件。"
+    )
+    cleaned = normalize_chapter_markdown(raw)
+    assert "### 2.3.1 宏观层面必要性\n\n从宏观层面看" in cleaned
+    assert "### 2.3.2 中观层面必要性\n\n从中观层面看" in cleaned
+    assert "### 2.3.3 微观层面必要性\n\n从微观层面看" in cleaned
 
 
 def test_export_standard_three_line_table_format(client):

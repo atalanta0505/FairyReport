@@ -191,13 +191,17 @@ async function copyFullMarkdown() {
   }
 }
 
-// ── 打开成果所在目录 ──
-async function openExportFolder() {
-  if (!engine.baseUrl || !projectStore.currentProject) return;
+// ── 打开成果所在目录（直接在系统资源管理器中高亮选中导出的文件） ──
+async function openExportFolder(filePath?: string) {
+  if (!engine.baseUrl) return;
   try {
-    await engineApi.openProjectDir(engine.baseUrl, projectStore.currentProject.name);
+    await engineApi.openExportFolder(
+      engine.baseUrl,
+      filePath,
+      projectStore.currentProject?.name,
+    );
   } catch (err: any) {
-    showMsg(`打开目录失败: ${err.message}`, "error");
+    showMsg(`打开导出文件夹失败: ${err.message}`, "error");
   }
 }
 </script>
@@ -292,8 +296,8 @@ async function openExportFolder() {
               </div>
             </div>
             <div class="success-actions">
-              <button class="btn btn-secondary btn-sm" @click="openExportFolder">
-                📂 打开导出文件夹
+              <button class="btn btn-secondary btn-sm" @click="openExportFolder(exportDocxResultPath)">
+                📂 打开导出文件夹并选中文件
               </button>
             </div>
           </div>
@@ -341,8 +345,8 @@ async function openExportFolder() {
               </div>
             </div>
             <div class="success-actions">
-              <button class="btn btn-secondary btn-sm" @click="openExportFolder">
-                📂 打开导出文件夹
+              <button class="btn btn-secondary btn-sm" @click="openExportFolder(exportMdResultPath)">
+                📂 打开导出文件夹并选中文件
               </button>
             </div>
           </div>

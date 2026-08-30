@@ -97,6 +97,8 @@ def md_to_docx(md_content: str, output_path: str, title: str = "") -> str:
 
     title 非空时在开头插入报告总标题（Level 0 / Title 样式）。
     """
+    md_content = normalize_chapter_markdown(md_content)
+
     doc = Document()
     _init_document_styles(doc)
 
