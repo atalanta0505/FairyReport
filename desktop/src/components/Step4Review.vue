@@ -1188,23 +1188,26 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 审阅心跳与进度条 (正在执行全书审阅时内联展示) -->
+        <!-- 审阅心跳与进度条 (正在执行全书审阅或单章审阅时内联展示) -->
         <transition name="fade">
-          <div v-if="projectStore.batchReviewing" class="review-heartbeat-bar">
+          <div v-if="projectStore.batchReviewing || projectStore.reviewingSeq !== null" class="review-heartbeat-bar">
             <div class="heartbeat-inner">
               <div class="hb-left">
                 <span class="radar-pulse"></span>
                 <div class="hb-title-box">
                   <div class="hb-main-title">
-                    <strong>⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
+                    <strong v-if="projectStore.batchReviewing">⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
+                    <strong v-else>⚡ 正在深度审阅 第 {{ projectStore.reviewingSeq }} 章：《{{ currentChapter?.title || '当前章节' }}》· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
                   </div>
                   <div class="hb-desc">
-                    已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照投资项目编制规程与行业规范进行系统体检
+                    <span v-if="projectStore.batchReviewing">已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照投资项目编制规程与行业规范进行系统体检</span>
+                    <span v-else>对本章节正文论述、关键工程技术参数与数值前后自洽性进行全维度高标准专家体检</span>
                   </div>
                 </div>
               </div>
               <div class="hb-right">
                 <button
+                  v-if="projectStore.batchReviewing"
                   class="btn btn-danger btn-sm btn-stop-review"
                   @click="handleStopReview"
                   title="中止当前正在执行的批量全书审阅任务"
