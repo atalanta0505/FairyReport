@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import * as engineApi from "../lib/engineApi";
+import { extractIssueCandidateKeys } from "../lib/markdown";
 import type {
   ChapterInfo,
   GenericStatus,
@@ -1490,24 +1491,33 @@ export const useProjectStore = defineStore("project", () => {
     const titles = outlineChapters.value.find((c) => c.seq === seq);
     const chapterTitle = titles?.title || `第 ${seq} 章`;
 
-    // 寻找目标段落
-    const quote = (issue.quote || issue.snippet || "").trim();
-    let targetParagraph = "";
+    // 寻找目标段落（采用多级精准提取候选词）
+    const candidates = extractIssueCandidateKeys(issue);
     const paragraphs = originalText.split(/\n\n+/);
+    let targetParagraph = "";
 
-    if (quote) {
-      const cleanQuote = quote.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+    // 1. 优先使用候选特征词在段落中匹配
+    for (const cand of candidates) {
+      if (!cand || cand.length < 2) continue;
+      const cleanCand = cand.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+
       for (const p of paragraphs) {
-        if (
-          p.includes(quote) ||
-          (cleanQuote.length >= 4 && p.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "").includes(cleanQuote))
-        ) {
+        if (p.includes(cand)) {
           targetParagraph = p;
           break;
         }
+        if (cleanCand.length >= 4) {
+          const cleanP = p.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+          if (cleanP.includes(cleanCand) || (cleanCand.length >= 8 && cleanP.includes(cleanCand.slice(0, 8)))) {
+            targetParagraph = p;
+            break;
+          }
+        }
       }
+      if (targetParagraph) break;
     }
 
+    // 2. 尝试从 location 提取标题/段落
     if (!targetParagraph && issue.location) {
       const locKey = issue.location.replace(/^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*/, "").trim();
       if (locKey.length >= 2) {
@@ -1516,6 +1526,16 @@ export const useProjectStore = defineStore("project", () => {
             targetParagraph = p;
             break;
           }
+        }
+      }
+    }
+
+    // 3. 若仍未精确命中，选取首个含有实质正文（非纯标题）的段落进行局部修补
+    if (!targetParagraph && paragraphs.length > 0) {
+      for (const p of paragraphs) {
+        if (p.trim().length >= 20 && !p.trim().startsWith("#")) {
+          targetParagraph = p;
+          break;
         }
       }
     }
@@ -1532,19 +1552,15 @@ export const useProjectStore = defineStore("project", () => {
           chapter_title: chapterTitle,
           report_type: reportType.value,
         });
-        newChapterText = originalText.replace(targetParagraph, res.revised_paragraph);
-      } else {
-        const res = await engineApi.reviseChapter(targetUrl, {
-          chapter_text: originalText,
-          instruction,
-          llm_config: llmConfig,
-          chapter_title: chapterTitle,
-          report_type: reportType.value,
-        });
-        newChapterText = res.revised_text;
+        if (res && res.revised_paragraph) {
+          newChapterText = originalText.replace(targetParagraph, res.revised_paragraph);
+        }
       }
 
-      chapters.value[seq] = newChapterText;
+      chapters.value = {
+        ...chapters.value,
+        [seq]: newChapterText,
+      };
       await saveChapter(targetUrl, seq, newChapterText, true);
 
       // 从该章诊断问题中移除此问题

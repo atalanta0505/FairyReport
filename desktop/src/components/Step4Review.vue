@@ -868,6 +868,9 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
   if (revisionTimer) clearInterval(revisionTimer);
   revisionTimer = setInterval(() => {
     revisionElapsedSeconds.value += 1;
+    if (projectStore.revisionProgress) {
+      projectStore.revisionProgress.elapsedSeconds = revisionElapsedSeconds.value;
+    }
     if (revisionElapsedSeconds.value % 3 === 0 && revisionStageIndex.value < revisionStages.length - 1) {
       revisionStageIndex.value += 1;
     }
@@ -890,7 +893,7 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
           stage: "refine",
           message: `正在按序号修复 (${idx + 1}/${totalIssues})：${issueTitle}`,
           elapsedSeconds: revisionElapsedSeconds.value,
-          thoughtText: `AI 专家正在分析第 ${idx + 1} 项修改建议：「${issue.suggestion || issue.description || issue.message}」，对照投资项目编制规程执行外科手术式段落精准重构...`,
+          thoughtText: `【正在修复第 ${idx + 1}/${totalIssues} 项】\n● 审查维度：${issue.dimension || issue.category || "规范合规性"}\n● 缺陷描述：${issue.description || issue.message}\n● 专家建议：${issue.suggestion || "完善论述与参数依据"}\n\nAI 专家正在锁定目标段落，依照投资项目编制规程与行业规范执行外科手术式段落精准重构与原位无缝替换...`,
         };
 
         await projectStore.runParagraphRevision(engine.baseUrl, targetSeq, issue, llmConfig);
@@ -1261,8 +1264,8 @@ onUnmounted(() => {
                 <span class="radar-pulse"></span>
                 <div class="hb-title-box">
                   <div class="hb-main-title">
-                    <strong v-if="projectStore.batchReviewing">⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
-                    <strong v-else>⚡ 正在深度审阅 第 {{ projectStore.reviewingSeq }} 章：《{{ currentChapter?.title || '当前章节' }}》· 已耗时 {{ projectStore.reviewProgress?.elapsedSeconds ?? reviewElapsedSeconds }}s</strong>
+                    <strong v-if="projectStore.batchReviewing">⚡ 正在深度审阅 第 {{ projectStore.reviewProgress?.currentIndex || 1 }}/{{ projectStore.reviewProgress?.totalTarget || 1 }} 章：《{{ projectStore.reviewProgress?.currentTitle || '当前章节' }}》（进度 {{ projectStore.reviewProgress?.percent || 0 }}%）· 已耗时 {{ reviewElapsedSeconds }}s</strong>
+                    <strong v-else>⚡ 正在深度审阅 第 {{ projectStore.reviewingSeq }} 章：《{{ currentChapter?.title || '当前章节' }}》· 已耗时 {{ reviewElapsedSeconds }}s</strong>
                   </div>
                   <div class="hb-desc">
                     <span v-if="projectStore.batchReviewing">已完成 {{ projectStore.reviewProgress?.currentIndex ? projectStore.reviewProgress.currentIndex - 1 : 0 }} 章，累计发现 {{ projectStore.reviewProgress?.completedIssuesCount || 0 }} 处优化建议 · 依照投资项目编制规程与行业规范进行系统体检</span>
@@ -1317,7 +1320,7 @@ onUnmounted(() => {
                 <span class="radar-pulse"></span>
                 <div class="hb-title-box">
                   <div class="hb-main-title">
-                    <strong>⚡ AI 智能修订重构中：第 {{ projectStore.revisingSeq }} 章（{{ revisionStages[revisionStageIndex]?.title || '局部智能重构' }}）· 已耗时 {{ projectStore.revisionProgress?.elapsedSeconds ?? revisionElapsedSeconds }}s</strong>
+                    <strong>⚡ AI 智能修订重构中：第 {{ projectStore.revisingSeq }} 章（{{ revisionStages[revisionStageIndex]?.title || '局部智能重构' }}）· 已耗时 {{ revisionElapsedSeconds }}s</strong>
                   </div>
                   <div class="hb-desc">
                     {{ projectStore.revisionProgress?.message || revisionStages[revisionStageIndex]?.desc || '统筹上下文逻辑与专家诊断建议，流式执行工程出版级精准重构' }}
