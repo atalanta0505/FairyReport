@@ -271,60 +271,33 @@ def global_assign_ref_numbers(full_body: str) -> tuple:
 
 
 def generate_global_ref_list(global_refs: list, numbering: dict) -> str:
-    """根据合并引用 + 编号映射生成导出 _ref.md 内容。"""
+    """根据合并引用 + 编号映射生成导出 _ref.md 内容（GB/T 7714 标准格式）。"""
     if not global_refs:
-        return "# 参考资料清单\n\n（未检测到引用标记）\n"
+        return "# 参考文献\n\n（全书未引用外部参考资料）\n"
 
     sorted_refs = sorted(
         global_refs,
-        key=lambda r: numbering.get(r["label"], 99999),
+        key=lambda r: numbering.get(r.get("label", ""), 99999),
     )
 
-    project_items = [r for r in sorted_refs if r["type"] == "项目资料"]
-    standard_items = [r for r in sorted_refs if r["type"] == "规程标准"]
-    web_items = [r for r in sorted_refs if r["type"] == "网页链接"]
-    ai_items = [r for r in sorted_refs if r["type"] == "AI自有知识"]
+    lines = ["# 参考文献\n", "> 依据 GB/T 7714 信息与文献 参考文献著录规则 自动汇总排序\n"]
 
-    lines = ["# 参考资料清单\n", "> 自动生成于报告导出时\n"]
+    for r in sorted_refs:
+        label = r.get("label", "")
+        n = numbering.get(label, "?")
+        name = r.get("name", "")
+        source = r.get("source", "")
+        ref_type = r.get("type", "项目资料")
 
-    if project_items:
-        lines.append("## 项目资料\n")
-        for r in project_items:
-            n = numbering.get(r["label"], "?")
-            name = r.get("name", "")
-            source = r.get("source", "")
-            if source and source != name:
-                lines.append(f"- [{n}] {name} — 来源: {source}")
-            else:
-                lines.append(f"- [{n}] {name}")
-        lines.append("")
+        if ref_type in ("网页链接", "web"):
+            url_part = f" 访问网址: {source}" if (source and source.startswith("http")) else ""
+            lines.append(f"[{n}] [联网检索] {name}.{url_part}")
+        elif ref_type in ("规程标准", "standard"):
+            lines.append(f"[{n}] [规程标准] {name}.")
+        elif ref_type == "AI自有知识":
+            lines.append(f"[{n}] [领域知识] {name} — 通用领域工程专业知识补充.")
+        else:
+            source_part = f" — 来源: {source}" if (source and source != name) else ""
+            lines.append(f"[{n}] [项目资料] {name}{source_part}.")
 
-    if standard_items:
-        lines.append("## 规程标准\n")
-        for r in standard_items:
-            n = numbering.get(r["label"], "?")
-            name = r.get("name", "")
-            source = r.get("source", "")
-            if source and source != name:
-                lines.append(f"- [{n}] {name} — 来源: {source}")
-            else:
-                lines.append(f"- [{n}] {name}")
-        lines.append("")
-
-    if web_items:
-        lines.append("## 网页链接\n")
-        for r in web_items:
-            n = numbering.get(r["label"], "?")
-            name = r.get("name", "")
-            source = r.get("source", "")
-            if source and source != name:
-                lines.append(f"- [{n}] {name} — {source}")
-            else:
-                lines.append(f"- [{n}] {name}")
-        lines.append("")
-
-    if ai_items:
-        lines.append("## AI自有知识\n")
-        lines.append("（由 AI 在编写过程中补充的通用领域知识）\n")
-
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"

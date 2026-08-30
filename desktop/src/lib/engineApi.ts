@@ -1132,3 +1132,25 @@ export async function deleteProjectFullReview(
   );
 }
 
+export interface ExportDocxRequest {
+  project: string;
+  title: string;
+  chapters: Record<string | number, string>;
+  include_refs?: boolean;
+}
+
+/** 导出全书 Word .docx 成果文件（包含顺序编号与末尾参考文献章） */
+export async function exportDocx(
+  baseUrl: string,
+  req: ExportDocxRequest,
+): Promise<{ path: string; size_bytes: number }> {
+  return request<{ path: string; size_bytes: number }>(
+    baseUrl,
+    "/export/docx",
+    {
+      method: "POST",
+      body: JSON.stringify(req),
+    },
+  );
+}
+

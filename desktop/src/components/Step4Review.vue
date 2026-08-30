@@ -2,8 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type * as engineApi from "../lib/engineApi";
 import {
-  assignGlobalRefNumbers,
-  convertRefsToNumberedCitations,
   countContentChars,
   escapeHtml,
   extractOutlineHeadings,
@@ -289,30 +287,14 @@ function getUnwrittenPlaceholderHtml(seq: number, title: string): string {
   return `<div class="unwritten-chapter-placeholder"><div class="unwritten-icon">📝</div><div class="unwritten-title">第 ${seq} 章《${escapeHtml(title)}》暂未生成正文</div><div class="unwritten-desc">本章节大纲已就绪，当前内容为空。您可直接在此处点击输入排版正文，或返回【步骤 3 报告写作】进行 AI 一键撰写。</div></div>`;
 }
 
-// ── 引用视图模式（语义标签视图 vs 学术编号 [1][2]... 视图）──
-const refViewMode = ref<"semantic" | "numbered">("semantic");
-
-function toggleRefViewMode() {
-  refViewMode.value = refViewMode.value === "semantic" ? "numbered" : "semantic";
-  syncEditorContent();
-  showMsg(`已切换为${refViewMode.value === "semantic" ? "「🏷️ 语义标签视图」" : "「🔢 学术与规程编号视图 [1][2]...」"}`, "info");
-}
-
 // ── 同步排版正文到单章 contenteditable DOM ──
 function syncEditorContent() {
   if (!editorCanvasRef.value || !currentChapter.value) return;
   const seq = currentChapter.value.seq;
-  let text = projectStore.chapters[seq] || "";
+  const text = projectStore.chapters[seq] || "";
   if (!text.trim()) {
     editorCanvasRef.value.innerHTML = getUnwrittenPlaceholderHtml(seq, currentChapter.value.title);
   } else {
-    if (refViewMode.value === "numbered") {
-      const { labelToNumber } = assignGlobalRefNumbers(
-        projectStore.chapters,
-        projectStore.outlineChapters.map((c) => c.seq)
-      );
-      text = convertRefsToNumberedCitations(text, labelToNumber);
-    }
     const rawHtml = markdownToHtml(text, seq, outlineHeadings.value);
     editorCanvasRef.value.innerHTML = applyIssueHighlightsToHtml(rawHtml, seq);
   }
@@ -1235,15 +1217,6 @@ onUnmounted(() => {
               title="打开全高右侧参考资料来源抽屉"
             >
               📚 参考资料 ({{ currentChapterReferences.length }})
-            </button>
-
-            <button
-              class="btn btn-outline"
-              :class="{ active: refViewMode === 'numbered' }"
-              @click="toggleRefViewMode"
-              :title="refViewMode === 'semantic' ? '点击切换为规范学术与工程规程数字上标编号 [1][2]... 视图' : '点击切换为语义化参考资料标签 【源:...】 视图'"
-            >
-              {{ refViewMode === 'semantic' ? '🏷️ 语义标签视图' : '🔢 学术编号 [1][2]' }}
             </button>
 
             <button

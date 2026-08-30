@@ -196,11 +196,9 @@ def test_export_refs_numbering_global(client):
     # 原始标签被替换
     assert "【源:policy.md】" not in full
     assert "【标:GB50016】" not in full
-    # 规范参考文献与资料出处附录存在且包含各分类
-    assert "参考文献与资料出处" in full
-    assert "项目底稿资料" in full
-    assert "国家与行业规程标准" in full
-    assert "互联网与第三方参考" in full
+    # 规范参考文献附录存在且包含各引用
+    assert "参考文献" in full
+    assert "GB/T 7714" in full
     assert "policy.md" in full
     assert "GB50016" in full
     assert "https://www.ndrc.gov.cn" in full

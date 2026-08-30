@@ -8,6 +8,7 @@ import Step1Project from "../components/Step1Project.vue";
 import Step2Outline from "../components/Step2Outline.vue";
 import Step3Writing from "../components/Step3Writing.vue";
 import Step4Review from "../components/Step4Review.vue";
+import Step5Export from "../components/Step5Export.vue";
 
 const auth = useAuthStore();
 const engine = useEngineStore();
@@ -169,17 +170,8 @@ async function onLogout() {
         <!-- 步骤 4：专家审阅与修改 -->
         <Step4Review v-show="projectStore.currentStep === 4" />
 
-        <!-- 步骤 5：成果导出（占位） -->
-        <div v-show="projectStore.currentStep === 5" class="step-placeholder">
-          <div class="placeholder-card">
-            <span class="placeholder-icon">📦</span>
-            <h3>Step 5：成果格式化导出</h3>
-            <p>一键导出标准化 Word 报告文档（.docx）及附表附图资料包。</p>
-            <div class="btn-group">
-              <button class="btn btn-secondary" @click="projectStore.setStep(4)">&larr; 返回上一步</button>
-            </div>
-          </div>
-        </div>
+        <!-- 步骤 5：成果格式化导出 -->
+        <Step5Export v-show="projectStore.currentStep === 5" />
       </div>
 
       <!-- 设置视图 -->

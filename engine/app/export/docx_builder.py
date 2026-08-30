@@ -825,63 +825,37 @@ def _parse_md_line(line: str):
 
 
 def format_ref_appendix(global_refs: list, numbering: dict) -> str:
-    """生成符合国家出版级规范的三源参考文献与资料出处附录 Markdown。"""
+    """生成符合学术论文与国家标准规范（GB/T 7714 顺序编码制）的《参考文献》章 Markdown。"""
     if not global_refs:
-        return "## 参考文献与资料出处\n\n（未检测到引用标记）\n"
+        return "# 参考文献\n\n（全书未引用外部参考资料）\n"
 
+    # 按全文首次出现的编号严格升序排列 [1], [2], [3]...
     sorted_refs = sorted(
         global_refs,
-        key=lambda r: numbering.get(r["label"], 99999),
+        key=lambda r: numbering.get(r.get("label", ""), 99999),
     )
 
-    project_items = [r for r in sorted_refs if r.get("type") == "项目资料"]
-    standard_items = [r for r in sorted_refs if r.get("type") == "规程标准"]
-    web_items = [r for r in sorted_refs if r.get("type") == "网页链接"]
-    ai_items = [r for r in sorted_refs if r.get("type") == "AI自有知识"]
+    lines = ["# 参考文献\n", "> 依据 GB/T 7714 信息与文献 参考文献著录规则 自动汇总排序\n"]
 
-    lines = ["## 参考文献与资料出处\n", "> 自动生成于报告导出时\n"]
+    for r in sorted_refs:
+        label = r.get("label", "")
+        n = numbering.get(label, "?")
+        name = r.get("name", "")
+        source = r.get("source", "")
+        ref_type = r.get("type", "项目资料")
 
-    if project_items:
-        lines.append("### 一、项目底稿资料\n")
-        for r in project_items:
-            n = numbering.get(r["label"], "?")
-            name = r.get("name", "")
-            source = r.get("source", "")
-            if source and source != name:
-                lines.append(f"- [{n}] {name} — 来源: {source}")
-            else:
-                lines.append(f"- [{n}] {name}")
-        lines.append("")
+        if ref_type in ("网页链接", "web"):
+            url_part = f" 访问网址: {source}" if (source and source.startswith("http")) else ""
+            lines.append(f"[{n}] [联网检索] {name}.{url_part}")
+        elif ref_type in ("规程标准", "standard"):
+            lines.append(f"[{n}] [规程标准] {name}.")
+        elif ref_type == "AI自有知识":
+            lines.append(f"[{n}] [领域知识] {name} — 通用领域工程专业知识补充.")
+        else:
+            source_part = f" — 来源: {source}" if (source and source != name) else ""
+            lines.append(f"[{n}] [项目资料] {name}{source_part}.")
 
-    if standard_items:
-        lines.append("### 二、国家与行业规程标准\n")
-        for r in standard_items:
-            n = numbering.get(r["label"], "?")
-            name = r.get("name", "")
-            source = r.get("source", "")
-            if source and source != name:
-                lines.append(f"- [{n}] {name} — 来源: {source}")
-            else:
-                lines.append(f"- [{n}] {name}")
-        lines.append("")
-
-    if web_items:
-        lines.append("### 三、互联网与第三方参考\n")
-        for r in web_items:
-            n = numbering.get(r["label"], "?")
-            name = r.get("name", "")
-            source = r.get("source", "")
-            if source and source != name:
-                lines.append(f"- [{n}] {name} — {source}")
-            else:
-                lines.append(f"- [{n}] {name}")
-        lines.append("")
-
-    if ai_items:
-        lines.append("### 四、AI自有知识\n")
-        lines.append("（由 AI 在编写过程中补充的通用领域知识）\n")
-
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def generate_report_ref(chapters: dict, output_path: str, refs: list = None):
