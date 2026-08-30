@@ -12,6 +12,7 @@ import {
   type ReferencesSummary,
   type SubHeading,
 } from "../lib/markdown";
+import * as engineApi from "../lib/engineApi";
 import { useEngineStore } from "../stores/engine";
 import { useProjectStore } from "../stores/project";
 import { useSettingsStore } from "../stores/settings";
@@ -230,6 +231,27 @@ function locateRefInCanvas(title: string) {
     showMsg(`已定位到正文引用位置：「${title}」`, "success");
   } else {
     showMsg(`未在当前正文视口中找到「${title}」引用标记`, "error");
+  }
+}
+
+async function handleOpenWebUrl(url?: string) {
+  if (!url) {
+    showMsg("暂无对应的有效网页链接", "error");
+    return;
+  }
+  try {
+    const { open } = await import("@tauri-apps/plugin-shell");
+    await open(url);
+  } catch {
+    try {
+      if (engine.baseUrl) {
+        await engineApi.openWebUrl(engine.baseUrl, url);
+      } else {
+        window.open(url, "_blank");
+      }
+    } catch {
+      window.open(url, "_blank");
+    }
   }
 }
 
@@ -1086,11 +1108,10 @@ function nextStep() {
                     <div class="ref-card-title">
                       <a
                         v-if="refItem.type === 'web' && refItem.url"
-                        :href="refItem.url"
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        href="#"
                         class="ref-title-link"
                         title="点击直接在浏览器中打开权威原网页"
+                        @click.prevent="handleOpenWebUrl(refItem.url)"
                       >
                         {{ refItem.title }} <span class="ext-icon">↗</span>
                       </a>

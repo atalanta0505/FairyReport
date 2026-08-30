@@ -507,10 +507,56 @@ def _search_zero_key(query: str, timeout: float, max_results: int = 5) -> list[d
 # ═══════════════════════════════════════════════════════════════
 
 
+def save_project_web_refs(project_name: str, web_items: list[dict]):
+    """持久化保存项目检索到的网页引用（标题 -> URL 映射）。"""
+    if not project_name or not web_items:
+        return
+    try:
+        from ..config import settings
+        pdir = settings.project_dir(project_name)
+        pdir.mkdir(parents=True, exist_ok=True)
+        reg_file = pdir / "web_refs.json"
+        existing = {}
+        if reg_file.exists():
+            try:
+                with open(reg_file, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+            except Exception:
+                existing = {}
+        for it in web_items:
+            title = clean_title(it.get("title", ""))
+            url = it.get("url", "").strip()
+            if title and url:
+                existing[title] = url
+                simp = to_simplified_chinese(title)
+                if simp != title:
+                    existing[simp] = url
+        with open(reg_file, "w", encoding="utf-8") as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        _logger.warning("保存项目 web_refs 失败: %s", e)
+
+
+def get_project_web_refs(project_name: str) -> dict[str, str]:
+    """读取项目的网页引用映射表 {title: url}。"""
+    if not project_name:
+        return {}
+    try:
+        from ..config import settings
+        reg_file = settings.project_dir(project_name) / "web_refs.json"
+        if reg_file.exists():
+            with open(reg_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
 def search_gov_web(
     query: str,
     max_results: int = 5,
     timeout: float = 3.5,
+    project_name: str = "",
 ) -> str:
     """免 Key 国内高可用权威联网检索（百度第一优先，严格黑名单拦截）。
 
@@ -545,6 +591,7 @@ def search_gov_web(
         # 去重、权威过滤与格式化
         seen_urls = set()
         formatted_blocks = []
+        valid_items = []
         for it in items:
             url = it.get("url", "").strip()
             title = it.get("title", "").strip()
@@ -554,10 +601,14 @@ def search_gov_web(
             if not is_authoritative_url(url):
                 continue
             seen_urls.add(url)
+            valid_items.append({"title": title, "url": url, "snippet": snippet})
             block = format_web_item(title, url, snippet)
             formatted_blocks.append(block)
             if len(formatted_blocks) >= max_results:
                 break
+
+        if project_name and valid_items:
+            save_project_web_refs(project_name, valid_items)
 
         return "\n\n".join(formatted_blocks)
     except Exception as e:

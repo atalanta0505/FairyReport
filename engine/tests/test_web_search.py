@@ -323,7 +323,7 @@ def test_query_rag_tri_source_fusion(monkeypatch):
         "  https://www.ndrc.gov.cn/xxgk/zcfb/tz/202303/t20230324_1352467.html\n"
         "  > 规范投资项目决策与审批管理程序。"
     )
-    monkeypatch.setattr(ws_mod, "search_gov_web", lambda q, max_results=5, timeout=3.5: fake_web_block)
+    monkeypatch.setattr(ws_mod, "search_gov_web", lambda q, *args, **kwargs: fake_web_block)
 
     rag_out = query_rag(
         project_name="水利投资示范项目",
@@ -400,3 +400,32 @@ def test_refs_standardization_and_no_isolated_z():
     assert "【源:" not in numbered_body
     assert "【标:" not in numbered_body
     assert "【网:" not in numbered_body
+
+
+def test_project_web_refs_persistence_and_fuzzy_url_extract(tmp_path):
+    """验证项目级 web_refs 持久化、繁体/简写模糊 URL 匹配及 open-url 功能。"""
+    from engine.app.writing.web_search import save_project_web_refs, get_project_web_refs
+    from engine.app.writing.refs import _extract_url_for_label
+
+    proj_name = "test_fuzzy_web_proj"
+    items = [
+        {
+            "title": "製革及毛皮加工工業水污染物排放標準中華人民共和國生態環境部",
+            "url": "https://www.mee.gov.cn/ywgz/fgbz/bz/bzwb/shjbh/swrwpfbz/201401/t20140114_266403.shtml",
+            "snippet": "国家标准规定..."
+        }
+    ]
+    save_project_web_refs(proj_name, items)
+    loaded = get_project_web_refs(proj_name)
+    assert len(loaded) > 0
+
+    # 验证简体简化标题能命中繁体长标题的 URL
+    url = _extract_url_for_label("【网:制革及毛皮加工工业水污染物排放标准】", project_name=proj_name)
+    assert url == "https://www.mee.gov.cn/ywgz/fgbz/bz/bzwb/shjbh/swrwpfbz/201401/t20140114_266403.shtml"
+
+
+def test_open_url_endpoint(client):
+    """验证 POST /writing/open-url 接口参数校验。"""
+    resp = client.post("/writing/open-url", json={"url": "https://www.gov.cn"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True

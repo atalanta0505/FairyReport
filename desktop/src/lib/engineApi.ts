@@ -1358,3 +1358,18 @@ export async function openExportFolder(
   );
 }
 
+/** 在系统默认浏览器中打开外部 URL */
+export async function openWebUrl(
+  baseUrl: string,
+  url: string,
+): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    baseUrl,
+    "/writing/open-url",
+    {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    },
+  );
+}
+

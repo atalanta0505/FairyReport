@@ -51,7 +51,7 @@ def export_docx(req: ExportDocxRequest):
 
     # 按 seq 合并 + 全局参考文献表
     try:
-        final_md = build_merged_md(req.chapters, include_refs=req.include_refs)
+        final_md = build_merged_md(req.chapters, include_refs=req.include_refs, project=req.project)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"合并失败：{e}")
 
@@ -89,7 +89,7 @@ def export_md(req: ExportMdRequest):
             raise HTTPException(status_code=422, detail=f"chapter {k} 内容必须为字符串")
 
     try:
-        final_md = build_merged_md(req.chapters, include_refs=req.include_refs)
+        final_md = build_merged_md(req.chapters, include_refs=req.include_refs, project=req.project)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"合并失败：{e}")
 

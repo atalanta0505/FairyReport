@@ -180,7 +180,7 @@ def query_rag(
         )
         if smart_query:
             try:
-                web_content = web_search.search_gov_web(smart_query, max_results=n_results)
+                web_content = web_search.search_gov_web(smart_query, max_results=n_results, project_name=project_name)
                 if web_content and web_content.strip():
                     results.append(web_content.strip())
             except Exception as e:

@@ -27,7 +27,7 @@ from .prompts import (
     TOP_P,
 )
 from .rag import query_rag
-from .refs import strip_fabricated_labels
+from .refs import extract_chapter_refs, build_chapter_ref_section, strip_fabricated_labels
 from .templates_loader import TemplatesNotInstalled
 from .writer import (
     ChapterWriter,
@@ -493,6 +493,11 @@ def chapter(req: ChapterRequest):
             report_name=rep_name, chapter_budget=chapter_budget,
             is_summary=is_summary,
         )
+        if content and "## 📎 本章参考资料" not in content:
+            refs = extract_chapter_refs(content, rag_context=rag_context, project_name=req.project)
+            ref_sec = build_chapter_ref_section(refs)
+            if ref_sec:
+                content = content.rstrip() + "\n\n" + ref_sec
     except LLMError as e:
         raise _map_llm_error(e)
     return {"chapter_text": content}
@@ -500,7 +505,7 @@ def chapter(req: ChapterRequest):
 
 def _stream_chapter(writer, llm, req, chapter_title,
                     chapter_budget, is_summary, topic):
-    """SSE 生成器：阶段事件 + 思考事件 + 透传 LLM chunks。"""
+    """SSE 生成器：阶段事件 + 思考事件 + 透传 LLM chunks + 最终生成附带URL的参考资料段。"""
     try:
         # 1. RAG 检索阶段
         yield _sse_event(json.dumps({
@@ -542,6 +547,7 @@ def _stream_chapter(writer, llm, req, chapter_title,
         }, ensure_ascii=False))
 
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        full_content_parts = []
         for chunk in llm.chat_stream_iter(
             messages, temperature=TEMPERATURE_WRITING,
             frequency_penalty=FREQUENCY_PENALTY,
@@ -549,6 +555,21 @@ def _stream_chapter(writer, llm, req, chapter_title,
             top_p=TOP_P,
         ):
             yield _sse_event(chunk)
+            try:
+                c_obj = json.loads(chunk)
+                if c_obj.get("type") == "chunk" and c_obj.get("chunk"):
+                    full_content_parts.append(c_obj["chunk"])
+            except Exception:
+                pass
+
+        full_body = "".join(full_content_parts)
+        if full_body and "## 📎 本章参考资料" not in full_body:
+            refs = extract_chapter_refs(full_body, rag_context=rag_context, project_name=req.project)
+            ref_sec = build_chapter_ref_section(refs)
+            if ref_sec:
+                ref_chunk = "\n\n" + ref_sec
+                yield _sse_event(json.dumps({"type": "chunk", "chunk": ref_chunk}, ensure_ascii=False))
+
         yield "data: [DONE]\n\n"
     except LLMError as e:
         yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}, ensure_ascii=False))
@@ -803,4 +824,22 @@ def get_hint_endpoint(project: str, ch_seq: int):
     from .hints import load_hint, get_predecessor_hints
     hint = load_hint(project, ch_seq)
     return {"ch_seq": ch_seq, "hint": hint}
+
+
+class OpenUrlRequest(BaseModel):
+    url: str
+
+
+@router.post("/writing/open-url")
+def open_url_endpoint(req: OpenUrlRequest):
+    """在系统默认浏览器中打开外部 URL。"""
+    import webbrowser
+    u = (req.url or "").strip()
+    if u and u.startswith("http"):
+        try:
+            webbrowser.open(u)
+            return {"ok": True, "url": u}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"打开网页失败: {e}")
+    return {"ok": False, "detail": "非法的 URL"}
 

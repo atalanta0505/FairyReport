@@ -34,26 +34,53 @@ def strip_fabricated_labels(chapter_text: str, rag_context: str) -> str:
     return source_pat.sub(_clean, chapter_text)
 
 
-def _extract_url_for_label(label: str, rag_context: str) -> str:
-    """从 rag_context 提取网页标签对应的真实完整 URL。"""
-    if not rag_context:
-        return ""
+def _extract_url_for_label(label: str, rag_context: str = "", project_name: str = "") -> str:
+    """从 rag_context 或项目 web_refs 中提取网页标签对应的真实完整 URL。"""
     title_match = re.match(r"【网:(.+?)】", label)
     if not title_match:
         return ""
-    title = re.escape(title_match.group(1).strip())
-    pattern = rf"【网:{title}】[^\n]*\n?\s*(https?://[^\s\)]+)"
-    m = re.search(pattern, rag_context)
-    if m:
-        return m.group(1).strip()
-    pattern_fallback = rf"{title}[^\n]*\s+(https?://[^\s\)]+)"
-    m2 = re.search(pattern_fallback, rag_context)
-    if m2:
-        return m2.group(1).strip()
+    raw_query = title_match.group(1).strip()
+    from .web_search import to_simplified_chinese, get_project_web_refs
+    query_simp = to_simplified_chinese(raw_query)
+
+    # 1. 优先从 rag_context 提取
+    if rag_context:
+        # 匹配标准 【网:标题】\n URL 结构
+        items = re.findall(r"【网:(.+?)】[^\n]*\n?\s*(https?://[^\s\)\>\]\"]+)", rag_context)
+        for t, u in items:
+            t_simp = to_simplified_chinese(t.strip())
+            if query_simp in t_simp or t_simp in query_simp or raw_query in t:
+                return u.strip()
+
+        # 匹配 markdown link [标题](URL)
+        links = re.findall(r"\[(.+?)\]\((https?://[^\s\)\>\]\"]+)\)", rag_context)
+        for t, u in links:
+            t_simp = to_simplified_chinese(t.strip())
+            if query_simp in t_simp or t_simp in query_simp or raw_query in t:
+                return u.strip()
+
+        # 宽松正则匹配
+        escaped = re.escape(raw_query[:12]) if len(raw_query) > 12 else re.escape(raw_query)
+        m = re.search(rf"{escaped}[^\n]*\s+(https?://[^\s\)\>\]\"]+)", rag_context)
+        if m:
+            return m.group(1).strip()
+
+    # 2. 从项目持久化 web_refs 映射查找
+    if project_name:
+        web_map = get_project_web_refs(project_name)
+        if raw_query in web_map:
+            return web_map[raw_query]
+        if query_simp in web_map:
+            return web_map[query_simp]
+        for t, u in web_map.items():
+            t_simp = to_simplified_chinese(t)
+            if query_simp in t_simp or t_simp in query_simp:
+                return u
+
     return ""
 
 
-def extract_chapter_refs(body: str, rag_context: str = "") -> list:
+def extract_chapter_refs(body: str, rag_context: str = "", project_name: str = "") -> list:
     """提取正文中所有引用标签及其来源信息。
 
     返回 [{"label", "name", "source", "type"}, ...]；同标签去重，按首次出现排序。
@@ -93,7 +120,7 @@ def extract_chapter_refs(body: str, rag_context: str = "") -> list:
         if label not in seen_labels:
             seen_labels.add(label)
             name = m.group(1).strip()
-            source = _extract_url_for_label(label, rag_context) or name
+            source = _extract_url_for_label(label, rag_context=rag_context, project_name=project_name) or name
             refs.append({
                 "label": label,
                 "name": name,
@@ -230,7 +257,7 @@ def _parse_ref_section(text: str) -> list:
     return refs
 
 
-def merge_global_refs(chapters: dict) -> list:
+def merge_global_refs(chapters: dict, project_name: str = "") -> list:
     """合并所有章引用列表，去重（同名+同类型保留首次出现章）。按章序扫描。"""
     seen = set()
     merged = []
@@ -242,7 +269,14 @@ def merge_global_refs(chapters: dict) -> list:
         ch_text = chapters.get(ch_key, "")
         refs = _parse_ref_section(ch_text)
         if not refs:
-            refs = extract_chapter_refs(ch_text)
+            refs = extract_chapter_refs(ch_text, project_name=project_name)
+        else:
+            for r in refs:
+                if r.get("type") == "网页链接" and (not r.get("source") or not str(r.get("source")).startswith("http")):
+                    u = _extract_url_for_label(r.get("label", ""), project_name=project_name)
+                    if u:
+                        r["source"] = u
+
         for ref in refs:
             key = (ref["name"], ref["type"])
             if key not in seen:

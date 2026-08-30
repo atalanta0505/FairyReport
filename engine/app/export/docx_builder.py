@@ -899,7 +899,7 @@ def generate_report_ref(chapters: dict, output_path: str, refs: list = None):
         pass
 
 
-def build_merged_md(chapters: dict, include_refs: bool = True) -> str:
+def build_merged_md(chapters: dict, include_refs: bool = True, project: str = "") -> str:
     """按 seq 合并各章正文；include_refs 时做全局编号并附参考文献表。
 
     chapters: {seq(可str/int): markdown}，按 seq 数值升序合并。
@@ -925,7 +925,7 @@ def build_merged_md(chapters: dict, include_refs: bool = True) -> str:
         return full_body
 
     # 全局编号 + 规范参考文献附录
-    global_refs = merge_global_refs(chapters)
+    global_refs = merge_global_refs(chapters, project_name=project)
     numbered_body, numbering = global_assign_ref_numbers(full_body)
     ref_md = format_ref_appendix(global_refs, numbering)
     if ref_md.strip():

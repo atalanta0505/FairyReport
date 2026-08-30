@@ -204,6 +204,28 @@ async function openExportFolder(filePath?: string) {
     showMsg(`打开导出文件夹失败: ${err.message}`, "error");
   }
 }
+
+// ── 在系统默认浏览器中打开外部链接 ──
+async function handleOpenWebUrl(url?: string) {
+  if (!url) {
+    showMsg("暂无对应的有效网页链接", "info");
+    return;
+  }
+  try {
+    const { open } = await import("@tauri-apps/plugin-shell");
+    await open(url);
+  } catch {
+    try {
+      if (engine.baseUrl) {
+        await engineApi.openWebUrl(engine.baseUrl, url);
+      } else {
+        window.open(url, "_blank");
+      }
+    } catch {
+      window.open(url, "_blank");
+    }
+  }
+}
 </script>
 
 <template>
@@ -387,11 +409,10 @@ async function openExportFolder(filePath?: string) {
                   </span>
                   <a
                     v-if="entry.type === 'web' && entry.url"
-                    :href="entry.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    href="#"
                     class="entry-title-link"
                     title="点击直接在浏览器中打开权威原网页"
+                    @click.prevent="handleOpenWebUrl(entry.url)"
                   >
                     {{ entry.title }} <span class="ext-icon">↗</span>
                   </a>
