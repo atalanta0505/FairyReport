@@ -1691,7 +1691,19 @@ onUnmounted(() => {
                     <div class="ref-count-badge">引用 {{ refItem.count }} 次</div>
                   </div>
 
-                  <div class="ref-title-text">{{ refItem.title }}</div>
+                  <div class="ref-title-text">
+                    <a
+                      v-if="refItem.type === 'web' && refItem.url"
+                      :href="refItem.url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="ref-title-link"
+                      title="点击直接在浏览器中打开权威原网页"
+                    >
+                      {{ refItem.title }} <span class="ext-icon">↗</span>
+                    </a>
+                    <span v-else>{{ refItem.title }}</span>
+                  </div>
 
                   <div class="ref-card-actions">
                     <button class="btn btn-outline btn-xs" @click="locateRefInCanvas(refItem.title)">
@@ -2771,6 +2783,23 @@ onUnmounted(() => {
   font-size: 13px;
   font-weight: 600;
   color: #0f172a;
+}
+.ref-title-link {
+  color: #0369a1;
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  transition: all 0.15s ease;
+}
+.ref-title-link:hover {
+  color: #0284c7;
+  text-decoration: underline;
+}
+.ext-icon {
+  font-size: 11px;
+  opacity: 0.75;
 }
 .ref-card-actions {
   display: flex;

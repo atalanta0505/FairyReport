@@ -385,7 +385,17 @@ async function openExportFolder(filePath?: string) {
                   >
                     {{ entry.type === 'standard' ? '规程标准' : entry.type === 'web' ? '联网检索' : '项目资料' }}
                   </span>
-                  <span class="entry-title-text">{{ entry.title }}</span>
+                  <a
+                    v-if="entry.type === 'web' && entry.url"
+                    :href="entry.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="entry-title-link"
+                    title="点击直接在浏览器中打开权威原网页"
+                  >
+                    {{ entry.title }} <span class="ext-icon">↗</span>
+                  </a>
+                  <span v-else class="entry-title-text">{{ entry.title }}</span>
                 </div>
                 <div class="ref-entry-sub">
                   首次引用于第 {{ entry.firstChapterSeq }} 章 · 全书累计引用 {{ entry.count }} 次
@@ -706,6 +716,32 @@ async function openExportFolder(filePath?: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.entry-title-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0369a1;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.entry-title-link:hover {
+  color: #0284c7;
+  text-decoration: underline;
+}
+
+.ext-icon {
+  font-size: 11px;
+  opacity: 0.75;
+  flex-shrink: 0;
 }
 
 .ref-entry-sub {

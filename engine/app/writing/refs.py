@@ -151,7 +151,9 @@ def build_chapter_ref_section(refs: list) -> str:
         for r in web_items:
             name = r["name"]
             source = r.get("source", "")
-            if source and source != name:
+            if source and source.startswith("http"):
+                lines.append(f"- [{name}]({source})")
+            elif source and source != name:
                 lines.append(f"- {name} — {source}")
             else:
                 lines.append(f"- {name}")
@@ -197,7 +199,11 @@ def _parse_ref_section(text: str) -> list:
             current_type = "AI自有知识"
         elif line.startswith("- ") and current_type:
             item = line[2:].strip()
-            if " — " in item:
+            link_m = re.match(r'^\[(.*?)\]\((https?://.*?)\)$', item)
+            if link_m:
+                name = link_m.group(1).strip()
+                source = link_m.group(2).strip()
+            elif " — " in item:
                 name, source = item.split(" — ", 1)
             else:
                 name = item

@@ -362,14 +362,20 @@ export function extractReferences(text: string, ragContext?: string): ReferenceI
       typeLabel = "百度联网";
       // 尝试提取真实 URL（从正文、附带格式或 ragContext 中）
       const escapedTitle = content.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const urlPattern = new RegExp(`【(?:网|网络)[:：]\\s*${escapedTitle}】\\s*\\n?\\s*(https?:\\/\\/[^\\s\\n>"]+)`);
+      const urlPattern = new RegExp(`【(?:网|网络)[:：]\\s*${escapedTitle}】\\s*\\n?\\s*(https?:\\/\\/[^\\s\\n>"\\]]+)`);
       const urlMatch = text.match(urlPattern) || (ragContext ? ragContext.match(urlPattern) : null);
       if (urlMatch) {
         url = urlMatch[1].trim();
       } else {
-        const generalMatch = (ragContext || text).match(new RegExp(`${escapedTitle}[\\s\\S]{0,80}?(https?:\\/\\/[^\\s\\n>"]+)`));
-        if (generalMatch) {
-          url = generalMatch[1].trim();
+        const linkPattern = new RegExp(`\\[${escapedTitle}\\]\\((https?:\\/\\/[^\\s\\n>"\\]]+)\\)`);
+        const linkMatch = text.match(linkPattern) || (ragContext ? ragContext.match(linkPattern) : null);
+        if (linkMatch) {
+          url = linkMatch[1].trim();
+        } else {
+          const generalMatch = (ragContext || text).match(new RegExp(`${escapedTitle}[\\s\\S]{0,80}?(https?:\\/\\/[^\\s\\n>"\\]]+)`));
+          if (generalMatch) {
+            url = generalMatch[1].trim();
+          }
         }
       }
     } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
@@ -401,6 +407,41 @@ export function extractReferences(text: string, ragContext?: string): ReferenceI
         count: 1,
         url,
       });
+    }
+  }
+
+  // 从章末 ## 📎 本章参考资料 中提取并补齐可能缺失的 web URL
+  const footerLines = text.split("\n");
+  let inWebSection = false;
+  for (const line of footerLines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("### 网页链接")) {
+      inWebSection = true;
+    } else if (trimmed.startsWith("### ") || trimmed.startsWith("## ")) {
+      inWebSection = false;
+    } else if (inWebSection && trimmed.startsWith("- ")) {
+      const item = trimmed.slice(2).trim();
+      const linkM = item.match(/^\[(.*?)\]\((https?:\/\/[^\s\n>"]+)\)$/);
+      if (linkM) {
+        const nameClean = linkM[1].trim();
+        const srcClean = linkM[2].trim();
+        for (const val of map.values()) {
+          if (val.type === "web" && (val.title === nameClean || val.title.includes(nameClean) || nameClean.includes(val.title))) {
+            if (!val.url) val.url = srcClean;
+          }
+        }
+      } else if (item.includes(" — ")) {
+        const [n, s] = item.split(" — ", 2);
+        const nameClean = n.trim();
+        const srcClean = s.trim();
+        if (srcClean.startsWith("http")) {
+          for (const val of map.values()) {
+            if (val.type === "web" && (val.title === nameClean || val.title.includes(nameClean) || nameClean.includes(val.title))) {
+              if (!val.url) val.url = srcClean;
+            }
+          }
+        }
+      }
     }
   }
 
@@ -1058,9 +1099,22 @@ export function assignGlobalRefNumbers(
         type = "web";
         typeLabel = "百度联网";
         const escapedTitle = content.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const urlPattern = new RegExp(`【(?:网|网络)[:：]\\s*${escapedTitle}】\\s*\\n?\\s*(https?:\\/\\/[^\\s\\n>"]+)`);
+        const urlPattern = new RegExp(`【(?:网|网络)[:：]\\s*${escapedTitle}】\\s*\\n?\\s*(https?:\\/\\/[^\\s\\n>"\\]]+)`);
         const urlMatch = text.match(urlPattern);
-        if (urlMatch) url = urlMatch[1].trim();
+        if (urlMatch) {
+          url = urlMatch[1].trim();
+        } else {
+          const linkPattern = new RegExp(`\\[${escapedTitle}\\]\\((https?:\\/\\/[^\\s\\n>"\\]]+)\\)`);
+          const linkMatch = text.match(linkPattern);
+          if (linkMatch) {
+            url = linkMatch[1].trim();
+          } else {
+            const generalMatch = text.match(new RegExp(`${escapedTitle}[\\s\\S]{0,80}?(https?:\\/\\/[^\\s\\n>"\\]]+)`));
+            if (generalMatch) {
+              url = generalMatch[1].trim();
+            }
+          }
+        }
       } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
         type = "standard";
         typeLabel = "国标规程";
@@ -1096,6 +1150,41 @@ export function assignGlobalRefNumbers(
           firstChapterSeq: seq,
         });
         currentNumber++;
+      }
+    }
+
+    // 从该章章末 ## 📎 本章参考资料 中提取并补齐可能缺失的 web URL
+    const footerLines = text.split("\n");
+    let inWeb = false;
+    for (const line of footerLines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("### 网页链接")) {
+        inWeb = true;
+      } else if (trimmed.startsWith("### ") || trimmed.startsWith("## ")) {
+        inWeb = false;
+      } else if (inWeb && trimmed.startsWith("- ")) {
+        const item = trimmed.slice(2).trim();
+        const linkM = item.match(/^\[(.*?)\]\((https?:\/\/[^\s\n>"]+)\)$/);
+        if (linkM) {
+          const nameClean = linkM[1].trim();
+          const srcClean = linkM[2].trim();
+          for (const entry of refEntries) {
+            if (entry.type === "web" && (entry.title === nameClean || entry.title.includes(nameClean) || nameClean.includes(entry.title))) {
+              if (!entry.url) entry.url = srcClean;
+            }
+          }
+        } else if (item.includes(" — ")) {
+          const [n, s] = item.split(" — ", 2);
+          const nameClean = n.trim();
+          const srcClean = s.trim();
+          if (srcClean.startsWith("http")) {
+            for (const entry of refEntries) {
+              if (entry.type === "web" && (entry.title === nameClean || entry.title.includes(nameClean) || nameClean.includes(entry.title))) {
+                if (!entry.url) entry.url = srcClean;
+              }
+            }
+          }
+        }
       }
     }
 

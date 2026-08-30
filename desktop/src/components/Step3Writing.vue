@@ -1083,20 +1083,18 @@ function nextStep() {
                         </button>
                       </div>
                     </div>
-                    <div class="ref-card-title">{{ refItem.title }}</div>
-                    <div v-if="refItem.type === 'web'" class="ref-card-link-box">
+                    <div class="ref-card-title">
                       <a
-                        v-if="refItem.url"
+                        v-if="refItem.type === 'web' && refItem.url"
                         :href="refItem.url"
                         target="_blank"
                         rel="noopener noreferrer"
-                        class="ref-external-link"
+                        class="ref-title-link"
+                        title="点击直接在浏览器中打开权威原网页"
                       >
-                        🔗 访问原网页出处 ↗
+                        {{ refItem.title }} <span class="ext-icon">↗</span>
                       </a>
-                      <span v-else class="ref-archive-note">
-                        🌐 百度检索在线实时快照已归档入库
-                      </span>
+                      <span v-else>{{ refItem.title }}</span>
                     </div>
                     <div class="ref-card-raw"><code>{{ refItem.raw }}</code></div>
                   </div>
@@ -2686,21 +2684,22 @@ function nextStep() {
   color: #1e293b;
   word-break: break-all;
 }
-.ref-card-link-box {
-  margin: 2px 0;
-}
-.ref-external-link {
-  color: #2563eb;
-  text-decoration: underline;
+.ref-title-link {
+  color: #0369a1;
+  text-decoration: none;
   cursor: pointer;
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  word-break: break-all;
+  align-items: baseline;
+  gap: 3px;
+  transition: all 0.15s ease;
 }
-.ref-external-link:hover {
-  color: #1d4ed8;
+.ref-title-link:hover {
+  color: #0284c7;
+  text-decoration: underline;
+}
+.ext-icon {
+  font-size: 11px;
+  opacity: 0.75;
 }
 .ref-archive-note {
   font-size: 11px;
