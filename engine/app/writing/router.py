@@ -130,6 +130,14 @@ class ReviseRequest(BaseModel):
     chapter_budget: int = 0
 
 
+class ReviseParagraphRequest(BaseModel):
+    paragraph_text: str
+    instruction: str
+    llm_config: LLMConfig
+    chapter_title: str = ""
+    report_type: str = "可行性研究报告"
+
+
 class HintSaveRequest(BaseModel):
     project: str
     ch_seq: int
@@ -647,6 +655,23 @@ def revise(req: ReviseRequest):
     except LLMError as e:
         raise _map_llm_error(e)
     return {"revised_text": revised}
+
+
+@router.post("/writing/revise-paragraph")
+def revise_paragraph(req: ReviseParagraphRequest):
+    """按指令针对局部段落执行外科手术式精准修订。"""
+    llm = _make_llm(req.llm_config)
+    writer = ChapterWriter(llm, report_type=req.report_type)
+    try:
+        revised = writer.modify_paragraph(
+            req.paragraph_text,
+            req.instruction,
+            chapter_title=req.chapter_title,
+            report_type=req.report_type,
+        )
+    except LLMError as e:
+        raise _map_llm_error(e)
+    return {"revised_paragraph": revised}
 
 
 @router.post("/writing/hints")

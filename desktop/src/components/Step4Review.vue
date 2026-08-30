@@ -1,11 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import {
-  computeDiffStats,
-  computeLineDiff,
-  type DiffLine,
-  type DiffStats,
-} from "../lib/diff";
 import type * as engineApi from "../lib/engineApi";
 import {
   countContentChars,
@@ -28,9 +22,6 @@ import { useSettingsStore } from "../stores/settings";
 const engine = useEngineStore();
 const settings = useSettingsStore();
 const projectStore = useProjectStore();
-
-// ── 视图模式切换：rich 最终排版正文 (就地可编辑) | diff 修订差异对比 (全宽单栏内联) ──
-const viewMode = ref<"rich" | "diff">("rich");
 
 // ── 右侧全高抽屉 (Slide-over Drawer, 540px) ──
 const showDiagnosticDrawer = ref<boolean>(false);
@@ -57,10 +48,9 @@ const revisionStageIndex = ref<number>(0);
 let revisionTimer: ReturnType<typeof setInterval> | null = null;
 
 const revisionStages = [
-  { id: "context", title: "解析全书脉络", desc: "统筹上下文逻辑与专家诊断修改指令" },
-  { id: "restructure", title: "重构方案论述", desc: "依据发改委与行业规程深化工艺与估算" },
-  { id: "polish", title: "技术规范润色", desc: "压制套话，规范 10.5pt 工程出版级术语" },
-  { id: "diff", title: "构建内联 Diff", desc: "生成精准全宽单栏段落级差异比对" },
+  { id: "locate", title: "锁定问题段落", desc: "精准提取缺陷段落与专家修改建议" },
+  { id: "refine", title: "局部智能重构", desc: "依据发改委与行业规程深化工艺参数与方案" },
+  { id: "replace", title: "原位无缝替换", desc: "原位更新排版正文，自动清除问题高亮" },
 ];
 
 const saveDebounceTimers: Record<number, ReturnType<typeof setTimeout>> = {};
@@ -452,11 +442,6 @@ function openDiagnosticDrawerAndFocusIssue(issueId: string) {
  * 彻底升级：问题清单段落/句子级多级穿透绝对精准定位与呼吸高亮脉冲联动
  */
 async function locateIssueInCanvas(issue: engineApi.ReviewIssue) {
-  if (viewMode.value !== "rich") {
-    viewMode.value = "rich";
-    await nextTick();
-  }
-
   if (issue.chapterSeq && issue.chapterSeq !== projectStore.selectedChapterSeq) {
     selectChapter(issue.chapterSeq);
     await nextTick();
@@ -744,30 +729,43 @@ function handleStopReview() {
   showMsg("已停止全书审阅任务", "info");
 }
 
-// ── AI 一键智能修订与 Diff 联动 ──
-const diffOriginalText = computed(() => {
-  const targetSeq = projectStore.activeRevision?.seq || projectStore.selectedChapterSeq;
-  return projectStore.chapters[targetSeq] || "";
+// ── AI 外科手术式精准修订与单条修复 ──
+const hasSnapshot = computed(() => {
+  const seq = currentChapter.value?.seq;
+  return !!(seq && projectStore.chapterSnapshots[seq]);
 });
 
-const diffRevisedText = computed(() => {
-  if (projectStore.activeRevision && projectStore.activeRevision.seq === projectStore.selectedChapterSeq) {
-    return projectStore.activeRevision.revisedText;
+function isChapterReviewed(seq: number): boolean {
+  return !!projectStore.chapterReviews[seq];
+}
+
+function getChapterIssuesCount(seq: number): number {
+  return projectStore.chapterReviews[seq]?.issues?.length || 0;
+}
+
+async function handleFixSingleIssue(issue: engineApi.ReviewIssue) {
+  if (!engine.baseUrl) {
+    showMsg("本地引擎未就绪", "error");
+    return;
   }
-  return projectStore.activeRevision?.revisedText || currentChapterText.value;
-});
+  let llmConfig: engineApi.LLMConfig;
+  try {
+    llmConfig = getLLMConfig();
+  } catch (err: any) {
+    showMsg(err.message, "error");
+    return;
+  }
 
-const diffLines = computed<DiffLine[]>(() => {
-  return computeLineDiff(diffOriginalText.value, diffRevisedText.value);
-});
-
-const currentDiffStats = computed<DiffStats>(() => {
-  return computeDiffStats(diffOriginalText.value, diffRevisedText.value);
-});
-
-const hasActiveRevision = computed(() => {
-  return !!projectStore.activeRevision && projectStore.activeRevision.seq === projectStore.selectedChapterSeq;
-});
+  const seq = issue.chapterSeq || projectStore.selectedChapterSeq;
+  try {
+    showMsg(`⚡ 正在对问题「${issue.dimension || issue.category || "规范"}」执行外科手术式精准修补...`, "info");
+    await projectStore.runParagraphRevision(engine.baseUrl, seq, issue, llmConfig);
+    showMsg("✅ 该问题已完成外科手术式精准修复，正文已原位更新！", "success");
+    syncEditorContent();
+  } catch (err: any) {
+    showMsg(`修复失败: ${err.message}`, "error");
+  }
+}
 
 async function handleDirectRevision(seq?: number, customInstruction?: string) {
   if (!engine.baseUrl) {
@@ -789,39 +787,35 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
     return;
   }
 
-  let instruction = customInstruction;
-  if (!instruction) {
-    const issues = projectStore.chapterReviews[targetSeq]?.issues || [];
-    if (issues.length > 0) {
-      instruction = `请依据国家发改委投资项目编制规程重点修复以下问题：\n${issues
-        .map(
-          (i, idx) =>
-            `${idx + 1}. [${i.dimension || i.category || "规范"}] ${i.description || i.message} (建议: ${
-              i.suggestion || "完善论述"
-            })`
-        )
-        .join("\n")}`;
-    } else {
-      instruction =
-        "请依据国家发改委投资项目高质量编制标准，进一步深化工程参数论述与规范表格排版。";
-    }
-  }
+  const issues = projectStore.chapterReviews[targetSeq]?.issues || [];
 
   revisionElapsedSeconds.value = 0;
   revisionStageIndex.value = 0;
   if (revisionTimer) clearInterval(revisionTimer);
   revisionTimer = setInterval(() => {
     revisionElapsedSeconds.value += 1;
-    if (revisionElapsedSeconds.value % 4 === 0 && revisionStageIndex.value < revisionStages.length - 1) {
+    if (revisionElapsedSeconds.value % 2 === 0 && revisionStageIndex.value < revisionStages.length - 1) {
       revisionStageIndex.value += 1;
     }
   }, 1000);
 
   try {
-    showMsg(`正在对第 ${targetSeq} 章执行 AI 智能重构修订...`, "info");
-    await projectStore.runChapterRevision(engine.baseUrl, targetSeq, instruction, llmConfig);
-    showMsg(`第 ${targetSeq} 章 AI 修订生成完成！已切换至段落级 Diff 对比视图。`, "success");
-    viewMode.value = "diff";
+    if (issues.length > 0 && !customInstruction) {
+      showMsg(`⚡ 正在对第 ${targetSeq} 章全部 ${issues.length} 处建议执行外科手术式修补...`, "info");
+      const issuesCopy = [...issues];
+      for (const issue of issuesCopy) {
+        await projectStore.runParagraphRevision(engine.baseUrl, targetSeq, issue, llmConfig);
+      }
+      showMsg(`🎉 第 ${targetSeq} 章全部问题已完成精准修补，正文已更新！`, "success");
+    } else {
+      const instruction =
+        customInstruction ||
+        "请依据国家发改委投资项目高质量编制标准，进一步深化工程参数论述与规范表格排版。";
+      showMsg(`正在对第 ${targetSeq} 章执行 AI 智能重构修订...`, "info");
+      await projectStore.runChapterRevision(engine.baseUrl, targetSeq, instruction, llmConfig);
+      showMsg(`第 ${targetSeq} 章 AI 修订完成！正文已更新。`, "success");
+    }
+    syncEditorContent();
   } catch (err: any) {
     showMsg(`修订失败: ${err.message}`, "error");
   } finally {
@@ -832,25 +826,16 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
   }
 }
 
-async function handleApplyRevision() {
-  if (!engine.baseUrl || !projectStore.activeRevision) return;
+async function handleUndoRevision(seq?: number) {
+  if (!engine.baseUrl) return;
+  const targetSeq = seq !== undefined ? seq : (currentChapter.value?.seq || projectStore.selectedChapterSeq);
   try {
-    const seq = projectStore.activeRevision.seq;
-    await projectStore.applyRevision(engine.baseUrl, seq);
-    showMsg(`第 ${seq} 章修订已采纳并保存为最新正文！`, "success");
-    viewMode.value = "rich";
+    await projectStore.undoChapterRevision(engine.baseUrl, targetSeq);
+    showMsg(`已撤销第 ${targetSeq} 章的修改，恢复至修改前版本！`, "success");
     syncEditorContent();
   } catch (err: any) {
-    showMsg(`采纳修订失败: ${err.message}`, "error");
+    showMsg(`撤销失败: ${err.message}`, "error");
   }
-}
-
-function handleDiscardRevision() {
-  if (!projectStore.activeRevision) return;
-  const seq = projectStore.activeRevision.seq;
-  projectStore.discardRevision();
-  showMsg(`已放弃第 ${seq} 章本次修订`, "info");
-  viewMode.value = "rich";
 }
 
 function copyCurrentChapterMarkdown() {
@@ -997,18 +982,26 @@ onUnmounted(() => {
                   :class="
                     projectStore.reviewingSeq === ch.seq
                       ? 'reviewing'
-                      : isChapterWritten(ch.seq)
-                      ? 'completed'
-                      : 'idle'
+                      : !isChapterWritten(ch.seq)
+                      ? 'unwritten'
+                      : isChapterReviewed(ch.seq) && getChapterIssuesCount(ch.seq) === 0
+                      ? 'reviewed'
+                      : isChapterReviewed(ch.seq) && getChapterIssuesCount(ch.seq) > 0
+                      ? 'has-issues'
+                      : 'unreviewed'
                   "
                 >
                   <span v-if="projectStore.reviewingSeq === ch.seq" class="spinner-inline"></span>
                   {{
                     projectStore.reviewingSeq === ch.seq
                       ? "审阅中…"
-                      : isChapterWritten(ch.seq)
-                      ? "已完成 ✓"
-                      : "待撰写"
+                      : !isChapterWritten(ch.seq)
+                      ? "待撰写"
+                      : isChapterReviewed(ch.seq) && getChapterIssuesCount(ch.seq) === 0
+                      ? "已审阅 ✓"
+                      : isChapterReviewed(ch.seq) && getChapterIssuesCount(ch.seq) > 0
+                      ? `待修改 (${getChapterIssuesCount(ch.seq)})`
+                      : "待审阅"
                   }}
                 </span>
 
@@ -1101,29 +1094,8 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 右上角核心操作组 (视图模式切换、单章审阅、AI智能修订、抽屉与复制) -->
+          <!-- 右上角核心操作组 (单章审阅、AI智能修订、撤销、抽屉与复制) -->
           <div class="editor-actions">
-            <!-- 视图模式切换 Tab -->
-            <div class="view-mode-tabs">
-              <button
-                class="tab-btn"
-                :class="{ active: viewMode === 'rich' }"
-                @click="viewMode = 'rich'"
-                title="最终排版正文：支持在文字上直接就地点击编辑润色，300ms 自动落盘"
-              >
-                📝 最终排版正文
-              </button>
-              <button
-                class="tab-btn"
-                :class="{ active: viewMode === 'diff' }"
-                @click="viewMode = 'diff'"
-                title="纯净段落级 Diff 对比：全宽单栏段落级差异比对 (删除线/新增背景)"
-              >
-                🔍 修订差异对比
-                <span v-if="hasActiveRevision" class="active-diff-indicator">●</span>
-              </button>
-            </div>
-
             <button
               class="btn btn-outline"
               :disabled="!isChapterWritten(currentChapter?.seq || 1) || projectStore.reviewingSeq === currentChapter?.seq"
@@ -1137,9 +1109,19 @@ onUnmounted(() => {
               class="btn btn-primary"
               :disabled="!isChapterWritten(currentChapter?.seq || 1) || projectStore.revisingSeq !== null"
               @click="handleDirectRevision(currentChapter?.seq)"
-              title="代入本章专家诊断建议，一键由大模型执行智能重构并生成 Diff"
+              title="代入本章专家诊断建议，一键执行外科手术式精准修补"
             >
+              <span v-if="projectStore.revisingSeq === currentChapter?.seq" class="spinner-inline"></span>
               ⚡ AI 智能修订
+            </button>
+
+            <button
+              v-if="hasSnapshot"
+              class="btn btn-outline btn-undo"
+              @click="handleUndoRevision(currentChapter?.seq)"
+              title="撤销本次智能修改，恢复至修改前的原版正文"
+            >
+              ↩️ 撤销修改
             </button>
 
             <button
@@ -1265,14 +1247,12 @@ onUnmounted(() => {
 
         <!-- 主工作画布容器 -->
         <div class="card-body editor-body">
-          <!-- ═════════════════════════════════════════════════════════ -->
-          <!-- 模式 1: 最终排版正文 (rich) — 单章聚焦 + contenteditable 就地编辑 -->
-          <!-- ═════════════════════════════════════════════════════════ -->
-          <div v-show="viewMode === 'rich'" class="writing-canvas">
+          <!-- 纯净出版级排版正文画布 — 单章聚焦 + contenteditable 就地编辑 -->
+          <div class="writing-canvas">
             <div class="canvas-spec-bar">
               <span class="spec-tag">📖 国家发改委与行业规程出版级排版 (10.5pt)</span>
               <span class="spec-tip">
-                支持直接在排版文字上点击输入修改，300ms 自动落盘。点击黄色高亮诊断标记可直接联动右侧修改建议。
+                支持直接在排版文字上点击输入修改，300ms 自动落盘。点击黄色高亮诊断标记可联动右侧修改建议或一键局部精准修复。
               </span>
             </div>
 
@@ -1285,85 +1265,6 @@ onUnmounted(() => {
               @click="handleEditorCanvasClick"
               data-placeholder="本章节暂未生成正文。可直接在此处点击输入排版文字，或返回步骤 3 进行 AI 一键写作..."
             ></div>
-          </div>
-
-          <!-- ═════════════════════════════════════════════════════════ -->
-          <!-- 模式 2: 纯净段落级 Diff 对比 (diff) — 全宽单栏内联段落级高亮 -->
-          <!-- ═════════════════════════════════════════════════════════ -->
-          <div v-show="viewMode === 'diff'" class="canvas-diff-view">
-            <!-- 差异比对常驻操作栏 -->
-            <div class="diff-sticky-header">
-              <div class="diff-header-info">
-                <div class="diff-title-row">
-                  <span class="diff-main-badge">🔍 全宽单栏内联 Diff 差异对比</span>
-                  <span v-if="projectStore.activeRevision" class="diff-ch-tag">
-                    第 {{ projectStore.activeRevision.seq }} 章
-                  </span>
-                </div>
-              </div>
-
-              <div class="diff-header-stats">
-                <span class="diff-stat-pill pill-added">+ {{ currentDiffStats.addedLines }} 新增</span>
-                <span class="diff-stat-pill pill-removed">- {{ currentDiffStats.removedLines }} 删除</span>
-                <span class="diff-stat-pill pill-unchanged">= {{ currentDiffStats.unchangedLines }} 未修改</span>
-              </div>
-
-              <div class="diff-header-actions">
-                <button
-                  class="btn btn-success"
-                  :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
-                  @click="handleApplyRevision"
-                  title="采纳本次 AI 修订结果并保存覆盖为最新正文"
-                >
-                  ✅ 采纳全部修订并保存为正文
-                </button>
-                <button
-                  class="btn btn-outline"
-                  :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
-                  @click="handleDirectRevision(projectStore.activeRevision?.seq || projectStore.selectedChapterSeq, projectStore.activeRevision?.instruction)"
-                  title="代入修改指令重新生成修订"
-                >
-                  🔄 重新生成
-                </button>
-                <button
-                  class="btn btn-outline btn-danger-text"
-                  :disabled="!hasActiveRevision || projectStore.revisingSeq !== null"
-                  @click="handleDiscardRevision"
-                  title="放弃本次修订结果，保留原章节正文"
-                >
-                  ❌ 放弃修订
-                </button>
-              </div>
-            </div>
-
-            <!-- 内联段落级 Diff 渲染区 -->
-            <div class="diff-body-container">
-              <div v-if="diffLines.length === 0" class="diff-empty-state">
-                <div class="empty-icon">⚖️</div>
-                <div class="empty-title">当前章节暂无修订对比数据</div>
-                <div class="empty-desc">
-                  点击上方「⚡ AI 智能修订」或「专家诊断」中的「采纳修订」，系统将根据发改委规范自动生成高质量修订方案与 Diff 对比。
-                </div>
-              </div>
-
-              <div v-else class="diff-lines-list">
-                <div
-                  v-for="(dl, idx) in diffLines"
-                  :key="idx"
-                  class="diff-line-row"
-                  :class="`diff-type-${dl.type}`"
-                >
-                  <div class="diff-gutter">
-                    <span class="line-no old-no">{{ dl.oldLineNumber !== undefined ? dl.oldLineNumber : '' }}</span>
-                    <span class="line-no new-no">{{ dl.newLineNumber !== undefined ? dl.newLineNumber : '' }}</span>
-                    <span class="diff-symbol">{{ dl.type === 'added' ? '+' : dl.type === 'removed' ? '-' : ' ' }}</span>
-                  </div>
-                  <div class="diff-content">
-                    <pre>{{ dl.text || ' ' }}</pre>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -1453,10 +1354,15 @@ onUnmounted(() => {
                         </button>
                         <button
                           class="btn btn-primary btn-xs"
-                          @click="handleDirectRevision(issue.chapterSeq || projectStore.selectedChapterSeq, `针对问题进行专项修订：${issue.description || issue.message}，建议：${issue.suggestion || '完善论述'}`)"
-                          title="针对该问题专项执行 AI 智能修订"
+                          :disabled="projectStore.revisingSeq !== null"
+                          @click="handleFixSingleIssue(issue)"
+                          title="针对该问题执行外科手术式局部精准修复"
                         >
-                          ⚡ 采纳修订
+                          <span
+                            v-if="projectStore.revisingIssueId === (issue.id || issue.quote || issue.description || 'single')"
+                            class="spinner-inline"
+                          ></span>
+                          ⚡ 局部修复
                         </button>
                       </div>
                     </div>
@@ -2010,21 +1916,44 @@ onUnmounted(() => {
   gap: 3px;
   white-space: nowrap;
 }
-.status-pill.idle {
-  background: #f1f5f9;
-  color: #64748b;
-}
-.status-pill.reviewing {
-  background: #fef3c7;
-  color: #b45309;
-}
-.status-pill.completed {
+.status-pill.reviewed {
   background: #dcfce7;
   color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+.status-pill.has-issues {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+.status-pill.unreviewed {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.status-pill.unwritten {
+  background: #f8fafc;
+  color: #94a3b8;
+  border: 1px dashed #cbd5e1;
+}
+.status-pill.reviewing {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
 }
 .status-pill.error {
   background: #fee2e2;
   color: #b91c1c;
+}
+
+.btn-undo {
+  color: #d97706;
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+.btn-undo:hover {
+  background: #fef3c7;
+  border-color: #f59e0b;
 }
 
 .ch-action-btn {
@@ -2177,37 +2106,6 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-.view-mode-tabs {
-  display: flex;
-  background: #f1f5f9;
-  padding: 2px;
-  border-radius: 6px;
-  border: 1px solid #e2e8f0;
-}
-.tab-btn {
-  background: transparent;
-  border: none;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #64748b;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.tab-btn.active {
-  background: #ffffff;
-  color: #2563eb;
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-}
-.active-diff-indicator {
-  color: #22c55e;
-  font-size: 10px;
-}
 
 .editor-body {
   flex: 1;
@@ -2425,168 +2323,6 @@ onUnmounted(() => {
   font-size: 13px;
   color: #94a3b8;
   max-width: 480px;
-}
-
-/* ═════════════════════════════════════════════════════════ */
-/* Diff 差异对比视图 */
-/* ═════════════════════════════════════════════════════════ */
-.canvas-diff-view {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  background: #ffffff;
-}
-
-.diff-sticky-header {
-  padding: 10px 18px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.diff-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.diff-main-badge {
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.diff-ch-tag {
-  background: #e0e7ff;
-  color: #3730a3;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-.diff-header-stats {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.diff-stat-pill {
-  font-size: 11.5px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-.pill-added {
-  background: #dcfce7;
-  color: #166534;
-}
-.pill-removed {
-  background: #fee2e2;
-  color: #991b1b;
-}
-.pill-unchanged {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-.diff-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.btn-danger-text {
-  color: #dc2626;
-  border-color: #fca5a5;
-}
-.btn-danger-text:hover {
-  background: #fee2e2;
-}
-
-.diff-body-container {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  font-family: monospace;
-  font-size: 13px;
-}
-.diff-empty-state {
-  text-align: center;
-  padding: 60px 20px;
-}
-.diff-empty-state .empty-icon {
-  font-size: 40px;
-  margin-bottom: 12px;
-}
-.diff-empty-state .empty-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #334155;
-  margin-bottom: 8px;
-}
-.diff-empty-state .empty-desc {
-  font-size: 13px;
-  color: #94a3b8;
-  max-width: 500px;
-  margin: 0 auto;
-}
-
-.diff-lines-list {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  overflow: hidden;
-}
-.diff-line-row {
-  display: flex;
-  align-items: flex-start;
-  min-height: 22px;
-  line-height: 22px;
-}
-.diff-line-row.diff-type-added {
-  background: #ecfdf5;
-  color: #065f46;
-}
-.diff-line-row.diff-type-removed {
-  background: #fef2f2;
-  color: #991b1b;
-}
-.diff-line-row.diff-type-unchanged {
-  background: #ffffff;
-  color: #334155;
-}
-.diff-gutter {
-  display: flex;
-  align-items: center;
-  width: 90px;
-  background: #f8fafc;
-  border-right: 1px solid #e2e8f0;
-  padding: 0 6px;
-  user-select: none;
-  font-size: 11px;
-  color: #94a3b8;
-  flex-shrink: 0;
-}
-.line-no {
-  width: 32px;
-  text-align: right;
-}
-.diff-symbol {
-  width: 14px;
-  text-align: center;
-  font-weight: 700;
-}
-.diff-content {
-  flex: 1;
-  padding: 0 10px;
-  overflow-x: auto;
-}
-.diff-content pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-family: inherit;
 }
 
 /* ═════════════════════════════════════════════════════════ */

@@ -1382,6 +1382,24 @@ describe("Pinia useProjectStore", () => {
       );
     });
 
+    it("engineApi.reviseParagraph: 发送局部段落精准修订请求并返回重构段落", async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ revised_paragraph: "修改后的精准工艺参数段落内容。" }),
+      );
+
+      const res = await engineApi.reviseParagraph(BASE_URL, {
+        paragraph_text: "原工艺参数段落...",
+        instruction: "补充能耗指标",
+        llm_config: { api_key: "sk-test", base_url: "http://api", model: "m" },
+      });
+
+      expect(res.revised_paragraph).toBe("修改后的精准工艺参数段落内容。");
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${BASE_URL}/writing/revise-paragraph`,
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
     it("engineApi 专家审阅持久化 CRUD", async () => {
       const reviewItem: engineApi.ExpertReviewResult = {
         status: "需补充",
@@ -1487,6 +1505,65 @@ describe("Pinia useProjectStore", () => {
       expect(store.activeRevision).not.toBeNull();
       store.discardRevision();
       expect(store.activeRevision).toBeNull();
+    });
+
+    it("store: runParagraphRevision 外科手术式单段落替换、自动清除问题与 undoChapterRevision 回滚", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "精准修订项目", created_at: "2026-08-25T00:00:00Z" };
+      store.chapters[1] = "# 第一章 概述\n\n段落一：项目基本背景。\n\n段落二：原工艺参数论述欠缺。\n\n段落三：结论建议。";
+      store.outlineChapters = [{ seq: 1, title: "第一章 概述" }];
+      store.chapterReviews[1] = {
+        status: "需修改",
+        score: 75,
+        summary: "存在待修改问题",
+        issues: [
+          {
+            id: "issue-1",
+            dimension: "技术规范",
+            severity: "high",
+            description: "工艺参数论述欠缺",
+            quote: "原工艺参数论述欠缺",
+            suggestion: "补充吨耗电与回收率",
+          },
+        ],
+      };
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/writing/revise-paragraph")) {
+          return jsonResponse({ revised_paragraph: "段落二：工艺参数已详实补充吨耗电0.45kWh及98%回收率。" });
+        }
+        if (u.includes("/chapters/1")) {
+          return jsonResponse({ ok: true });
+        }
+        if (u.includes("/reviews/1")) {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({});
+      });
+
+      // 1. 执行局部段落修复
+      const updatedText = await store.runParagraphRevision(
+        BASE_URL,
+        1,
+        store.chapterReviews[1].issues![0],
+        { api_key: "sk-test", base_url: "http://api", model: "m" }
+      );
+
+      // 验证精准原位替换
+      expect(updatedText).toContain("段落二：工艺参数已详实补充吨耗电0.45kWh及98%回收率。");
+      expect(updatedText).toContain("段落一：项目基本背景。");
+      expect(updatedText).toContain("段落三：结论建议。");
+      expect(store.chapters[1]).toBe(updatedText);
+
+      // 验证已从问题清单中移除
+      expect(store.chapterReviews[1].issues?.length).toBe(0);
+      expect(store.chapterSnapshots[1]).toBe("# 第一章 概述\n\n段落一：项目基本背景。\n\n段落二：原工艺参数论述欠缺。\n\n段落三：结论建议。");
+
+      // 2. 撤销回滚
+      await store.undoChapterRevision(BASE_URL, 1);
+      expect(store.chapters[1]).toContain("段落二：原工艺参数论述欠缺。");
+      expect(store.chapterSnapshots[1]).toBeUndefined();
     });
 
     it("store: runAllChaptersReview 批量审查所有章节并维护 batchReviewing 状态", async () => {

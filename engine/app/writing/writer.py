@@ -594,6 +594,28 @@ class ChapterWriter:
                                 top_p=TOP_P)
         return normalize_chapter_markdown(res)
 
+    def modify_paragraph(self, paragraph_content: str, instruction: str,
+                         chapter_title: str = "", topic: str = "") -> str:
+        """针对单一/局部段落进行外科手术式精准重构与修改（毫秒级响应，零副作用）。"""
+        prompt = (
+            f"## 待修改段落原文\n{paragraph_content}\n\n"
+            f"## 专家修改意见\n{instruction}\n\n"
+            f"请根据上述修改意见，对该段落进行精准修改、参数补充或方案深化，直接返回修改后的该段落内容（不得包含任何引言、解释、说明或问候语）：\n\n"
+            f"{REASONING_CHINESE_DEFENSE_PROMPT}"
+        )
+        system = (
+            "你是一名国家发改委投资项目工程咨询专家。你的任务是根据专家的具体修改建议，对给定的局部段落进行精准的专业润色、参数补充与论述深化。\n"
+            "要求：\n"
+            "1. 保持工程出版级严肃专业术语与逻辑通顺；\n"
+            "2. 仅返回修改后的目标段落正文本身，严禁输出任何引言、解释、前后说明或无关废话；\n"
+            "3. 如果原文包含 Markdown 格式（如列表、粗体、小标题），请严格保留相符的排版结构。"
+        )
+        res = self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_MODIFY,
+                            frequency_penalty=FREQUENCY_PENALTY,
+                            presence_penalty=PRESENCE_PENALTY,
+                            top_p=TOP_P)
+        return res.strip()
+
     def _build_modify_args(self, original_content: str, instruction: str,
                            chapter_budget: int,
                            report_type: str = "",

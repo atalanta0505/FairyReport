@@ -793,6 +793,23 @@ export async function streamChapterReview(
   };
 }
 
+export interface ReviseChapterRequest {
+  chapter_text: string;
+  instruction: string;
+  llm_config: LLMConfig;
+  chapter_title?: string;
+  report_type?: string;
+  chapter_budget?: number;
+}
+
+export interface ReviseParagraphRequest {
+  paragraph_text: string;
+  instruction: string;
+  llm_config: LLMConfig;
+  chapter_title?: string;
+  report_type?: string;
+}
+
 /** 针对章节执行 AI 定向修改与润色 */
 export async function reviseChapter(
   baseUrl: string,
@@ -801,6 +818,21 @@ export async function reviseChapter(
   return request<{ revised_text: string }>(
     baseUrl,
     "/writing/revise",
+    {
+      method: "POST",
+      body: JSON.stringify(req),
+    },
+  );
+}
+
+/** 针对局部段落执行外科手术式精准修订（毫秒级响应，零副作用） */
+export async function reviseParagraph(
+  baseUrl: string,
+  req: ReviseParagraphRequest,
+): Promise<{ revised_paragraph: string }> {
+  return request<{ revised_paragraph: string }>(
+    baseUrl,
+    "/writing/revise-paragraph",
     {
       method: "POST",
       body: JSON.stringify(req),

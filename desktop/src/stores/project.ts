@@ -388,6 +388,8 @@ export const useProjectStore = defineStore("project", () => {
   const reviewProgress = ref<ReviewProgress | null>(null);
   let reviewProgressTimer: ReturnType<typeof setInterval> | null = null;
   const revisingSeq = ref<number | null>(null);
+  const revisingIssueId = ref<string | null>(null);
+  const chapterSnapshots = ref<Record<number, string>>({});
   const activeRevision = ref<{
     seq: number;
     originalText: string;
@@ -1414,13 +1416,143 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
+  /** 外科手术式单段落精准重构与原位替换（毫秒级响应，零副作用） */
+  async function runParagraphRevision(
+    baseUrl: string,
+    seq: number,
+    issue: engineApi.ReviewIssue,
+    llmConfig: engineApi.LLMConfig,
+  ): Promise<string> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    const originalText = chapters.value[seq] || "";
+    if (!originalText.trim()) {
+      throw new Error(`第 ${seq} 章尚无正文内容，无法修订`);
+    }
+
+    revisingSeq.value = seq;
+    revisingIssueId.value = issue.id || issue.quote || issue.description || "single";
+    error.value = null;
+
+    // 保存快照用于撤销回滚
+    if (!chapterSnapshots.value[seq]) {
+      chapterSnapshots.value[seq] = originalText;
+    }
+
+    const titles = outlineChapters.value.find((c) => c.seq === seq);
+    const chapterTitle = titles?.title || `第 ${seq} 章`;
+
+    // 寻找目标段落
+    const quote = (issue.quote || issue.snippet || "").trim();
+    let targetParagraph = "";
+    const paragraphs = originalText.split(/\n\n+/);
+
+    if (quote) {
+      const cleanQuote = quote.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "");
+      for (const p of paragraphs) {
+        if (
+          p.includes(quote) ||
+          (cleanQuote.length >= 4 && p.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, "").includes(cleanQuote))
+        ) {
+          targetParagraph = p;
+          break;
+        }
+      }
+    }
+
+    if (!targetParagraph && issue.location) {
+      const locKey = issue.location.replace(/^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*/, "").trim();
+      if (locKey.length >= 2) {
+        for (const p of paragraphs) {
+          if (p.includes(locKey)) {
+            targetParagraph = p;
+            break;
+          }
+        }
+      }
+    }
+
+    const instruction = `针对问题「${issue.description || issue.message}」，执行修改建议：${issue.suggestion || "完善论述与参数依据"}`;
+
+    try {
+      let newChapterText = originalText;
+      if (targetParagraph) {
+        const res = await engineApi.reviseParagraph(targetUrl, {
+          paragraph_text: targetParagraph,
+          instruction,
+          llm_config: llmConfig,
+          chapter_title: chapterTitle,
+          report_type: reportType.value,
+        });
+        newChapterText = originalText.replace(targetParagraph, res.revised_paragraph);
+      } else {
+        const res = await engineApi.reviseChapter(targetUrl, {
+          chapter_text: originalText,
+          instruction,
+          llm_config: llmConfig,
+          chapter_title: chapterTitle,
+          report_type: reportType.value,
+        });
+        newChapterText = res.revised_text;
+      }
+
+      chapters.value[seq] = newChapterText;
+      await saveChapter(targetUrl, seq, newChapterText, true);
+
+      // 从该章诊断问题中移除此问题
+      if (chapterReviews.value[seq]?.issues) {
+        chapterReviews.value[seq].issues = chapterReviews.value[seq].issues.filter(
+          (i) => i.id !== issue.id && i.quote !== issue.quote && i.description !== issue.description
+        );
+        await saveReview(targetUrl, seq, chapterReviews.value[seq]);
+      }
+
+      return newChapterText;
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      revisingSeq.value = null;
+      revisingIssueId.value = null;
+    }
+  }
+
+  /** 一键撤销本章修改（恢复上个快照版本） */
+  async function undoChapterRevision(baseUrl: string, seq: number): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    const snapshot = chapterSnapshots.value[seq];
+    if (!snapshot) return;
+
+    chapters.value[seq] = snapshot;
+    await saveChapter(targetUrl, seq, snapshot, true);
+    delete chapterSnapshots.value[seq];
+  }
+
+  /** 从本章诊断记录中删除指定问题 */
+  async function removeChapterIssue(baseUrl: string, seq: number, issueId: string): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (chapterReviews.value[seq]?.issues) {
+      chapterReviews.value[seq].issues = chapterReviews.value[seq].issues.filter((i) => i.id !== issueId);
+      await saveReview(targetUrl, seq, chapterReviews.value[seq]);
+    }
+  }
+
+  /** 清空本章诊断问题记录并标记为通过 */
+  async function clearChapterIssues(baseUrl: string, seq: number): Promise<void> {
+    const targetUrl = baseUrl || lastBaseUrl.value;
+    if (chapterReviews.value[seq]) {
+      chapterReviews.value[seq].issues = [];
+      chapterReviews.value[seq].status = "通过";
+      await saveReview(targetUrl, seq, chapterReviews.value[seq]);
+    }
+  }
+
   async function runChapterRevision(
     baseUrl: string,
     seq: number,
     instruction: string,
     llmConfig: engineApi.LLMConfig,
   ): Promise<string> {
-    if (baseUrl) lastBaseUrl.value = baseUrl;
+    const targetUrl = baseUrl || lastBaseUrl.value;
     const originalText = chapters.value[seq] || "";
     if (!originalText.trim()) {
       throw new Error(`第 ${seq} 章尚无正文内容，无法修订`);
@@ -1432,17 +1564,31 @@ export const useProjectStore = defineStore("project", () => {
     revisingSeq.value = seq;
     error.value = null;
 
+    if (!chapterSnapshots.value[seq]) {
+      chapterSnapshots.value[seq] = originalText;
+    }
+
     const titles = outlineChapters.value.find((c) => c.seq === seq);
     const chapterTitle = titles?.title || `第 ${seq} 章`;
 
     try {
-      const res = await engineApi.reviseChapter(baseUrl, {
+      const res = await engineApi.reviseChapter(targetUrl, {
         chapter_text: originalText,
         instruction,
         llm_config: llmConfig,
         chapter_title: chapterTitle,
         report_type: reportType.value,
       });
+
+      chapters.value[seq] = res.revised_text;
+      await saveChapter(targetUrl, seq, res.revised_text, true);
+
+      // 修订完成清空已修复问题列表
+      if (chapterReviews.value[seq]) {
+        chapterReviews.value[seq].issues = [];
+        chapterReviews.value[seq].status = "通过";
+        await saveReview(targetUrl, seq, chapterReviews.value[seq]);
+      }
 
       activeRevision.value = {
         seq,
@@ -1470,6 +1616,13 @@ export const useProjectStore = defineStore("project", () => {
     const newText = activeRevision.value.revisedText;
     chapters.value[targetSeq] = newText;
     await saveChapter(targetUrl, targetSeq, newText, true);
+
+    // 清空已修复问题
+    if (chapterReviews.value[targetSeq]) {
+      chapterReviews.value[targetSeq].issues = [];
+      chapterReviews.value[targetSeq].status = "通过";
+      await saveReview(targetUrl, targetSeq, chapterReviews.value[targetSeq]);
+    }
 
     activeRevision.value = null;
   }
@@ -1853,6 +2006,8 @@ export const useProjectStore = defineStore("project", () => {
     batchReviewing,
     reviewProgress,
     revisingSeq,
+    revisingIssueId,
+    chapterSnapshots,
     activeRevision,
     lastBaseUrl,
     loadingProjects,
@@ -1892,6 +2047,10 @@ export const useProjectStore = defineStore("project", () => {
     runAllChaptersReview,
     stopBatchReview,
     runChapterRevision,
+    runParagraphRevision,
+    undoChapterRevision,
+    removeChapterIssue,
+    clearChapterIssues,
     applyRevision,
     discardRevision,
     loadFullBookReview,

@@ -10,6 +10,9 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: "127.0.0.1",
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
   },
   // Env vars prefixed with TAURI_ are exposed to the frontend.
   envPrefix: ["VITE_", "TAURI_"],
