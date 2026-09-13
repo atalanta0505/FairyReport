@@ -604,7 +604,7 @@ def test_build_chapter_write_args_skeleton_infilling():
     # 验证骨架靶向填充写作要求
     assert "## 写作要求（骨架靶向填充模式）" in prompt
     assert "骨架锁定（最高优先级）" in prompt
-    assert "末级小节精准填充：在每一个最低级别标题（### / ####）下方强制空一行（\\n\\n）" in prompt
+    assert "在每一个最低级别标题（### / ####）下方强制空一行（\\n\\n）" in prompt
     assert "非末级标题禁止堆砌正文：一级章（#）和二级节（##）作为分类与结构导引" in prompt
     assert "格式规范（极重要）" in prompt
 

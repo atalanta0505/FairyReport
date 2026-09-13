@@ -948,5 +948,47 @@ describe("Markdown 解析与排版工具", () => {
       expect(bib).toContain("[3] [联网检索] 生态环境部关于发布2023年重点区域执行通知. 访问网址: https://mee.gov.cn/notice/1");
     });
   });
+
+  describe("V2-T47: 节首句标点补齐、段落融合与引用标记行内消除换行", () => {
+    it("引用标记消除孤立换行并紧随前置句子", () => {
+      const raw = "本项目符合国家绿色发展产业目录要求。\n\n【源:产业目录.docx】\n规划建设规模为年产1000万件。";
+      const normalized = normalizeMarkdown(raw);
+      expect(normalized).toContain("【源:产业目录.docx】。");
+      expect(normalized).not.toContain("\n\n【源:产业目录.docx】");
+
+      const rawNumbered = "本项目工程地质条件稳定。\n\n[1]\n各项参数均满足抗震设防要求。";
+      const normNumbered = normalizeMarkdown(rawNumbered);
+      expect(normNumbered).toContain("[1]。");
+      expect(normNumbered).not.toContain("\n\n[1]");
+    });
+
+    it("末级小节下孤立无标点引导短句自动补齐句号并与后文段落合并", () => {
+      const raw = [
+        "### 1.1.1 建设地点",
+        "",
+        "本项目主要能源消耗品种为电力和天然气",
+        "",
+        "项目总规划用地面积 120 亩，总建筑面积约 85000 平方米。",
+      ].join("\n");
+
+      const normalized = normalizeMarkdown(raw);
+      expect(normalized).toBe(
+        "### 1.1.1 建设地点\n\n本项目主要能源消耗品种为电力和天然气。项目总规划用地面积 120 亩，总建筑面积约 85000 平方米。"
+      );
+    });
+
+    it("末级小节下单行无标点短句自动补充句号", () => {
+      const raw = [
+        "### 1.1.2 建设规模",
+        "",
+        "本项目年产各类高档皮革制品 500 万件",
+        "",
+        "### 1.1.3 建设周期",
+      ].join("\n");
+
+      const normalized = normalizeMarkdown(raw);
+      expect(normalized).toContain("### 1.1.2 建设规模\n\n本项目年产各类高档皮革制品 500 万件。\n\n### 1.1.3 建设周期");
+    });
+  });
 });
 

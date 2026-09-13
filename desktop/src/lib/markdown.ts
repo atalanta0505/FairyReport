@@ -248,7 +248,86 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
     }
   );
 
-  return text;
+  // 7. 引用标记行内紧随融合（消除孤立换行，贴合在陈述句末尾）
+  text = text.replace(
+    /([，。；！？])\s*\n+\s*【(源|材料|标|标准|规|规程|网|网络)[:：]([^】]+)】/g,
+    "【$2:$3】$1"
+  );
+  text = text.replace(
+    /([，。；！？])\s*\n+\s*(\[Z(?:-[^\]]+)?\]|\[\d+\])/g,
+    "$2$1"
+  );
+  text = text.replace(
+    /^(?!\s*#{1,6}\s)(.+[^\s\n#|>-])\s*\n+\s*【(源|材料|标|标准|规|规程|网|网络)[:：]([^】]+)】\s*$/gm,
+    "$1【$2:$3】"
+  );
+
+  // 8. 节首孤立无标点引导短句补齐标点与正文段落融合
+  const lines = text.split("\n");
+  const newLines: string[] = [];
+  let idx = 0;
+  while (idx < lines.length) {
+    const line = lines[idx];
+    newLines.push(line);
+    if (/^#{2,6}\s+/.test(line.trim())) {
+      let b = idx + 1;
+      while (b < lines.length && !lines[b].trim()) {
+        b++;
+      }
+      if (b < lines.length) {
+        const firstBody = lines[b].trim();
+        const isSpecial = (
+          firstBody.startsWith("#") ||
+          firstBody.startsWith("|") ||
+          firstBody.startsWith("-") ||
+          firstBody.startsWith("*") ||
+          firstBody.startsWith(">") ||
+          firstBody.startsWith("```") ||
+          /^\d+[\.、]/.test(firstBody)
+        );
+        if (!isSpecial) {
+          const hasEndPunct = /[。！？；!?;:…”’\.：—~]$/.test(firstBody);
+          const normFirst = hasEndPunct ? firstBody : firstBody + "。";
+
+          let merged = false;
+          if (firstBody.length <= 80 && !firstBody.endsWith("：") && !firstBody.endsWith(":")) {
+            let c = b + 1;
+            while (c < lines.length && !lines[c].trim()) {
+              c++;
+            }
+            if (c < lines.length) {
+              const secondBody = lines[c].trim();
+              const isSecondSpecial = (
+                secondBody.startsWith("#") ||
+                secondBody.startsWith("|") ||
+                secondBody.startsWith("-") ||
+                secondBody.startsWith("*") ||
+                secondBody.startsWith(">") ||
+                secondBody.startsWith("```") ||
+                /^\d+[\.、]/.test(secondBody)
+              );
+              if (!isSecondSpecial) {
+                newLines.push("");
+                newLines.push(normFirst + (secondBody.startsWith(" ") ? "" : "") + secondBody);
+                idx = c;
+                merged = true;
+              }
+            }
+          }
+
+          if (!merged) {
+            newLines.push("");
+            newLines.push(normFirst);
+            idx = b;
+          }
+        }
+      }
+    }
+    idx++;
+  }
+
+  const res = newLines.join("\n");
+  return res.replace(/\n{3,}/g, "\n\n");
 }
 
 /**

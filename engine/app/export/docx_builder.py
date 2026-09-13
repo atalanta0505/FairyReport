@@ -217,9 +217,32 @@ def md_to_docx(md_content: str, output_path: str, title: str = "") -> str:
             i += 1
             continue
 
-        # ── 普通正文段落 ──
+        # ── 普通正文段落（按空行合并连续行，符合标准 Markdown 段落规范）──
         if stripped:
-            _add_formatted_paragraph(doc, stripped)
+            para_lines = [stripped]
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j]
+                next_stripped = next_line.strip()
+                if not next_stripped:
+                    break
+                if (
+                    next_stripped.startswith('#') or
+                    (next_stripped.startswith('|') and next_stripped.endswith('|')) or
+                    next_stripped.startswith('```') or
+                    next_stripped.startswith('>') or
+                    re.match(r'^[-*]\s+', next_stripped) or
+                    re.match(r'^\d+[\.、]\s+', next_stripped) or
+                    next_stripped.startswith('\x00LATEX_DISPLAY_')
+                ):
+                    break
+                para_lines.append(next_stripped)
+                j += 1
+
+            merged_para = "".join(para_lines) if all(ord(c) > 127 for c in stripped[-1:] + (para_lines[1][:1] if len(para_lines) > 1 else "")) else " ".join(para_lines)
+            _add_formatted_paragraph(doc, merged_para)
+            i = j
+            continue
 
         i += 1
 

@@ -87,8 +87,8 @@ def _build_writing_system_prompt(report_type: str = "",
 核心规则：
 0. **禁止开场白**：不要输出任何"好的"、"作为专家"、"我将"等确认语或自我介绍，直接从章节标题和正文开始。
 1. **大纲锁定**：严格按大纲中的标题文字和层级写作，绝不修改任何标题
-2. **引用格式**：引用时只能使用上方「参考资料」中实际出现的来源标签。项目资料使用【源:文件名】，国家与行业规程标准使用【标:规程标准全称】，百度联网检索结果使用【网:标题】。**严禁编造不存在的来源标签，严禁输出孤立的 [Z] 标记**——若无对应来源直接撰写专业正文论述即可，无需添加任何虚构标签。导出时系统将统一生成参考文献编号。
-3. **逻辑连贯**：如果前文已有相关数据或结论，请在基础上自然衔接
+2. **引用格式（行内紧随）**：引用时只能使用上方「参考资料」中实际出现的来源标签。项目资料使用【源:文件名】，国家与行业规程标准使用【标:规程标准全称】，百度联网检索结果使用【网:标题】。所有引用标签必须紧随在具体事实陈述句末尾或句中（如`...建设方案合规【标:相关标准】。`），严禁单独另起一行，严禁作为段首字符单独起段。严禁编造不存在的来源标签，严禁输出孤立的 [Z] 标记。导出时系统将统一生成参考文献编号。
+3. **逻辑连贯与标点规范**：在各级标题（###/####）下方书写正文时，必须直接展开为有完整标点符号（句号、逗号、分号等）的自然段落。严禁在标题下单独输出 1 行无句号的概括短句再另起一行，每句话都必须有完整标点且与后文连贯成段！
 4. **专业表达**：使用工程咨询行业的标准术语和表述方式
 5. **内容充实**：每节/小节都要有实质性内容，不要空洞
 8. **Markdown 格式规范与 12 项规定动作标准三线表（极重要）**：每个标题（#、##、###、####）必须独占一行且强制空一行（输出 \\n\\n）后再写正文，严禁标题与正文连在同一行，严禁同名同句同排！在涉及主要技术经济指标表（1.1.6）、建设规模比选（3.2.1）、场址比选（4.1.2）、技术路线比选（5.1.1）、关键设备比选（5.2.1）、主要设备清单（5.2.2）、工程方案比选（5.3.1）、项目总投资与建设投资估算表/分年度资金计划（7.1.2/7.1.5，按投资项目行业教材全要素包含建筑工程费、设备购置费、安装工程费、工程建设其他费、基本预备费、涨价预备费、建设期利息、流动资金等）、主要财务指标汇总（7.2.3，包含全要素 FIRR、FNPV、Pt、ROI、ROE）、融资方案比选（7.3.1）、债务清偿能力指标（7.4.3，包含 ICR、DSCR、资产负债率）、风险评价矩阵（9.1.8）等小节，必须强制输出标准 Markdown 三线表格（含表头、对齐线、量纲单位及推荐结论），表格每行末尾必须输出标准换行符 \\n，表格前后强制空一行，严禁使用 || 连写在同一行！"""
@@ -442,20 +442,105 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         prefix = m.group(1) or "### "
         num_part = m.group(2).strip()
         rest = m.group(3).strip()
+        max_end = -1
         for kw in _REPORT_TITLE_KEYWORDS:
             kw_idx = rest.find(kw)
             if 0 <= kw_idx <= 25:
                 end_pos = kw_idx + len(kw)
-                if end_pos < len(rest):
-                    h_text = rest[:end_pos].strip()
-                    body_text = rest[end_pos:].lstrip(':：。—-\u2014\u2013，, \t').strip()
-                    if body_text:
-                        return f"{prefix.strip()} {num_part} {h_text}\n\n{body_text}"
+                if end_pos > max_end:
+                    max_end = end_pos
+        if max_end > 0 and max_end < len(rest):
+            h_text = rest[:max_end].strip()
+            body_text = rest[max_end:].lstrip(':：。—-\u2014\u2013，, \t').strip()
+            if len(body_text) >= 4:
+                return f"{prefix.strip()} {num_part} {h_text}\n\n{body_text}"
         return m.group(0)
     cleaned = re.sub(pattern_num_dense, _repl_num_dense, cleaned, flags=re.MULTILINE)
 
     # 7. 确保标题与正文之间有空行（如 ### 1.1 标题\n正文 -> ### 1.1 标题\n\n正文）
     cleaned = re.sub(r'^(#{1,6}\s+[^\n]+)\n(?!\n|#{1,6}\s)', r'\1\n\n', cleaned, flags=re.MULTILINE)
+
+    # 8. 引用标记行内紧随融合（消除孤立换行，贴合在陈述句末尾）
+    # 8.1 句末标点后跟换行的引用标签：如 "说明。\n\n【源:xxx】" -> "说明【源:xxx】。"
+    cleaned = re.sub(
+        r'([，。；！？])\s*\n+\s*【(源|材料|标|标准|规|规程|网|网络)[:：]([^】]+)】',
+        r'【\2:\3】\1',
+        cleaned,
+    )
+    # 8.2 句末标点后跟换行的 [Z] 或 [N] 引用：如 "说明。\n\n[1]" -> "说明[1]。"
+    cleaned = re.sub(
+        r'([，。；！？])\s*\n+\s*(\[Z(?:-[^\]]+)?\]|\[\d+\])',
+        r'\2\1',
+        cleaned,
+    )
+    # 8.3 普通文本换行后紧跟引用标记：排除标题行
+    cleaned = re.sub(
+        r'^(?!\s*#{1,6}\s)(.+[^\s\n#|>-])\s*\n+\s*【(源|材料|标|标准|规|规程|网|网络)[:：]([^】]+)】\s*$',
+        r'\1【\2:\3】',
+        cleaned,
+        flags=re.MULTILINE,
+    )
+
+    # 9. 节首孤立无标点引导短句补齐标点与正文段落融合
+    def _merge_lead_sentence(text_block: str) -> str:
+        lines = text_block.split("\n")
+        new_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            new_lines.append(line)
+            # 判断当前行是否为小节标题 (## / ### / ####)
+            if re.match(r'^#{2,6}\s+', line.strip()):
+                b = i + 1
+                while b < len(lines) and not lines[b].strip():
+                    b += 1
+
+                if b < len(lines):
+                    first_body = lines[b].strip()
+                    is_special = (
+                        first_body.startswith('#') or
+                        first_body.startswith('|') or
+                        first_body.startswith('-') or
+                        first_body.startswith('*') or
+                        first_body.startswith('>') or
+                        first_body.startswith('```') or
+                        bool(re.match(r'^\d+[\.、]', first_body))
+                    )
+                    if not is_special:
+                        has_end_punct = bool(re.search(r'[。！？；!?;:…”’\.：—~]$', first_body))
+                        norm_first = first_body if has_end_punct else (first_body + "。")
+
+                        merged = False
+                        if len(first_body) <= 80 and not first_body.endswith("：") and not first_body.endswith(":"):
+                            c = b + 1
+                            while c < len(lines) and not lines[c].strip():
+                                c += 1
+                            if c < len(lines):
+                                second_body = lines[c].strip()
+                                is_second_special = (
+                                    second_body.startswith('#') or
+                                    second_body.startswith('|') or
+                                    second_body.startswith('-') or
+                                    second_body.startswith('*') or
+                                    second_body.startswith('>') or
+                                    second_body.startswith('```') or
+                                    bool(re.match(r'^\d+[\.、]', second_body))
+                                )
+                                if not is_second_special:
+                                    new_lines.append("")
+                                    new_lines.append(norm_first + ("" if second_body.startswith(" ") else "") + second_body)
+                                    i = c
+                                    merged = True
+
+                        if not merged:
+                            new_lines.append("")
+                            new_lines.append(norm_first)
+                            i = b
+            i += 1
+        res = "\n".join(new_lines)
+        return re.sub(r'\n{3,}', '\n\n', res)
+
+    cleaned = _merge_lead_sentence(cleaned)
 
     return cleaned
 
@@ -583,11 +668,11 @@ class ChapterWriter:
             f"## 写作要求（骨架靶向填充模式）\n"
             f"- **骨架锁定（最高优先级）：必须严格保留上方【待填充的本章结构骨架】中的所有标题行（#、##、###、####）及其完整文字与层级，严禁增删、修改或调换任何标题顺序！**\n"
             f"- **12 项规定动作标准三线表格强制规范（最高优先级）：在涉及主要技术经济指标（1.1.6）、建设规模方案比选（3.2.1）、场址方案比选（4.1.2）、技术路线比选（5.1.1）、关键设备比选（5.2.1）、主要设备清单（5.2.2）、工程方案比选（5.3.1）、投资估算构成与资金计划（7.1.2/7.1.5）、财务评价指标（7.2.3）、融资方案比选（7.3.1）、债务清偿能力（7.4.3）、风险评价管控矩阵（9.1.8）等小节，必须强制输出标准的 Markdown 三线表格（表头 + 对齐分隔线如 `| :--- | :---: | ---: |` + 完整数据行、工程量纲单位及推荐结论），严禁全篇纯文字堆砌！**\n"
-            f"- **末级小节精准填充：在每一个最低级别标题（### / ####）下方强制空一行（\\n\\n），直接开始深入填充详实、专业、严谨的正文分析、工程参数、合规论证与数据表格！**\n"
+            f"- **末级小节精准填充与段落连贯（极重要）：在每一个最低级别标题（### / ####）下方强制空一行（\\n\\n），直接展开深入填充详实、专业、严谨且带完整句号标点的正文段落，严禁在标题下单独输出 1 行无句号概括短句后再另起一行！**\n"
             f"- **非末级标题禁止堆砌正文：一级章（#）和二级节（##）作为分类与结构导引，正文必须具体归属到对应的末级小节下方！**\n"
             f"- **内容深度与充实展开（极重要）：全面展开实质性工程分析、技术论证、详实参数核算、政策背景契合度推演与合规论证，每小节论述充分详尽，杜绝空洞简略与短句敷衍！**\n"
             f"- **格式规范（极重要）：每个标题（#、##、###、####）必须独占一行且强制空一行（\\n\\n）后再写正文，严禁标题与正文连在同一行，严禁标题与正文首句同名同句同排连写（例如严禁输出'### 1.1.1 建设地点：本项目位于...'，正确格式为'### 1.1.1 建设地点\\n\\n本项目位于...'）；表格每行末尾必须输出标准换行符 \\n，表格前后强制空一行，严禁使用 || 连写在同一行！**\n"
-            f"- 对事实性陈述插入引用标记：只能使用上方「参考资料」中实际出现的标签【源:文件名】、【标:规程标准】或【网:标题】，严禁输出孤立的 [Z] 标记\n"
+            f"- **引用标记行内紧随：【源:文件名】、【标:规程标准】或【网:标题】只能使用「参考资料」中实际出现的标签，且必须作为行内修饰紧随在事实陈述句末尾（如`...合规【标:标准】。`），严禁单独另起一行，严禁作为段首单独起段，严禁输出孤立的 [Z] 标记！**\n"
             f"- 请输出完整的章节正文（Markdown 格式），直接从标题和正文开始，禁止任何开场白或字数统计元数据标注\n\n"
             f"{REASONING_CHINESE_DEFENSE_PROMPT}\n"
         )

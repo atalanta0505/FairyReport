@@ -2480,6 +2480,140 @@ onUnmounted(() => {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
 
+.rich-rendered-editor :deep(h1) {
+  font-size: 16pt;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 24px 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e2e8f0;
+  scroll-margin-top: 16px;
+}
+.rich-rendered-editor :deep(h2) {
+  font-size: 14pt;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 20px 0 10px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #f1f5f9;
+  scroll-margin-top: 16px;
+}
+.rich-rendered-editor :deep(h3) {
+  font-size: 12pt;
+  font-weight: 600;
+  color: #334155;
+  margin: 16px 0 8px 0;
+  scroll-margin-top: 16px;
+}
+.rich-rendered-editor :deep(h4) {
+  font-size: 10.5pt;
+  font-weight: 600;
+  color: #475569;
+  margin: 12px 0 6px 0;
+  scroll-margin-top: 16px;
+}
+.rich-rendered-editor :deep(p) {
+  font-size: 10.5pt;
+  font-weight: 400;
+  color: #334155;
+  line-height: 1.8;
+  margin: 0 0 14px 0;
+  text-indent: 2em;
+  text-align: justify;
+}
+.rich-rendered-editor :deep(strong) {
+  font-weight: 600;
+  color: #0f172a;
+}
+.rich-rendered-editor :deep(em) {
+  font-style: italic;
+  color: #475569;
+}
+.rich-rendered-editor :deep(blockquote) {
+  margin: 14px 0;
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-left: 4px solid #3b82f6;
+  border-radius: 0 6px 6px 0;
+  color: #475569;
+  font-size: 10.5pt;
+}
+.rich-rendered-editor :deep(blockquote p) {
+  margin: 0;
+  text-indent: 0;
+  font-size: 10.5pt;
+}
+.rich-rendered-editor :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 18px 0;
+  font-size: 10.5pt;
+  border-top: 2px solid #334155;
+  border-bottom: 2px solid #334155;
+  border-left: none;
+  border-right: none;
+}
+.rich-rendered-editor :deep(th),
+.rich-rendered-editor :deep(td) {
+  border: none;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 10.5pt;
+  line-height: 1.5;
+}
+.rich-rendered-editor :deep(th) {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #1e293b;
+  border-bottom: 1px solid #475569;
+}
+.rich-rendered-editor :deep(tr:nth-child(even)) {
+  background: transparent;
+}
+.rich-rendered-editor :deep(tr:hover) {
+  background: #f8fafc;
+}
+.rich-rendered-editor :deep(ul),
+.rich-rendered-editor :deep(ol) {
+  margin: 0 0 14px 0;
+  padding-left: 24px;
+  color: #334155;
+}
+.rich-rendered-editor :deep(li) {
+  font-size: 10.5pt;
+  font-weight: 400;
+  margin-bottom: 6px;
+  line-height: 1.8;
+}
+.rich-rendered-editor :deep(pre) {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 12px 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 14px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+}
+.rich-rendered-editor :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #f1f5f9;
+  color: #0969da;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.rich-rendered-editor :deep(pre code) {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+.rich-rendered-editor :deep(hr) {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 20px 0;
+}
+
 .unwritten-chapter-placeholder {
   display: flex;
   flex-direction: column;

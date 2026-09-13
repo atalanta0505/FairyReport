@@ -326,6 +326,26 @@ def test_normalize_chapter_markdown_heading_separation_and_skeleton():
     raw5 = "### 1.1.3 建设内容\n本项目建设内容包含泵站与涵闸。"
     assert normalize_chapter_markdown(raw5) == "### 1.1.3 建设内容\n\n本项目建设内容包含泵站与涵闸。"
 
+    # 6. V2-T47: 引用标记行内紧随融合（消除孤立换行）
+    raw6 = "根据发改委产业指导目录。\n\n【源:产业目录.docx】\n本项目属于国家鼓励类投资项目。"
+    res6 = normalize_chapter_markdown(raw6)
+    assert "【源:产业目录.docx】。" in res6
+    assert "\n\n【源:产业目录.docx】" not in res6
+
+    # 7. V2-T47: 节首孤立无标点引导短句自动补齐标点与正文段落融合
+    raw7 = (
+        "### 1.1.1 建设地点\n\n"
+        "本项目主要能源消耗品种为电力和天然气\n\n"
+        "项目总规划用地面积 120 亩，总建筑面积约 85000 平方米。"
+    )
+    res7 = normalize_chapter_markdown(raw7)
+    assert res7 == "### 1.1.1 建设地点\n\n本项目主要能源消耗品种为电力和天然气。项目总规划用地面积 120 亩，总建筑面积约 85000 平方米。"
+
+    # 8. V2-T47: 节首孤立单句缺少句末标点时自动补充句号
+    raw8 = "### 1.1.2 建设规模\n\n本项目年产各类高档皮革制品 500 万件\n\n### 1.1.3 建设周期"
+    res8 = normalize_chapter_markdown(raw8)
+    assert "### 1.1.2 建设规模\n\n本项目年产各类高档皮革制品 500 万件。\n\n### 1.1.3 建设周期" in res8
+
 
 # ── rag.query_rag 智能检索词提炼 ──
 def test_query_rag_composite_query(monkeypatch):
@@ -334,7 +354,7 @@ def test_query_rag_composite_query(monkeypatch):
 
     captured_web_query = []
 
-    def stub_search(q, max_results=5):
+    def stub_search(q, max_results=5, **kwargs):
         captured_web_query.append(q)
         return "【网:权威报告】\n  http://gov.cn\n  > 摘要"
 
