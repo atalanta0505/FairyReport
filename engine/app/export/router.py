@@ -64,7 +64,7 @@ def export_docx(req: ExportDocxRequest):
     out_path = os.path.join(_exports_dir(), fname)
 
     try:
-        md_to_docx(final_md, out_path, title=req.title)
+        md_to_docx(final_md, out_path, title=req.title, project=req.project)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"docx 生成失败：{e}")
 

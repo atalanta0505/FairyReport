@@ -990,5 +990,55 @@ describe("Markdown 解析与排版工具", () => {
       expect(normalized).toContain("### 1.1.2 建设规模\n\n本项目年产各类高档皮革制品 500 万件。\n\n### 1.1.3 建设周期");
     });
   });
+
+  describe("V2-T48: 双句号消除、长粘连节标题彻底拆分与段落行内引用不换行", () => {
+    it("彻底消除引用后双句号及各种重复标点（[1]。。 / 【源:...】。。）", () => {
+      const raw1 = "产值达60亿元。\n\n【源:政府工作报告.docx】。随着正源牧业二期建成投产。";
+      const norm1 = normalizeMarkdown(raw1);
+      expect(norm1).toContain("【源:政府工作报告.docx】。随着");
+      expect(norm1).not.toContain("。。");
+
+      const raw2 = "核心竞争力【源:利辛县2026年政府工作报告.docx】。。在市场环境方面。";
+      const norm2 = normalizeMarkdown(raw2);
+      expect(norm2).toContain("【源:利辛县2026年政府工作报告.docx】。在市场环境方面");
+      expect(norm2).not.toContain("。。");
+
+      const raw3 = "投资规模符合规划。[1]。。资金来源已落实。";
+      const norm3 = normalizeMarkdown(raw3);
+      expect(norm3).toBe("投资规模符合规划[1]。资金来源已落实。");
+      expect(norm3).not.toContain("。。");
+
+      const raw4 = "重复标点清理测试，，包含、、多个；；标点。。";
+      const norm4 = normalizeMarkdown(raw4);
+      expect(norm4).toBe("重复标点清理测试，包含、多个；标点。");
+    });
+
+    it("长粘连数字小节标题与正文彻底拆分（无空格无标点直接粘连）", () => {
+      const longGlued = "### 3.1.2 市场需求潜力国内皮革制品市场需求总体保持稳定，生态化、高品质皮化材料及成品革的市场潜力较为突出。我国是世界最大的皮革生产与消费国，皮革制品涵盖鞋面革、服装革、箱包革、沙发革等多个应用领域，年需求量长期保持在较高水平。";
+      const norm = normalizeMarkdown(longGlued);
+      expect(norm).toContain("### 3.1.2 市场需求潜力\n\n国内皮革制品市场需求总体保持稳定");
+
+      const parenGlued = "### 3.2.5 分期建设安排（如适用）项目采用一次性规划、分两期实施的安排。";
+      const normParen = normalizeMarkdown(parenGlued);
+      expect(normParen).toContain("### 3.2.5 分期建设安排（如适用）\n\n项目采用一次性规划");
+
+      const layoutGlued = "### 3.2.2 总体布局项目总体布局按照“生产流程顺畅、功能分区明确”的原则进行设计。";
+      const normLayout = normalizeMarkdown(layoutGlued);
+      expect(normLayout).toContain("### 3.2.2 总体布局\n\n项目总体布局按照");
+    });
+
+    it("markdownToHtml 普通段落内换行不插入 <br />，引用标签自然行内流式", () => {
+      const mdWithSoftBreak = "利辛县具有显著区位优势\n【源:规划报告.docx】。项目建设条件良好。";
+      const html = markdownToHtml(mdWithSoftBreak);
+      expect(html).not.toContain("<br />");
+      expect(html).toContain("利辛县具有显著区位优势<span class=\"inline-ref-tag type-material\"");
+      expect(html).toContain("【源:规划报告.docx】</span>。项目建设条件良好。");
+
+      // 显式双空格换行仍保留 <br />
+      const mdWithHardBreak = "第一行重点要求  \n第二行细则说明";
+      const htmlHard = markdownToHtml(mdWithHardBreak);
+      expect(htmlHard).toContain("第一行重点要求<br />第二行细则说明");
+    });
+  });
 });
 

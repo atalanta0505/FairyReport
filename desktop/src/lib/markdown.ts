@@ -206,6 +206,23 @@ export function extractOutlineHeadings(outlineMd: string): string[] {
   return Array.from(headingSet).sort((a, b) => b.length - a.length);
 }
 
+const REPORT_TITLE_KEYWORDS = [
+  "必要性", "可行性", "合理性", "衔接性", "符合性", "适当性", "适应性", "可靠性", "安全性", "经济性", "合规性",
+  "立项背景", "建设背景", "项目背景", "行业背景", "政策背景", "前期进展", "工作进展", "审批情况",
+  "建设条件", "选址方案", "规划选址", "建设规模", "产品方案", "技术方案", "工艺方案", "工程方案",
+  "总图布置", "设备方案", "节能评估", "环境保护", "环境影响", "水土保持", "劳动安全", "消防安全",
+  "组织机构", "劳动定员", "实施进度", "工程进度", "投资估算", "资金筹措", "财务评价", "经济评价",
+  "社会效益", "生态效益", "环境效益", "风险分析", "防范对策", "招标方案", "结论建议", "编制依据",
+  "生产或服务能力", "市场需求潜力", "产出合理性评价", "建设规模方案比选", "总体布局", "分期建设安排",
+  "建设标准", "质量标准要求", "需求现状调查", "功能定位与目标", "需求总量与结构", "主要建设内容",
+  "背景", "进展", "情况", "分析", "评价", "方案", "选址", "条件", "保障", "规模", "指标",
+  "概算", "估算", "预测", "规划", "目标", "措施", "对策", "建议", "结论", "论述", "研究",
+  "内容", "概况", "要求", "依据", "原则", "构想", "说明", "安排", "计划", "总结", "表",
+  "体系", "定位", "布局", "工艺", "设备", "工程", "效益", "风险", "基础", "现状", "需求",
+  "标准", "能力", "潜力", "水平", "时机", "特征", "参数", "比选", "模式", "机制",
+  "设计", "施工", "运营", "管理", "定员", "招标", "效果", "影响"
+];
+
 export function normalizeMarkdown(md: string, knownHeadings?: string[]): string {
   if (!md || typeof md !== "string") return "";
   let text = md.replace(/\r\n/g, "\n");
@@ -248,19 +265,84 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
     }
   );
 
-  // 7. 引用标记行内紧随融合（消除孤立换行，贴合在陈述句末尾）
+  // 6.1 多级数字节标题与正文粘连拆分（有空格或标点连接）
   text = text.replace(
-    /([，。；！？])\s*\n+\s*【(源|材料|标|标准|规|规程|网|网络)[:：]([^】]+)】/g,
+    /^(#{1,6}\s*)?(\d+(?:\.\d+)+)\s+([^\n.:：。—\-\u2014\u2013\s]{2,25}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$/gm,
+    (_match, prefix, numPart, hText, bodyText) => {
+      const p = prefix || "### ";
+      return `${p.trim()} ${numPart} ${hText}\n\n${bodyText}`;
+    }
+  );
+
+  // 6.2 多级数字节标题与正文粘连拆分（无空格无标点直接粘连）
+  text = text.replace(
+    /^(#{1,6}\s*)?(\d+(?:\.\d+)+)\s*([^\n]+)$/gm,
+    (match, prefix, numPart, restPart) => {
+      const rest = (restPart || "").trim();
+      let maxEnd = -1;
+      let startIdxMatch = -1;
+      for (const kw of REPORT_TITLE_KEYWORDS) {
+        const kwIdx = rest.indexOf(kw);
+        if (kwIdx >= 0 && kwIdx <= 25) {
+          let endPos = kwIdx + kw.length;
+          const parenMatch = rest.slice(endPos).match(/^(?:（[^）]+）|\([^)]+\))/);
+          if (parenMatch) {
+            endPos += parenMatch[0].length;
+          }
+          if (kwIdx === 0) {
+            if (endPos > maxEnd) {
+              maxEnd = endPos;
+              startIdxMatch = 0;
+            }
+          } else if (startIdxMatch !== 0 && endPos > maxEnd) {
+            maxEnd = endPos;
+          }
+        }
+      }
+      if (maxEnd > 0 && maxEnd < rest.length) {
+        const hText = rest.slice(0, maxEnd).trim();
+        const bodyText = rest.slice(maxEnd).replace(/^[:：。—\-\u2014\u2013，,\s\t]+/, "").trim();
+        // 若拆分出的后续正文以连词（与、及、和）开头，说明属于复合标题（如投资估算与资金筹措方案），不予拆分
+        if (/^[与及和]/.test(bodyText)) {
+          return match;
+        }
+        if (bodyText.length >= 4) {
+          const p = prefix || "### ";
+          return `${p.trim()} ${numPart} ${hText}\n\n${bodyText}`;
+        }
+      }
+      return match;
+    }
+  );
+
+  // 7. 引用标记行内紧随融合与标点去重（消除孤立换行，贴合在陈述句末尾，根除双标点）
+  // 7.1 句末标点与换行的引用标签（前置标点移动至引用后，若后置已带标点则合并为单标点）
+  text = text.replace(
+    /([，。；！？])\s*\n+\s*【(源|材料|标|标准|规|规程|网|网络)[:：]([^】]+)】\s*([，。；！？])?/g,
     "【$2:$3】$1"
   );
+  // 7.2 [Z] 或 [N] 引用同理
   text = text.replace(
-    /([，。；！？])\s*\n+\s*(\[Z(?:-[^\]]+)?\]|\[\d+\])/g,
+    /([，。；！？])\s*\n+\s*(\[Z(?:-[^\]]+)?\]|\[\d+\])\s*([，。；！？])?/g,
     "$2$1"
   );
+  // 7.3 普通文本换行后紧跟引用标记：排除标题行
   text = text.replace(
     /^(?!\s*#{1,6}\s)(.+[^\s\n#|>-])\s*\n+\s*【(源|材料|标|标准|规|规程|网|网络)[:：]([^】]+)】\s*$/gm,
     "$1【$2:$3】"
   );
+  // 7.4 消除紧随引用标记后或正文中的重复句号与标点（如 [1]。。 / 【源:...】。。 等）
+  text = text.replace(
+    /(【(?:源|材料|标|标准|规|规程|网|网络)[:：][^】]+】|\[\d+\]|\[Z(?:-[^\]]+)?\])\s*([。！？；!?,，、]){2,}/g,
+    "$1$2"
+  );
+  // 消除引用标记前后同时出现标点的情况（如 。【源:xxx】。 -> 【源:xxx】。）
+  text = text.replace(
+    /([，。；！？])\s*(【(?:源|材料|标|标准|规|规程|网|网络)[:：][^】]+】|\[\d+\]|\[Z(?:-[^\]]+)?\])\s*([，。；！？])/g,
+    "$2$3"
+  );
+  // 消除连续同类中文标点（双句号、双逗号、双分号等，保留……与——）
+  text = text.replace(/([。，、；])\1+/g, "$1");
 
   // 8. 节首孤立无标点引导短句补齐标点与正文段落融合
   const lines = text.split("\n");
@@ -702,7 +784,7 @@ export function markdownToHtml(
     }
 
     // 9. 段落 (普通连续文本行)
-    const paragraphLines: string[] = [];
+    const paragraphLines: { text: string; hasHardBreak: boolean }[] = [];
     while (
       i < lines.length &&
       lines[i].trim() &&
@@ -714,12 +796,34 @@ export function markdownToHtml(
       !/^(\d+[\.\)]|\(\d+\))\s+/.test(lines[i].trim()) &&
       !(isTableLine(lines[i].trim()) && i + 1 < lines.length && isTableSeparator(lines[i + 1].trim()))
     ) {
-      paragraphLines.push(lines[i].trim());
+      const rawLine = lines[i];
+      const hasHardBreak = / {2,}$|\\$|<br\s*\/?>$/i.test(rawLine);
+      paragraphLines.push({ text: rawLine.trim(), hasHardBreak });
       i++;
     }
 
     if (paragraphLines.length > 0) {
-      const pContent = paragraphLines.map((l) => formatInline(l)).join("<br />");
+      let pContent = "";
+      for (let j = 0; j < paragraphLines.length; j++) {
+        const curr = paragraphLines[j];
+        if (j === 0) {
+          pContent = formatInline(curr.text);
+        } else {
+          const prev = paragraphLines[j - 1];
+          // 仅在上一行显式以双空格、反斜杠或 <br> 结尾时插入 <br />
+          if (prev.hasHardBreak) {
+            pContent += "<br />" + formatInline(curr.text);
+          } else {
+            const prevChar = prev.text.slice(-1);
+            const nextChar = curr.text.charAt(0);
+            if (/[a-zA-Z0-9]/.test(prevChar) && /[a-zA-Z0-9]/.test(nextChar)) {
+              pContent += " " + formatInline(curr.text);
+            } else {
+              pContent += formatInline(curr.text);
+            }
+          }
+        }
+      }
       htmlParts.push(`<p>${pContent}</p>`);
     }
   }

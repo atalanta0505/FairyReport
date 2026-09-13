@@ -313,6 +313,10 @@ def global_assign_ref_numbers(full_body: str) -> tuple:
     for num in range(1, len(seen) + 1):
         text = text.replace(f"\x00REF_{num}\x00", f"[{num}]")
 
+    # 防御性清洗：消除编号替换后可能留存的重复句号与标点（如 [1]。。 / [1]、、 等）
+    text = re.sub(r'(\[\d+\])\s*([。！？；!?,，、]){2,}', r'\1\2', text)
+    text = re.sub(r'([。，、；])\1+', r'\1', text)
+
     return text, numbering
 
 

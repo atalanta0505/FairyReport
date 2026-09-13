@@ -1,7 +1,11 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import * as engineApi from "../lib/engineApi";
-import { extractIssueCandidateKeys } from "../lib/markdown";
+import {
+  extractIssueCandidateKeys,
+  extractOutlineHeadings,
+  normalizeMarkdown,
+} from "../lib/markdown";
 import type {
   ChapterInfo,
   GenericStatus,
@@ -1170,6 +1174,16 @@ export const useProjectStore = defineStore("project", () => {
           chapterStatuses.value[seq] = "completed";
           currentWritingSeq.value = null;
           activeStopWriting = null;
+
+          // 规范化清洗完成的章节文本，消除潜在的标题粘连、双标点与格式瑕疵
+          const rawText = chapters.value[seq] || "";
+          const known = extractOutlineHeadings(outlineMd.value);
+          const normalized = normalizeMarkdown(rawText, known);
+          chapters.value = {
+            ...chapters.value,
+            [seq]: normalized,
+          };
+
           if (targetName) {
             saveChaptersToLocal(targetName, chapters.value);
             try {

@@ -392,4 +392,53 @@ def test_export_mermaid_flow_chart_to_table(client):
     assert "5000m³ 高位清水储罐" in all_table_text
 
 
+def test_docx_glued_heading_decoupling_and_double_period_cleanup(client, tmp_path):
+    """V2-T48 验证：导出 docx 自动解耦长粘连节标题，Heading 样式仅含纯标题，根除双句号。"""
+    from engine.app.export.docx_builder import _split_heading_and_body, md_to_docx
+    from docx import Document
+
+    # 1. 单元函数验证 _split_heading_and_body
+    h1, b1 = _split_heading_and_body(
+        "3.1.2 市场需求潜力国内皮革制品市场需求总体保持稳定，生态化、高品质皮化材料及成品革的市场潜力较为突出。",
+        ["3.1.2 市场需求潜力", "市场需求潜力"],
+    )
+    assert h1 == "3.1.2 市场需求潜力"
+    assert b1.startswith("国内皮革制品市场需求总体保持稳定")
+
+    h2, b2 = _split_heading_and_body(
+        "3.2.2 总体布局项目总体布局按照“生产流程顺畅、功能分区明确”的原则进行规划设计。",
+        None,
+    )
+    assert h2 == "3.2.2 总体布局"
+    assert b2.startswith("项目总体布局按照")
+
+    # 2. 端到端导出验证
+    md_content = (
+        "# 第三章 项目需求分析与产出方案\n\n"
+        "## 3.1 需求分析\n\n"
+        "### 3.1.2 市场需求潜力国内皮革制品市场需求总体保持稳定，生态化、高品质皮化材料及成品革的市场潜力较为突出。我国是世界最大的皮革生产与消费国【源:市场报告.docx】。。年需求量长期保持在较高水平。\n\n"
+        "### 3.2.2 总体布局项目总体布局按照“生产流程顺畅、功能分区明确、物料流向合理、环保设施集中”的原则进行规划设计。厂区分为原料皮库区、湿加工车间区等七个功能区。\n"
+    )
+
+    out_file = str(tmp_path / "decoupled_test.docx")
+    md_to_docx(md_content, out_file, title="生态皮革加工项目可研报告")
+    assert os.path.exists(out_file)
+
+    doc = Document(out_file)
+    headings = [p.text for p in doc.paragraphs if p.style.name.startswith("Heading")]
+    assert "3.1.2 市场需求潜力" in headings
+    assert "3.2.2 总体布局" in headings
+    # 验证 Heading 样式中绝不包含粘连的长句正文
+    for h in headings:
+        assert len(h) < 40, f"Heading 过长污染目录: {h}"
+        assert "国内皮革制品" not in h
+        assert "原则进行规划设计" not in h
+
+    # 验证全文无双句号
+    full_text = " ".join(p.text for p in doc.paragraphs)
+    assert "。。" not in full_text
+    assert "【源:市场报告.docx】。年需求量" in full_text
+
+
+
 

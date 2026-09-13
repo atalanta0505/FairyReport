@@ -92,12 +92,45 @@ def _init_document_styles(doc: Document):
     normal_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
 
-def md_to_docx(md_content: str, output_path: str, title: str = "") -> str:
+def md_to_docx(
+    md_content: str,
+    output_path: str,
+    title: str = "",
+    skeleton: str = "",
+    project: str = "",
+) -> str:
     """把 Markdown 内容转为符合出版级排版规范的 Word 文档。
 
     title 非空时在开头插入报告总标题（Level 0 / Title 样式）。
+    支持 skeleton 大纲骨架或 project 加载大纲，彻底消除节标题与正文粘连。
     """
-    md_content = normalize_chapter_markdown(md_content)
+    if not skeleton and project:
+        try:
+            from ..config import settings
+            p = settings.project_dir(project) / "outline.json"
+            if p.is_file():
+                import json
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    skeleton = data.get("outline_md", "")
+        except Exception:
+            pass
+
+    known_headings = []
+    if skeleton:
+        for line_s in skeleton.split("\n"):
+            line_s = line_s.strip()
+            m = re.match(r'^#{1,6}\s+(.+)$', line_s)
+            if m:
+                h = m.group(1).strip()
+                if h:
+                    known_headings.append(h)
+                    no_prefix = re.sub(r'^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*', '', h).strip()
+                    if no_prefix:
+                        known_headings.append(no_prefix)
+        known_headings.sort(key=len, reverse=True)
+
+    md_content = normalize_chapter_markdown(md_content, skeleton=skeleton)
 
     doc = Document()
     _init_document_styles(doc)
@@ -183,10 +216,13 @@ def md_to_docx(md_content: str, output_path: str, title: str = "") -> str:
                 i = j
                 continue
 
-        # ── 标题检测 ──
+        # ── 标题检测与正文粘连解耦防御 ──
         level, heading_text, is_heading = _parse_md_line(line)
         if is_heading:
-            _add_heading(doc, heading_text, level=level)
+            real_heading, rest_body = _split_heading_and_body(heading_text, known_headings)
+            _add_heading(doc, real_heading, level=level)
+            if rest_body:
+                _add_formatted_paragraph(doc, rest_body)
             i += 1
             continue
 
@@ -842,6 +878,68 @@ def _parse_inline_formatting(text: str) -> list:
     return result if result else [(text, False, False)]
 
 
+_BODY_STARTERS = (
+    "本项目", "项目", "本工程", "工程", "本报告",
+    "从宏观", "从中观", "从微观", "从区域", "从空间", "从规划", "从技术", "从经济", "从环境",
+    "截至", "目前", "当前", "根据", "按照", "依据", "随着", "调查", "结合", "经", "为",
+    "在宏观", "在中观", "在微观", "在产业", "在规划", "在政策", "在土地", "在资源", "在生态", "在环境", "在就业", "在市场", "在乡村", "在绿色",
+    "国内", "省内", "县域"
+)
+
+
+def _split_heading_and_body(heading_text: str, known_headings: list = None) -> tuple:
+    """严格解耦标题与可能粘连的正文内容：
+    返回 (pure_heading, remaining_body_text)。
+    若无粘连，remaining_body_text 为空。
+    """
+    text = heading_text.strip()
+    if not text:
+        return "", ""
+
+    # 1. 优先根据已知大纲标题库高精度匹配
+    if known_headings:
+        for kh in known_headings:
+            if not kh or not isinstance(kh, str):
+                continue
+            kh_escaped = re.escape(kh)
+            m = re.match(rf'^((?:\d+(?:\.\d+)*\s+)?{kh_escaped})\s*([:：，。—\-\s]*)(.*)$', text)
+            if m:
+                h_part = m.group(1).strip()
+                rest = m.group(3).strip()
+                if rest:
+                    return h_part, rest
+
+    # 2. 若长度 <= 35 且不包含句子标点，判定为纯标题
+    if len(text) <= 35 and not re.search(r'[，。；！？]', text):
+        return text, ""
+
+    # 3. 启发式防御：基于多级数字编号及标点/正文首句特征解耦
+    num_m = re.match(r'^(\d+(?:\.\d+)*\s+)?(.*)$', text)
+    if num_m:
+        num_prefix = num_m.group(1) or ""
+        rest_title = num_m.group(2).strip()
+
+        # 3.1 若有冒号/句号/破折号
+        p_split = re.split(r'[:：。—\-]\s*', rest_title, maxsplit=1)
+        if len(p_split) == 2 and 2 <= len(p_split[0]) <= 30:
+            return f"{num_prefix}{p_split[0]}".strip(), p_split[1].strip()
+
+        # 3.2 若包含正文起始主体词
+        for starter in _BODY_STARTERS:
+            idx = rest_title.find(starter)
+            if 2 <= idx <= 30:
+                h = rest_title[:idx].strip()
+                b = rest_title[idx:].strip()
+                return f"{num_prefix}{h}".strip(), b
+
+        # 3.3 截断至首个逗号前（若逗号前在合理标题长度内）
+        comma_idx = rest_title.find("，")
+        if comma_idx != -1 and 2 <= comma_idx <= 25:
+            return f"{num_prefix}{rest_title[:comma_idx]}".strip(), rest_title[comma_idx + 1:].strip()
+
+    return text, ""
+
+
 def _parse_md_line(line: str):
     """解析 Markdown 行为 (level, text, is_heading)。"""
     stripped = line.strip()
@@ -942,7 +1040,21 @@ def build_merged_md(chapters: dict, include_refs: bool = True, project: str = ""
         if content:
             body_parts.append(_strip_ref_section(content))
     full_body = "\n\n".join(body_parts)
-    full_body = normalize_chapter_markdown(full_body)
+
+    skeleton = ""
+    if project:
+        try:
+            from ..config import settings
+            p = settings.project_dir(project) / "outline.json"
+            if p.is_file():
+                import json
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    skeleton = data.get("outline_md", "")
+        except Exception:
+            pass
+
+    full_body = normalize_chapter_markdown(full_body, skeleton=skeleton)
 
     if not include_refs:
         return full_body

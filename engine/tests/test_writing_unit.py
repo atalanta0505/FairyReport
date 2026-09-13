@@ -346,6 +346,39 @@ def test_normalize_chapter_markdown_heading_separation_and_skeleton():
     res8 = normalize_chapter_markdown(raw8)
     assert "### 1.1.2 建设规模\n\n本项目年产各类高档皮革制品 500 万件。\n\n### 1.1.3 建设周期" in res8
 
+    # 9. V2-T48: 彻底消除引用后双句号及各种重复标点（[1]。。 / 【源:...】。。）
+    raw9_1 = "产值达60亿元。\n\n【源:政府工作报告.docx】。随着正源牧业二期建成投产。"
+    res9_1 = normalize_chapter_markdown(raw9_1)
+    assert "【源:政府工作报告.docx】。随着" in res9_1
+    assert "。。" not in res9_1
+
+    raw9_2 = "核心竞争力【源:利辛县2026年政府工作报告.docx】。。在市场环境方面。"
+    res9_2 = normalize_chapter_markdown(raw9_2)
+    assert "【源:利辛县2026年政府工作报告.docx】。在市场环境方面" in res9_2
+    assert "。。" not in res9_2
+
+    raw9_3 = "投资规模符合规划。[1]。。资金来源已落实。"
+    res9_3 = normalize_chapter_markdown(raw9_3)
+    assert "投资规模符合规划[1]。资金来源已落实。" in res9_3
+    assert "。。" not in res9_3
+
+    raw9_4 = "重复标点清理测试，，包含、、多个；；标点。。"
+    res9_4 = normalize_chapter_markdown(raw9_4)
+    assert res9_4 == "重复标点清理测试，包含、多个；标点。"
+
+    # 10. V2-T48: 长粘连数字小节标题与正文彻底拆分
+    long_glued = "### 3.1.2 市场需求潜力国内皮革制品市场需求总体保持稳定，生态化、高品质皮化材料及成品革的市场潜力较为突出。我国是世界最大的皮革生产与消费国，皮革制品涵盖鞋面革、服装革、箱包革、沙发革等多个应用领域，年需求量长期保持在较高水平。"
+    res10 = normalize_chapter_markdown(long_glued)
+    assert "### 3.1.2 市场需求潜力\n\n国内皮革制品市场需求总体保持稳定" in res10
+
+    paren_glued = "### 3.2.5 分期建设安排（如适用）项目采用一次性规划、分两期实施的安排。"
+    res_paren = normalize_chapter_markdown(paren_glued)
+    assert "### 3.2.5 分期建设安排（如适用）\n\n项目采用一次性规划" in res_paren
+
+    compound_title = "### 1.1.4 投资估算与资金筹措方案"
+    res_compound = normalize_chapter_markdown(compound_title)
+    assert res_compound == "### 1.1.4 投资估算与资金筹措方案"
+
 
 # ── rag.query_rag 智能检索词提炼 ──
 def test_query_rag_composite_query(monkeypatch):
