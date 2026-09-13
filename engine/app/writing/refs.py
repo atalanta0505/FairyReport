@@ -330,7 +330,12 @@ def generate_global_ref_list(global_refs: list, numbering: dict) -> str:
         key=lambda r: numbering.get(r.get("label", ""), 99999),
     )
 
-    lines = ["# 参考文献\n", "> 依据 GB/T 7714 信息与文献 参考文献著录规则 自动汇总排序\n"]
+    lines = [
+        "# 参考文献",
+        "",
+        "> 依据 GB/T 7714 信息与文献 参考文献著录规则 自动汇总排序",
+        "",
+    ]
 
     for r in sorted_refs:
         label = r.get("label", "")
@@ -349,5 +354,6 @@ def generate_global_ref_list(global_refs: list, numbering: dict) -> str:
         else:
             source_part = f" — 来源: {source}" if (source and source != name) else ""
             lines.append(f"[{n}] [项目资料] {name}{source_part}.")
+        lines.append("")
 
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).rstrip() + "\n"

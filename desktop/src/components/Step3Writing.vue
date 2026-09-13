@@ -2166,6 +2166,15 @@ function nextStep() {
   text-indent: 2em;
   text-align: justify;
 }
+.rich-rendered-editor :deep(p.ref-entry-line) {
+  margin: 4px 0 6px 0;
+  padding-left: 2em;
+  text-indent: -2em;
+  text-align: justify;
+  font-size: 10.5pt;
+  color: #334155;
+  line-height: 1.6;
+}
 .rich-rendered-editor :deep(strong) {
   font-weight: 600;
   color: #0f172a;

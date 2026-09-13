@@ -387,6 +387,17 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         return ""
     cleaned = text.replace("\r\n", "\n")
 
+    # 若文本包含独立的参考文献章（# 参考文献 或 ## 参考文献），将其彻底隔离
+    # 参考文献章由规范生成逻辑输出，绝不参与正文的断行消除、标点吸收与小节引导句融合
+    ref_marker_m = re.search(r'\n(?=#{1,2}\s+参考文献\b)', cleaned)
+    ref_section = ""
+    if ref_marker_m:
+        split_pos = ref_marker_m.start()
+        ref_section = cleaned[split_pos:]
+        cleaned = cleaned[:split_pos]
+    elif re.match(r'^#{1,2}\s+参考文献\b', cleaned):
+        return cleaned
+
     # 1. 在所有非换行符/非#紧邻的 #{1,6} 前强制补双换行符
     cleaned = re.sub(r'([^#\n])\s*(#{1,6}\s+)', r'\1\n\n\2', cleaned)
 
@@ -486,10 +497,10 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         lambda m: f"【{m.group(2)}:{m.group(3)}】{(m.group(1) or m.group(4) or '')}",
         cleaned,
     )
-    # 8.2 [Z] 或 [N] 引用同理
+    # 8.2 [Z] 或 [N] 引用同理：仅匹配陈述句末尾孤立换行的学术引用标记，严禁误吞以 [N] 开头的参考文献条目
     cleaned = re.sub(
-        r'([，。；！？])?\s*\n+\s*(\[Z(?:-[^\]]+)?\]|\[\d+\])\s*([，。；！？])?',
-        lambda m: f"{m.group(2)}{(m.group(1) or m.group(3) or '')}",
+        r'([，。；！？])\s*\n+\s*(\[Z(?:-[^\]]+)?\]|\[\d+\])(?!\s*\[)\s*([，。；！？])?',
+        r'\2\1',
         cleaned,
     )
     # 8.3 普通文本换行后紧跟引用标记：排除标题行
@@ -574,6 +585,9 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         return re.sub(r'\n{3,}', '\n\n', res)
 
     cleaned = _merge_lead_sentence(cleaned)
+
+    if ref_section:
+        return f"{cleaned.rstrip()}\n\n{ref_section.strip()}\n"
 
     return cleaned
 

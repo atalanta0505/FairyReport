@@ -1039,6 +1039,20 @@ describe("Markdown 解析与排版工具", () => {
       const htmlHard = markdownToHtml(mdWithHardBreak);
       expect(htmlHard).toContain("第一行重点要求<br />第二行细则说明");
     });
+
+    it("V2-T49: markdownToHtml 将参考文献条目逐行独立渲染为 ref-entry-line，不被段落吞并", () => {
+      const bibMd = `# 参考文献\n\n> 依据 GB/T 7714 自动汇总\n\n[1] [项目资料] 立项文件.docx.\n\n[2] [规程标准] GB 50016.\n`;
+      const html = markdownToHtml(bibMd);
+      expect(html).toContain('<p class="ref-entry-line">[1] [项目资料] 立项文件.docx.</p>');
+      expect(html).toContain('<p class="ref-entry-line">[2] [规程标准] GB 50016.</p>');
+      expect(html).toContain("<blockquote><p>依据 GB/T 7714 自动汇总</p></blockquote>");
+    });
+
+    it("V2-T49: normalizeMarkdown 严格隔离保护参考文献章，不消除条目间换行符", () => {
+      const fullDoc = `## 1.1 章节概述\n正文阐述[1]。\n\n# 参考文献\n\n> 依据 GB/T 7714 自动汇总\n\n[1] [项目资料] 报告.docx.\n\n[2] [规程标准] 标准.md.\n`;
+      const norm = normalizeMarkdown(fullDoc);
+      expect(norm).toContain("# 参考文献\n\n> 依据 GB/T 7714 自动汇总\n\n[1] [项目资料] 报告.docx.\n\n[2] [规程标准] 标准.md.");
+    });
   });
 });
 

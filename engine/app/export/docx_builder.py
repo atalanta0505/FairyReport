@@ -253,6 +253,15 @@ def md_to_docx(
             i += 1
             continue
 
+        # ── 参考文献条目检测（[1] ... 或 [2] ...）──
+        ref_match = re.match(r'^(\[\d+\])\s*(.*)', stripped)
+        if ref_match:
+            prefix = ref_match.group(1).strip()
+            item_text = ref_match.group(2).strip()
+            _add_ref_item(doc, prefix, item_text)
+            i += 1
+            continue
+
         # ── 普通正文段落（按空行合并连续行，符合标准 Markdown 段落规范）──
         if stripped:
             para_lines = [stripped]
@@ -269,6 +278,7 @@ def md_to_docx(
                     next_stripped.startswith('>') or
                     re.match(r'^[-*]\s+', next_stripped) or
                     re.match(r'^\d+[\.、]\s+', next_stripped) or
+                    re.match(r'^\[\d+\]\s*', next_stripped) or
                     next_stripped.startswith('\x00LATEX_DISPLAY_')
                 ):
                     break
@@ -803,6 +813,42 @@ def _add_numbered_item(doc: Document, prefix: str, text: str):
                 )
 
 
+def _add_ref_item(doc: Document, prefix: str, text: str):
+    """添加符合 GB/T 7714 出版级规范的参考文献条目：
+    悬挂缩进 2 字符，仿宋 10.5pt（五号），1.3 倍行距，段间微距，逐条独立成行。
+    """
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Pt(24)
+    p.paragraph_format.first_line_indent = Pt(-24)
+    p.paragraph_format.line_spacing = 1.3
+    p.paragraph_format.space_before = Pt(2)
+    p.paragraph_format.space_after = Pt(2)
+    p.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+    num_run = p.add_run(f"{prefix} ")
+    _format_run(num_run, font_name='Times New Roman', east_asia='仿宋', font_size=Pt(10.5), bold=True)
+
+    parts = _LATEX_INLINE.split(text)
+    for idx, part in enumerate(parts):
+        if idx % 2 == 1:
+            run = p.add_run(f"${part}$")
+            _format_run(run, font_name='Times New Roman', east_asia='仿宋', font_size=Pt(10.5), italic=True)
+        else:
+            segments = _parse_inline_formatting(part)
+            for seg_text, is_bold, is_italic in segments:
+                if not seg_text:
+                    continue
+                run = p.add_run(seg_text)
+                _format_run(
+                    run,
+                    font_name='Times New Roman',
+                    east_asia='仿宋',
+                    font_size=Pt(10.5),
+                    bold=is_bold,
+                    italic=is_italic,
+                )
+
+
 def _add_blockquote(doc: Document, text: str):
     """添加出版级引用块：楷体 10.5pt，左右缩进 2 字符，淡灰边框与浅灰底纹。"""
     p = doc.add_paragraph()
@@ -969,7 +1015,12 @@ def format_ref_appendix(global_refs: list, numbering: dict) -> str:
         key=lambda r: numbering.get(r.get("label", ""), 99999),
     )
 
-    lines = ["# 参考文献\n", "> 依据 GB/T 7714 信息与文献 参考文献著录规则 自动汇总排序\n"]
+    lines = [
+        "# 参考文献",
+        "",
+        "> 依据 GB/T 7714 信息与文献 参考文献著录规则 自动汇总排序",
+        "",
+    ]
 
     for r in sorted_refs:
         label = r.get("label", "")
@@ -988,8 +1039,9 @@ def format_ref_appendix(global_refs: list, numbering: dict) -> str:
         else:
             source_part = f" — 来源: {source}" if (source and source != name) else ""
             lines.append(f"[{n}] [项目资料] {name}{source_part}.")
+        lines.append("")
 
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def generate_report_ref(chapters: dict, output_path: str, refs: list = None):

@@ -440,5 +440,35 @@ def test_docx_glued_heading_decoupling_and_double_period_cleanup(client, tmp_pat
     assert "【源:市场报告.docx】。年需求量" in full_text
 
 
+def test_bibliography_separate_lines(tmp_path):
+    """验证参考文献条目在 Word 导出中逐条独立成段，悬挂缩进排版，绝不糊在一起。"""
+    from docx.shared import Pt
+    from engine.app.export.docx_builder import md_to_docx
+    md_content = (
+        "# 项目报告\n\n"
+        "## 1.1 建设内容\n"
+        "本项目规划用地500亩[1]，遵循国家安全设计规范[2]。\n\n"
+        "# 参考文献\n\n"
+        "> 依据 GB/T 7714 信息与文献 参考文献著录规则 自动汇总排序\n\n"
+        "[1] [项目资料] 立项批复文件.docx.\n\n"
+        "[2] [规程标准] GB 50016—2014 建筑设计防火规范.\n\n"
+        "[3] [联网检索] 国家生态部技术指引. 访问网址: https://mee.gov.cn/doc\n"
+    )
+    out_file = str(tmp_path / "bib_test.docx")
+    md_to_docx(md_content, out_file, title="报告测试")
+    assert os.path.exists(out_file)
 
+    doc = Document(out_file)
+    ref_paragraphs = [p for p in doc.paragraphs if p.text.startswith("[1]") or p.text.startswith("[2]") or p.text.startswith("[3]")]
+    assert len(ref_paragraphs) == 3, f"期望 3 条独立参考文献段落，实际获得 {len(ref_paragraphs)}"
 
+    # 验证各条目排版规范：悬挂缩进
+    for rp in ref_paragraphs:
+        assert rp.paragraph_format.left_indent == Pt(24)
+        assert rp.paragraph_format.first_line_indent == Pt(-24)
+        assert "依据 GB/T 7714" not in rp.text
+
+    # 验证引用块独立存在
+    quote_p = [p for p in doc.paragraphs if "依据 GB/T 7714" in p.text]
+    assert len(quote_p) == 1
+    assert "[1]" not in quote_p[0].text

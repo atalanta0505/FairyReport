@@ -227,6 +227,16 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
   if (!md || typeof md !== "string") return "";
   let text = md.replace(/\r\n/g, "\n");
 
+  // 若包含独立的参考文献章（# 参考文献 或 ## 参考文献），将其彻底隔离保护
+  const refMarker = text.search(/\n(?=#{1,2}\s+参考文献\b)/);
+  let refSection = "";
+  if (refMarker !== -1) {
+    refSection = text.slice(refMarker);
+    text = text.slice(0, refMarker);
+  } else if (/^#{1,2}\s+参考文献\b/.test(text)) {
+    return text;
+  }
+
   // 1. 核心：在所有非换行符/非#紧邻的 #{1,6}\s+ 前面强制补双换行符
   text = text.replace(/([^#\n])\s*(#{1,6}\s+)/g, "$1\n\n$2");
 
@@ -321,9 +331,9 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
     /([，。；！？])\s*\n+\s*【(源|材料|标|标准|规|规程|网|网络)[:：]([^】]+)】\s*([，。；！？])?/g,
     "【$2:$3】$1"
   );
-  // 7.2 [Z] 或 [N] 引用同理
+  // 7.2 [Z] 或 [N] 引用同理：仅匹配陈述句末尾孤立换行的学术引用标记，严禁误吞以 [N] 开头的参考文献条目
   text = text.replace(
-    /([，。；！？])\s*\n+\s*(\[Z(?:-[^\]]+)?\]|\[\d+\])\s*([，。；！？])?/g,
+    /([，。；！？])\s*\n+\s*(\[Z(?:-[^\]]+)?\]|\[\d+\])(?!\s*\[)\s*([，。；！？])?/g,
     "$2$1"
   );
   // 7.3 普通文本换行后紧跟引用标记：排除标题行
@@ -409,7 +419,11 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
   }
 
   const res = newLines.join("\n");
-  return res.replace(/\n{3,}/g, "\n\n");
+  const cleaned = res.replace(/\n{3,}/g, "\n\n");
+  if (refSection) {
+    return `${cleaned.trimEnd()}\n\n${refSection.trim()}\n`;
+  }
+  return cleaned;
 }
 
 /**
@@ -783,6 +797,19 @@ export function markdownToHtml(
       continue;
     }
 
+    // 8.1 参考文献条目列表 ([1] item, [2] item) — 逐条独立显示，悬挂缩进
+    if (/^\[\d+\]\s+/.test(trimmed)) {
+      const refItems: string[] = [];
+      while (i < lines.length && /^\[\d+\]\s+/.test(lines[i].trim())) {
+        refItems.push(lines[i].trim());
+        i++;
+      }
+      for (const item of refItems) {
+        htmlParts.push(`<p class="ref-entry-line">${formatInline(item)}</p>`);
+      }
+      continue;
+    }
+
     // 9. 段落 (普通连续文本行)
     const paragraphLines: { text: string; hasHardBreak: boolean }[] = [];
     while (
@@ -794,6 +821,7 @@ export function markdownToHtml(
       !/^(\*{3,}|-{3,}|_{3,})$/.test(lines[i].trim()) &&
       !/^[\*\-\+]\s+/.test(lines[i].trim()) &&
       !/^(\d+[\.\)]|\(\d+\))\s+/.test(lines[i].trim()) &&
+      !/^\[\d+\]\s+/.test(lines[i].trim()) &&
       !(isTableLine(lines[i].trim()) && i + 1 < lines.length && isTableSeparator(lines[i + 1].trim()))
     ) {
       const rawLine = lines[i];
@@ -1436,7 +1464,8 @@ export function generateBibliographySection(refEntries: GlobalRefEntry[]): strin
     } else {
       lines.push(`[${item.number}] [项目资料] ${item.title}.`);
     }
+    lines.push("");
   }
 
-  return lines.join("\n") + "\n";
+  return lines.join("\n").trimEnd() + "\n";
 }
