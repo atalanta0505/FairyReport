@@ -19,6 +19,7 @@ export interface EngineDeps {
   spawnProcess: (args: string[], cwd: string) => Promise<EngineChild>;
   fetcher: (url: string) => Promise<Response>;
   sleep: (ms: number) => Promise<void>;
+  maxAttempts?: number;
 }
 
 export interface EngineHandle {
@@ -61,7 +62,8 @@ export async function pollHealth(
 ): Promise<void> {
   const fetcher = deps?.fetcher ?? pluginFetch;
   const sleep = deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  for (let i = 0; i < ENGINE_HEALTH_MAX_ATTEMPTS; i++) {
+  const maxAttempts = deps?.maxAttempts ?? ENGINE_HEALTH_MAX_ATTEMPTS;
+  for (let i = 0; i < maxAttempts; i++) {
     try {
       const resp = await fetcher(`${baseUrl}/health`);
       if (resp.ok) return;

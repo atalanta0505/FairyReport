@@ -138,14 +138,20 @@ async function onLogout() {
           设置
         </button>
 
-        <span class="engine-dot" :class="engine.status">
+        <span
+          class="engine-dot"
+          :class="engine.status"
+          style="cursor: pointer"
+          title="点击进入设置配置引擎地址"
+          @click="view = 'settings'"
+        >
           {{
             engine.status === "healthy"
-              ? "引擎就绪"
+              ? (engine.isRemote ? "云端就绪" : "引擎就绪")
               : engine.status === "starting"
               ? "启动中…"
               : engine.status === "error"
-              ? "引擎异常"
+              ? "引擎未连接"
               : "未启动"
           }}
         </span>
@@ -157,6 +163,11 @@ async function onLogout() {
 
     <!-- 主视口内容 -->
     <main ref="mainContentRef" class="main-content">
+      <div v-if="view === 'wizard' && engine.status === 'error'" class="engine-alert-bar">
+        <span>⚠️ 引擎未就绪：请确保云服务器 Docker 容器已启动，并在「设置」中填入引擎地址（如 http://IP:8000）。</span>
+        <button class="alert-btn" @click="view = 'settings'">前往配置</button>
+      </div>
+
       <div v-if="view === 'wizard'" class="wizard-content">
         <!-- 步骤 1：项目与资料管理 -->
         <Step1Project v-show="projectStore.currentStep === 1" />
@@ -322,6 +333,30 @@ async function onLogout() {
 .engine-dot.error {
   background: #fee2e2;
   color: #dc2626;
+}
+.engine-alert-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fffbeb;
+  border-bottom: 1px solid #fef3c7;
+  padding: 10px 20px;
+  color: #b45309;
+  font-size: 13px;
+  font-weight: 500;
+}
+.alert-btn {
+  padding: 4px 12px;
+  background: #f59e0b;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.alert-btn:hover {
+  background: #d97706;
 }
 .engine-dot.idle {
   background: #f1f5f9;

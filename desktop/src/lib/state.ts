@@ -11,6 +11,7 @@ export interface PersistedState {
   token?: string;
   email?: string;
   serverUrl?: string;
+  engineUrl?: string;
   llmKey?: string;
   llmBaseUrl?: string;
   llmModel?: string;

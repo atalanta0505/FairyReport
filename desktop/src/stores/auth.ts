@@ -25,11 +25,17 @@ export const useAuthStore = defineStore("auth", () => {
     await writeState({ token: token.value, email: email.value });
   }
 
+  async function loginAsDemo() {
+    token.value = "demo-access-token";
+    email.value = "demo@fairyreport.com";
+    await writeState({ token: token.value, email: email.value });
+  }
+
   async function logout() {
     token.value = "";
     email.value = "";
     await writeState({ token: "", email: "" });
   }
 
-  return { token, email, isLoggedIn, load, login, logout };
+  return { token, email, isLoggedIn, load, login, logout, loginAsDemo };
 });

@@ -74,6 +74,10 @@ async function onLogin() {
     loading.value = false;
   }
 }
+
+async function onDemoLogin() {
+  await auth.loginAsDemo();
+}
 </script>
 
 <template>
@@ -111,6 +115,14 @@ async function onLogin() {
 
       <button class="primary" :disabled="loading" @click="tab === 'login' ? onLogin() : onRegister()">
         {{ loading ? "处理中…" : tab === "login" ? "登录" : "注册并登录" }}
+      </button>
+
+      <div class="demo-divider">
+        <span>或</span>
+      </div>
+
+      <button class="demo-btn" @click="onDemoLogin">
+        🎯 快捷演示体验（免登录直接进入）
       </button>
     </div>
   </div>
@@ -211,5 +223,37 @@ async function onLogin() {
 }
 .primary:disabled {
   background: #9db7ff;
+}
+.demo-divider {
+  display: flex;
+  align-items: center;
+  margin: 16px 0 12px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.demo-divider::before,
+.demo-divider::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px dashed #cbd5e1;
+}
+.demo-divider span {
+  padding: 0 10px;
+}
+.demo-btn {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #10b981;
+  border-radius: 6px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.demo-btn:hover {
+  background: #d1fae5;
+  border-color: #059669;
 }
 </style>

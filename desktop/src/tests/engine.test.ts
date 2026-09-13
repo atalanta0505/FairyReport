@@ -41,6 +41,15 @@ describe("pollHealth", () => {
     ).rejects.toThrow("引擎健康检查超时");
     expect(fetcher).toHaveBeenCalledTimes(ENGINE_HEALTH_MAX_ATTEMPTS);
   });
+
+  it("支持自定义 maxAttempts 快速超时", async () => {
+    const fetcher = vi.fn().mockRejectedValue(new Error("down"));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      pollHealth("http://127.0.0.1:8001", { fetcher, sleep, maxAttempts: 3 }),
+    ).rejects.toThrow("引擎健康检查超时");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("startEngine", () => {
