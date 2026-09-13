@@ -16,7 +16,17 @@ from .materials.router import router as materials_router
 from .projects.router import router as projects_router
 from .writing.router import router as writing_router
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="FairyReport Engine", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(projects_router)
 app.include_router(materials_router)
@@ -34,13 +44,17 @@ def health():
 
 
 def main() -> None:
-    """本机启动（仅 127.0.0.1）。"""
+    """启动服务。"""
+    import os
     import uvicorn
+
+    host = os.environ.get("HOST", settings.host)
+    port = int(os.environ.get("PORT", str(settings.port)))
 
     uvicorn.run(
         "engine.app.main:app",
-        host=settings.host,  # 仅 127.0.0.1
-        port=settings.port,
+        host=host,
+        port=port,
         reload=False,
     )
 

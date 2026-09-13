@@ -50,6 +50,7 @@ desktop.ini
 # Environment variables
 .env
 .env.*
+!.env.example
 
 # FairyReport runtime data (projects, vector DBs, generated reports)
 data/
