@@ -223,7 +223,7 @@ describe("engineApi 基础接口", () => {
     );
   });
 
-  it("getTemplates: 获取 14 类模板列表", async () => {
+  it("getTemplates: 获取 15 类模板列表", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse([
         { report_type: "可行性研究报告", total_words_max: 50000, notes: "标准模板" },
@@ -605,7 +605,7 @@ describe("Pinia useProjectStore", () => {
     expect(store.materials[0].filename).toBe("scanned.md");
   });
 
-  it("loadTemplates: 加载 14 类模板并保留/更新 reportType", async () => {
+  it("loadTemplates: 加载 15 类模板并保留/更新 reportType", async () => {
     const store = useProjectStore();
 
     mockFetch.mockResolvedValue(

@@ -12,6 +12,7 @@ import sys
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..config import settings
@@ -69,7 +70,7 @@ def export_docx(req: ExportDocxRequest):
         raise HTTPException(status_code=500, detail=f"docx 生成失败：{e}")
 
     size = os.path.getsize(out_path)
-    return {"path": out_path, "size_bytes": size}
+    return {"path": out_path, "size_bytes": size, "filename": fname}
 
 
 class ExportMdRequest(BaseModel):
@@ -109,7 +110,21 @@ def export_md(req: ExportMdRequest):
         raise HTTPException(status_code=500, detail=f"md 导出失败：{e}")
 
     size = os.path.getsize(out_path)
-    return {"path": out_path, "size_bytes": size, "content": final_md}
+    return {"path": out_path, "size_bytes": size, "content": final_md, "filename": fname}
+
+
+@router.get("/download/{filename}")
+def download_export(filename: str):
+    """跨网下载导出的成果文件（docx/md）。"""
+    cleaned = os.path.basename(filename.strip())
+    fpath = os.path.join(_exports_dir(), cleaned)
+    if not os.path.isfile(fpath):
+        raise HTTPException(status_code=404, detail=f"成果文件不存在：{cleaned}")
+    return FileResponse(
+        fpath,
+        filename=cleaned,
+        media_type="application/octet-stream",
+    )
 
 
 class OpenExportFolderRequest(BaseModel):

@@ -3,6 +3,7 @@
 
 摄取：按本地文件路径解析-分块-向量化入库（重复摄取 upsert 覆盖）。
 """
+import base64
 import os
 import shutil
 
@@ -33,6 +34,15 @@ def _get_project(session: Session, name: str) -> models.Project:
 
 class IngestRequest(BaseModel):
     file_paths: list[str] = Field(..., min_length=1)
+
+
+class FileUploadItem(BaseModel):
+    filename: str
+    content_base64: str
+
+
+class FileUploadBatchRequest(BaseModel):
+    files: list[FileUploadItem] = Field(..., min_length=1)
 
 
 class IngestResult(BaseModel):
@@ -84,6 +94,7 @@ def _process_file(
         # 解析 → Markdown
         md_text = to_markdown(fpath)
         if not md_text or not md_text.strip():
+            err_msg = "未检测到可提取文字（纯图片扫描件，需先经 OCR 识别转文字）" if ext == ".pdf" else "转换后内容为空"
             return IngestResult(
                 source_id=filename,
                 filename=filename,
@@ -91,7 +102,7 @@ def _process_file(
                 chunk_count=0,
                 size_bytes=size_bytes,
                 status="error",
-                error="转换后内容为空",
+                error=err_msg,
             )
 
         # 分块
@@ -201,6 +212,45 @@ def ingest_materials(
             )
 
         res = _process_file(session, proj, store, embedder, fpath, copy_dest_dir=str(files_dir))
+        results.append(res)
+
+    return results
+
+
+@router.post("/upload", response_model=list[IngestResult])
+def upload_materials(
+    name: str,
+    body: FileUploadBatchRequest,
+    session: Session = Depends(db_module.get_db),
+):
+    """跨网上传资料文件并自动分块向量化入库（适配云端远程模式）。"""
+    proj = _get_project(session, name)
+    files_dir = settings.files_dir(name)
+    files_dir.mkdir(parents=True, exist_ok=True)
+    vector_dir = settings.vector_dir(name)
+    vector_dir.mkdir(parents=True, exist_ok=True)
+
+    store = ProjectVectorStore.get(name, vector_dir)
+    embedder = get_embedder()
+
+    results: list[IngestResult] = []
+    for item in body.files:
+        filename = os.path.basename(item.filename.strip())
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ALLOWED_EXTS:
+            raise HTTPException(
+                status_code=415, detail=f"不支持的扩展名：{ext}（仅支持 docx/xlsx/csv/md/txt）"
+            )
+        try:
+            content_bytes = base64.b64decode(item.content_base64)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Base64 解码失败: {e}")
+
+        dest_path = os.path.join(str(files_dir), filename)
+        with open(dest_path, "wb") as f:
+            f.write(content_bytes)
+
+        res = _process_file(session, proj, store, embedder, dest_path, copy_dest_dir=None)
         results.append(res)
 
     return results

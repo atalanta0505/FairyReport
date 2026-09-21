@@ -25,6 +25,8 @@ def to_markdown(file_path: str) -> str | None:
         return _convert_xlsx(file_path)
     if ext == ".csv":
         return _convert_csv(file_path)
+    if ext == ".pdf":
+        return _convert_pdf(file_path)
     if ext in (".txt", ".md"):
         text = _read_text(file_path)
         return text if (text and text.strip()) else None
@@ -238,3 +240,29 @@ def _convert_csv(file_path: str) -> str | None:
 
 def _esc_csv(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ").strip()
+
+
+# ── pdf ──
+def _convert_pdf(file_path: str) -> str | None:
+    """PDF -> Markdown：按页提取纯文本，保留分页标记。"""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(file_path)
+        parts: list[str] = []
+        fname = os.path.basename(file_path)
+        for i, page in enumerate(reader.pages):
+            try:
+                page_text = page.extract_text()
+            except Exception as pe:
+                _logger.debug("Extracting page %d of %s failed: %s", i + 1, file_path, pe)
+                continue
+            if page_text and page_text.strip():
+                parts.append(f"<!-- Page {i + 1} -->\n{page_text.strip()}")
+
+        if not parts:
+            _logger.warning("PDF 未能提取出有效文本（可能为纯图片扫描件）: %s", file_path)
+            return None
+        return f"# {fname}\n\n" + "\n\n".join(parts)
+    except Exception as e:
+        _logger.warning("解析 PDF 失败 %s: %s", file_path, e)
+        return None

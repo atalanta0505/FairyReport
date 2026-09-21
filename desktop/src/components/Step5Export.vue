@@ -226,6 +226,26 @@ async function handleOpenWebUrl(url?: string) {
     }
   }
 }
+
+// ── 下载成果文件至本地电脑（远程云端引擎模式） ──
+async function handleDownloadExport(filePath?: string) {
+  if (!engine.baseUrl || !filePath) return;
+  const downloadUrl = engineApi.getExportDownloadUrl(engine.baseUrl, filePath);
+  try {
+    const { open } = await import("@tauri-apps/plugin-shell");
+    await open(downloadUrl);
+    showMsg("📥 正在通过浏览器下载成果文件，请注意查看浏览器的下载目录！", "success");
+  } catch {
+    const a = document.createElement("a");
+    a.href = downloadUrl;
+    a.download = filePath.replace(/^.*[\\\/]/, "");
+    a.target = "_blank";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showMsg("📥 正在下载成果文件...", "success");
+  }
+}
 </script>
 
 <template>
@@ -318,7 +338,18 @@ async function handleOpenWebUrl(url?: string) {
               </div>
             </div>
             <div class="success-actions">
-              <button class="btn btn-secondary btn-sm" @click="openExportFolder(exportDocxResultPath)">
+              <button
+                v-if="engine.isRemote"
+                class="btn btn-primary btn-sm"
+                @click="handleDownloadExport(exportDocxResultPath)"
+              >
+                ⬇️ 下载 Word 报告到本地
+              </button>
+              <button
+                v-else
+                class="btn btn-secondary btn-sm"
+                @click="openExportFolder(exportDocxResultPath)"
+              >
                 📂 打开导出文件夹并选中文件
               </button>
             </div>
@@ -367,7 +398,18 @@ async function handleOpenWebUrl(url?: string) {
               </div>
             </div>
             <div class="success-actions">
-              <button class="btn btn-secondary btn-sm" @click="openExportFolder(exportMdResultPath)">
+              <button
+                v-if="engine.isRemote"
+                class="btn btn-primary btn-sm"
+                @click="handleDownloadExport(exportMdResultPath)"
+              >
+                ⬇️ 下载 Markdown 报告到本地
+              </button>
+              <button
+                v-else
+                class="btn btn-secondary btn-sm"
+                @click="openExportFolder(exportMdResultPath)"
+              >
                 📂 打开导出文件夹并选中文件
               </button>
             </div>

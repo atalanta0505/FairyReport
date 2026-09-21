@@ -82,6 +82,7 @@ REPORT_TYPES = [
     "政府和社会资本合作项目特许经营方案",
     "项目评估报告",
     "专题研究报告",
+    "智库决策专报与建言报告",
 ]
 
 # ═══════════════════════════════════════════════════════════════
@@ -102,6 +103,7 @@ TECH_ANALYSIS_CONDITIONAL_REPORT_TYPES = [
     "产业发展规划报告",
     "园区发展规划报告",
     "企业发展规划报告",
+    "智库决策专报与建言报告",
 ]
 
 # Chapter keywords that trigger technical analysis enhancement

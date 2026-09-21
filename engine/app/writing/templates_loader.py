@@ -19,6 +19,9 @@ from .prompts import (
 )
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
 class TemplatesNotInstalled(Exception):
     """通用知识包未安装，无法读取模板。"""
 
@@ -27,7 +30,7 @@ def _templates_dir() -> Path:
     """返回已安装通用包的 templates 目录；未装则抛异常。"""
     state = GenericStore._read_state()
     if not state or not state.get("version"):
-        raise TemplatesNotInstalled("通用知识包未安装，请先 /generic/update")
+        raise TemplatesNotInstalled("通用知识包未安装，请先从云端同步知识包")
     vdir = GenericStore._version_dir(state["version"])
     tdir = vdir / "templates"
     if not tdir.is_dir():
@@ -208,6 +211,6 @@ def require_installed() -> None:
     """显式要求通用包已安装；未装抛 TemplatesNotInstalled（路由映射 409）。"""
     state = GenericStore._read_state()
     if not state or not state.get("version"):
-        raise TemplatesNotInstalled("通用知识包未安装，请先 /generic/update")
+        raise TemplatesNotInstalled("通用知识包未安装，请先从云端同步知识包")
     if not GenericStore._version_dir(state["version"]).exists():
         raise TemplatesNotInstalled("通用知识包目录缺失")

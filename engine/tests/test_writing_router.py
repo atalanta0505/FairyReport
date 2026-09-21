@@ -318,15 +318,16 @@ def test_key_not_leaked_in_request_headers(client):
 
 
 # ── templates ──
-def test_list_templates_returns_14_types(client):
-    """未装通用包时也可获取 14 种报告类型及默认字数预算。"""
+def test_list_templates_returns_15_types(client):
+    """未装通用包时也可获取 15 种报告类型及默认字数预算。"""
     resp = client.get("/writing/templates")
     assert resp.status_code == 200
     items = resp.json()
-    assert len(items) == 14
+    assert len(items) == 15
     report_types = [it["report_type"] for it in items]
     assert "可行性研究报告" in report_types
     assert "产业发展规划报告" in report_types
+    assert "智库决策专报与建言报告" in report_types
     fe = next(it for it in items if it["report_type"] == "可行性研究报告")
     assert fe["total_words_max"] == 0
 
@@ -336,7 +337,7 @@ def test_list_templates_with_installed_pack(client, installed_pack):
     resp = client.get("/writing/templates")
     assert resp.status_code == 200
     items = resp.json()
-    assert len(items) == 14
+    assert len(items) == 15
     fe = next(it for it in items if it["report_type"] == "可行性研究报告")
     assert fe["total_words_max"] == 0
     assert "测试模板规范" in fe["notes"]

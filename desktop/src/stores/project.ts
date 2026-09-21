@@ -627,7 +627,34 @@ export const useProjectStore = defineStore("project", () => {
     ingesting.value = true;
     error.value = null;
     try {
-      const results = await engineApi.ingestMaterials(baseUrl, targetName, filePaths);
+      const isRemote = !baseUrl.includes("127.0.0.1") && !baseUrl.includes("localhost");
+      let results: IngestResult[];
+
+      if (isRemote) {
+        // 远程云端引擎：读取本地文件字节流转 Base64 后调用 upload 接口传输
+        const { invoke } = await import("@tauri-apps/api/core");
+        const uploadItems: engineApi.UploadFileItem[] = [];
+
+        for (const fpath of filePaths) {
+          const filename = fpath.replace(/^.*[\\\/]/, "");
+          const bytes = await invoke<number[] | Uint8Array>("read_file_binary", { path: fpath });
+          const u8 = new Uint8Array(bytes);
+          let binary = "";
+          const chunkSize = 8192;
+          for (let i = 0; i < u8.length; i += chunkSize) {
+            const sub = u8.subarray(i, i + chunkSize);
+            binary += String.fromCharCode.apply(null, sub as unknown as number[]);
+          }
+          const base64 = btoa(binary);
+          uploadItems.push({ filename, content_base64: base64 });
+        }
+
+        results = await engineApi.uploadMaterials(baseUrl, targetName, uploadItems);
+      } else {
+        // 本地引擎：直接传递本地路径
+        results = await engineApi.ingestMaterials(baseUrl, targetName, filePaths);
+      }
+
       await loadMaterials(baseUrl, targetName);
       return results;
     } catch (e) {

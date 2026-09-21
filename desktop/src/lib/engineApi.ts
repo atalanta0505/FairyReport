@@ -41,6 +41,11 @@ export interface IngestResult {
   error?: string | null;
 }
 
+export interface UploadFileItem {
+  filename: string;
+  content_base64: string;
+}
+
 export interface GenericStatus {
   installed: boolean;
   version?: string;
@@ -160,6 +165,22 @@ export async function ingestMaterials(
     method: "POST",
     body: JSON.stringify({ file_paths: filePaths }),
   });
+}
+
+/** 跨网上传资料文件（Base64 编码，适配云端远程模式） */
+export async function uploadMaterials(
+  baseUrl: string,
+  projectName: string,
+  files: UploadFileItem[],
+): Promise<IngestResult[]> {
+  return request<IngestResult[]>(
+    baseUrl,
+    `/projects/${encodeURIComponent(projectName)}/materials/upload`,
+    {
+      method: "POST",
+      body: JSON.stringify({ files }),
+    },
+  );
 }
 
 /** 扫描项目本地 files 目录并摄取资料 */
@@ -1304,8 +1325,8 @@ export interface ExportDocxRequest {
 export async function exportDocx(
   baseUrl: string,
   req: ExportDocxRequest,
-): Promise<{ path: string; size_bytes: number }> {
-  return request<{ path: string; size_bytes: number }>(
+): Promise<{ path: string; size_bytes: number; filename?: string }> {
+  return request<{ path: string; size_bytes: number; filename?: string }>(
     baseUrl,
     "/export/docx",
     {
@@ -1326,8 +1347,8 @@ export interface ExportMdRequest {
 export async function exportMd(
   baseUrl: string,
   req: ExportMdRequest,
-): Promise<{ path: string; size_bytes: number; content: string }> {
-  return request<{ path: string; size_bytes: number; content: string }>(
+): Promise<{ path: string; size_bytes: number; content: string; filename?: string }> {
+  return request<{ path: string; size_bytes: number; content: string; filename?: string }>(
     baseUrl,
     "/export/md",
     {
@@ -1335,6 +1356,13 @@ export async function exportMd(
       body: JSON.stringify(req),
     },
   );
+}
+
+/** 获取跨网导出成果下载链接（用于远程浏览器/客户端一键保存成果） */
+export function getExportDownloadUrl(baseUrl: string, filenameOrPath: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const cleanFname = filenameOrPath.replace(/^.*[\\\/]/, "");
+  return `${cleanBase}/export/download/${encodeURIComponent(cleanFname)}`;
 }
 
 export interface OpenExportFolderRequest {

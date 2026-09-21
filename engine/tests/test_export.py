@@ -472,3 +472,29 @@ def test_bibliography_separate_lines(tmp_path):
     quote_p = [p for p in doc.paragraphs if "依据 GB/T 7714" in p.text]
     assert len(quote_p) == 1
     assert "[1]" not in quote_p[0].text
+
+
+def test_export_docx_and_download(client):
+    """验证 docx 导出后返回 filename，并可通过 /export/download/{filename} 正确下载文件流。"""
+    res = client.post(
+        "/export/docx",
+        json={
+            "project": "download_test",
+            "title": "下载测试报告",
+            "chapters": {"1": "# 第一章\n\n正文测试内容。"},
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "filename" in data
+    assert data["filename"].endswith(".docx")
+    assert data["size_bytes"] > 0
+
+    # 测试通过 /export/download/{filename} 下载
+    dl_res = client.get(f"/export/download/{data['filename']}")
+    assert dl_res.status_code == 200
+    assert len(dl_res.content) == data["size_bytes"]
+
+    # 测试下载不存在的文件返回 404
+    bad_res = client.get("/export/download/nonexistent.docx")
+    assert bad_res.status_code == 404

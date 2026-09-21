@@ -14,6 +14,7 @@ SUPPORTED_EXTENSIONS = {
     ".csv": "csv",
     ".md": "markdown",
     ".txt": "text",
+    ".pdf": "pdf",
 }
 
 ALLOWED_EXTS = frozenset(SUPPORTED_EXTENSIONS.keys())

@@ -1326,8 +1326,8 @@ onUnmounted(() => {
               <div class="review-thought-card">
                 <div class="review-thought-header" @click="showReviewThoughtDetails = !showReviewThoughtDetails">
                   <div class="review-thought-title">
-                    <span class="review-thought-icon">🧠</span>
-                    <span>🧠 深度技术推演与专家质检过程 (纯中文) <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
+                    <span class="review-thought-icon">🔬</span>
+                    <span>专家深度质检与规程校核过程 (纯中文) <span v-if="projectStore.reviewProgress?.thoughtText">({{ projectStore.reviewProgress.thoughtText.length }} 字符)</span></span>
                     <span class="thinking-wave">
                       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                     </span>
@@ -1391,8 +1391,8 @@ onUnmounted(() => {
               <div class="review-thought-card">
                 <div class="review-thought-header" @click="showRevisionThoughtDetails = !showRevisionThoughtDetails">
                   <div class="review-thought-title">
-                    <span class="review-thought-icon">🧠</span>
-                    <span>🧠 AI 专家修订推演过程 (纯中文) <span v-if="projectStore.revisionProgress?.thoughtText">({{ projectStore.revisionProgress.thoughtText.length }} 字符)</span></span>
+                    <span class="review-thought-icon">⚡</span>
+                    <span>AI 专家智能修订推演过程 (纯中文) <span v-if="projectStore.revisionProgress?.thoughtText">({{ projectStore.revisionProgress.thoughtText.length }} 字符)</span></span>
                     <span class="thinking-wave">
                       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                     </span>

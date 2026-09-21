@@ -133,6 +133,18 @@ def test_status_not_installed_initially(client):
     assert client.get("/generic/status").json() == {"installed": False}
 
 
+
+def test_server_connect_timeout_graceful(client):
+    """服务器连接超时 → 转换为清晰的 504 错误提示。"""
+    def raise_timeout(req):
+        raise httpx.ConnectTimeout("Connect timeout", request=req)
+
+    set_transport(httpx.MockTransport(raise_timeout))
+    resp = _update(client)
+    assert resp.status_code == 504
+    assert "超时" in resp.json()["detail"]
+
+
 @pytest.fixture(autouse=True)
 def _reset_generic_state():
     """每用例前后清 GenericStore 缓存与传输层（client fixture 已重置目录）。"""

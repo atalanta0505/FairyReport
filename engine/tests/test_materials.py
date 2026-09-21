@@ -112,13 +112,27 @@ def test_ingest_nonexistent_path_returns_4xx(client):
 
 def test_ingest_unsupported_extension_returns_4xx(client, tmp_path):
     name = _make_project(client)
-    bad = tmp_path / "bad.pdf"
-    bad.write_text("not really a pdf", encoding="utf-8")
+    bad = tmp_path / "bad.bin"
+    bad.write_text("not a supported file", encoding="utf-8")
     resp = client.post(
         f"/projects/{name}/materials/ingest",
         json={"file_paths": [str(bad)]},
     )
     assert 400 <= resp.status_code < 500
+
+
+def test_ingest_pdf_success(client):
+    name = _make_project(client)
+    resp = client.post(
+        f"/projects/{name}/materials/ingest",
+        json={"file_paths": [fixture_path("sample.pdf")]},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["status"] == "ok"
+    assert data[0]["chunk_count"] > 0
+    assert data[0]["ext"] == ".pdf"
 
 
 def test_ingest_unknown_project_returns_404(client):
@@ -219,5 +233,40 @@ def test_ingest_empty_file_returns_error_result(client, tmp_path):
     assert len(results) == 1
     assert results[0]["status"] == "error"
     assert "内容为空" in results[0]["error"]
+
+
+def test_upload_materials_base64(client):
+    """跨网上传 Base64 文件摄取成功，分块数 > 0。"""
+    import base64
+    name = _make_project(client, "p_upload")
+    content = "# 虚拟工程资料\n\n本项目总投资1000万元，年产值2000万元。\n" * 10
+    b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+
+    resp = client.post(
+        f"/projects/{name}/materials/upload",
+        json={"files": [{"filename": "project_report.md", "content_base64": b64}]},
+    )
+    assert resp.status_code == 200
+    results = resp.json()
+    assert len(results) == 1
+    assert results[0]["status"] == "ok"
+    assert results[0]["filename"] == "project_report.md"
+    assert results[0]["chunk_count"] > 0
+
+    mats = client.get(f"/projects/{name}/materials").json()
+    assert len(mats) == 1
+    assert mats[0]["filename"] == "project_report.md"
+
+
+def test_upload_unsupported_extension_returns_415(client):
+    """上传非法后缀文件返回 415。"""
+    import base64
+    name = _make_project(client, "p_upload_bad")
+    b64 = base64.b64encode(b"malicious content").decode("ascii")
+    resp = client.post(
+        f"/projects/{name}/materials/upload",
+        json={"files": [{"filename": "evil.exe", "content_base64": b64}]},
+    )
+    assert resp.status_code == 415
 
 

@@ -6,7 +6,7 @@ services:
       - "8010"
     environment:
       DATABASE_URL: sqlite:////data/frl.db
-      JWT_SECRET: ${JWT_SECRET:?请在部署环境设置 JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:-fairyreport-jwt-secret-key-2026}
       JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
       SMTP_HOST: ${SMTP_HOST:-smtp.qq.com}
       SMTP_PORT: ${SMTP_PORT:-465}

@@ -38,15 +38,33 @@ class FastEmbedEmbedder:
             from fastembed import TextEmbedding
             from .config import settings
 
-            # 1. 优先使用仓库内预置或下载好的模型（100% 离线，毫秒级就绪）
-            repo_model_dir = Path(__file__).resolve().parent.parent.parent / "data" / "fastembed_models"
-            data_model_dir = Path(settings.engine_data_dir) / "models" / "fastembed"
+            import sys
 
             specific_path = None
-            if repo_model_dir.exists() and (repo_model_dir / "model_optimized.onnx").exists():
-                specific_path = str(repo_model_dir)
-            elif data_model_dir.exists() and (data_model_dir / "model_optimized.onnx").exists():
-                specific_path = str(data_model_dir)
+
+            # 0. 优先检测 PyInstaller 打包内置目录或同级目录
+            if getattr(sys, "frozen", False):
+                bundle_dir = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+                candidates = [
+                    bundle_dir / "fastembed_models",
+                    bundle_dir / "data" / "fastembed_models",
+                    Path(sys.executable).parent / "data" / "fastembed_models",
+                    Path(sys.executable).parent / "fastembed_models",
+                ]
+                for candidate in candidates:
+                    if candidate.exists() and (candidate / "model_optimized.onnx").exists():
+                        specific_path = str(candidate)
+                        break
+
+            # 1. 优先使用仓库内预置或下载好的模型（100% 离线，毫秒级就绪）
+            if not specific_path:
+                repo_model_dir = Path(__file__).resolve().parent.parent.parent / "data" / "fastembed_models"
+                data_model_dir = Path(settings.engine_data_dir) / "models" / "fastembed"
+
+                if repo_model_dir.exists() and (repo_model_dir / "model_optimized.onnx").exists():
+                    specific_path = str(repo_model_dir)
+                elif data_model_dir.exists() and (data_model_dir / "model_optimized.onnx").exists():
+                    specific_path = str(data_model_dir)
 
             if specific_path:
                 self._model = TextEmbedding(model_name=self._model_name, specific_model_path=specific_path)

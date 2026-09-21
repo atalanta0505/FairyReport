@@ -21,6 +21,7 @@ const STORAGE_KEY = "frl-desktop-state";
 const DEFAULT_STATE: PersistedState = {};
 
 let _cache: PersistedState | null = null;
+let _readPromise: Promise<PersistedState> | null = null;
 
 function isTauri(): boolean {
   return typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined";
@@ -28,22 +29,33 @@ function isTauri(): boolean {
 
 export async function readState(): Promise<PersistedState> {
   if (_cache) return { ..._cache };
-  let raw = "";
-  try {
-    if (isTauri()) {
-      raw = await invoke<string>("read_state");
-    } else {
-      raw = localStorage.getItem(STORAGE_KEY) || "";
+  if (_readPromise) return _readPromise;
+
+  _readPromise = (async () => {
+    let raw = "";
+    try {
+      if (isTauri()) {
+        raw = await invoke<string>("read_state");
+      } else {
+        raw = localStorage.getItem(STORAGE_KEY) || "";
+      }
+    } catch {
+      raw = "";
     }
-  } catch {
-    raw = "";
-  }
-  try {
-    _cache = raw ? { ...DEFAULT_STATE, ...(JSON.parse(raw) as PersistedState) } : { ...DEFAULT_STATE };
-  } catch {
-    _cache = { ...DEFAULT_STATE };
-  }
-  return { ..._cache };
+
+    const cleanRaw = (raw || "").replace(/^\uFEFF/, "").trim();
+    try {
+      _cache = cleanRaw ? { ...DEFAULT_STATE, ...(JSON.parse(cleanRaw) as PersistedState) } : { ...DEFAULT_STATE };
+    } catch (e) {
+      console.error("JSON.parse desktop-state failed:", e);
+      _cache = { ...DEFAULT_STATE };
+    } finally {
+      _readPromise = null;
+    }
+    return { ..._cache };
+  })();
+
+  return _readPromise;
 }
 
 export async function writeState(patch: Partial<PersistedState>): Promise<void> {

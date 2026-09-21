@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useSettingsStore, DEFAULT_SERVER_URL } from "../stores/settings";
+import { useSettingsStore, DEFAULT_SERVER_URL, DEFAULT_ENGINE_URL } from "../stores/settings";
 import { useEngineStore } from "../stores/engine";
 
 const settings = useSettingsStore();
@@ -20,18 +20,24 @@ function onResetServer() {
   settings.serverUrl = DEFAULT_SERVER_URL;
 }
 
+function onResetEngine() {
+  settings.engineUrl = DEFAULT_ENGINE_URL;
+}
+
 async function onTestEngine() {
   engineTestResult.value = "";
+  testingEngine.value = true;
   if (!settings.engineUrl || !settings.engineUrl.trim()) {
     try {
       await engine.start();
-      engineTestResult.value = "已切换为本地 Python 引擎并成功就绪！";
-    } catch {
-      engineTestResult.value = "本地未检测到 Python 引擎，请输入云服务器地址。";
+      engineTestResult.value = "✅ 已启动本地独立计算引擎并成功就绪！工程底稿 100% 本地封闭。";
+    } catch (err: any) {
+      engineTestResult.value = `❌ 本地引擎启动异常：${err?.message || err || "未检测到本地引擎"}`;
+    } finally {
+      testingEngine.value = false;
     }
     return;
   }
-  testingEngine.value = true;
   try {
     await engine.connectRemote(settings.engineUrl);
     engineTestResult.value = "✅ 云端引擎连接成功！服务正常就绪。";
@@ -50,13 +56,14 @@ async function onTestEngine() {
     <section class="group">
       <h3>核心引擎连接</h3>
       <div class="field">
-        <label>云端引擎服务地址（合伙人云服务器）</label>
+        <label>计算引擎服务地址</label>
         <div class="row">
           <input
             v-model="settings.engineUrl"
             type="text"
-            placeholder="留空为本地引擎，或填 http://<云服务器IP>:8000"
+            placeholder="默认留空（纯本地物理隔离引擎，资料 100% 不出机）"
           />
+          <button class="ghost" @click="onResetEngine">默认(本地)</button>
           <button class="ghost" :disabled="testingEngine" @click="onTestEngine">
             {{ testingEngine ? "测试中…" : "测试并连接" }}
           </button>
@@ -65,14 +72,14 @@ async function onTestEngine() {
           v-if="engineTestResult"
           class="field-hint"
           :class="{
-            ok: engineTestResult.includes('成功'),
+            ok: engineTestResult.includes('成功') || engineTestResult.includes('就绪'),
             err: engineTestResult.includes('失败') || engineTestResult.includes('未检测'),
           }"
         >
           {{ engineTestResult }}
         </p>
         <p class="field-desc">
-          💡 提示：在云服务器启动 Docker 容器后，填入例如 <code>http://123.57.xx.xx:8000</code>，客户端即可免安装 Python 直接使用！
+          💡 提示：默认留空为<strong>纯本地引擎模式</strong>（工程底稿 100% 封闭在本地电脑，物理级隔离，零上传）；若需使用云端算力，可填入 <code>http://101.42.9.223:8000</code>。
         </p>
       </div>
     </section>
@@ -80,9 +87,9 @@ async function onTestEngine() {
     <section class="group">
       <h3>认证与知识库服务</h3>
       <div class="field">
-        <label>账号服务地址</label>
+        <label>账号与知识库服务地址</label>
         <div class="row">
-          <input v-model="settings.serverUrl" type="text" placeholder="http://..." />
+          <input v-model="settings.serverUrl" type="text" placeholder="http://101.42.9.223" />
           <button class="ghost" @click="onResetServer">默认</button>
         </div>
       </div>

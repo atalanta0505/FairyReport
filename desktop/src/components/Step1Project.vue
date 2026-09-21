@@ -13,10 +13,17 @@ const projectStore = useProjectStore();
 
 const showNewProjectInput = ref(false);
 const newProjectName = ref("");
-const actionMessage = ref<{ type: "success" | "error"; text: string } | null>(null);
+const actionMessage = ref<{ type: "success" | "error" | "info"; text: string } | null>(null);
 const isDragOver = ref(false);
 
-function showMsg(text: string, type: "success" | "error" = "success") {
+interface IngestFailure {
+  filename: string;
+  error: string;
+  isPdfScan: boolean;
+}
+const ingestFailures = ref<IngestFailure[]>([]);
+
+function showMsg(text: string, type: "success" | "error" | "info" = "success") {
   actionMessage.value = { type, text };
   setTimeout(() => {
     if (actionMessage.value?.text === text) {
@@ -47,6 +54,7 @@ async function onSelectProject(e: Event) {
   const target = e.target as HTMLSelectElement;
   const name = target.value;
   if (!name) return;
+  ingestFailures.value = [];
   try {
     await projectStore.selectProject(engine.baseUrl, name);
   } catch (err) {
@@ -64,6 +72,7 @@ async function handleCreateProject() {
     await projectStore.createProject(engine.baseUrl, name);
     newProjectName.value = "";
     showNewProjectInput.value = false;
+    ingestFailures.value = [];
     showMsg(`项目「${name}」创建成功`);
   } catch (err) {
     showMsg(`创建项目失败: ${(err as Error).message}`, "error");
@@ -78,6 +87,7 @@ async function handleDeleteProject() {
   }
   try {
     await projectStore.deleteProject(engine.baseUrl, name);
+    ingestFailures.value = [];
     showMsg(`项目「${name}」已删除`);
   } catch (err) {
     showMsg(`删除项目失败: ${(err as Error).message}`, "error");
@@ -111,8 +121,14 @@ async function handleScanMaterials() {
     if (results.length === 0) {
       showMsg("资料目录中暂无可摄取的新文件");
     } else if (failed.length > 0) {
-      showMsg(`扫描完成，部分文件失败: ${failed.map((f) => f.filename).join(", ")}`, "error");
+      ingestFailures.value = failed.map((f) => ({
+        filename: f.filename,
+        error: f.error || (f.ext === ".pdf" ? "未检测到可提取文字（纯图片扫描件，需先经 OCR 识别转文字）" : "解析失败或内容为空"),
+        isPdfScan: f.ext === ".pdf" || (f.error?.includes("扫描件") ?? false),
+      }));
+      showMsg(`扫描完成，发现 ${failed.length} 份文件无法解析入库，请查看下方排查卡片`, "error");
     } else {
+      ingestFailures.value = [];
       showMsg(`扫描完成，成功摄取 ${results.length} 份本地资料并建立索引！`);
     }
   } catch (err) {
@@ -126,14 +142,19 @@ async function handleSyncGeneric() {
     return;
   }
   if (!auth.token) {
-    showMsg("未登录或 Token 失效", "error");
+    showMsg("请先在左侧完成登录或使用演示模式，再同步云端知识库", "error");
     return;
   }
   try {
-    await projectStore.updateGeneric(engine.baseUrl, settings.serverUrl, auth.token);
-    showMsg("通用知识包同步成功！");
+    const res = await projectStore.updateGeneric(engine.baseUrl, settings.serverUrl, auth.token);
+    if (res && res.status === "already_installed") {
+      showMsg(`通用知识包已是最新版本（${res.version}）`);
+    } else {
+      showMsg("通用知识包同步成功！");
+    }
   } catch (err) {
-    showMsg(`通用知识包同步失败: ${(err as Error).message}`, "error");
+    const errMsg = (err as Error).message || "";
+    showMsg(`通用知识包同步失败: ${errMsg}`, "error");
   }
 }
 
@@ -147,8 +168,8 @@ async function handlePickFiles() {
       multiple: true,
       filters: [
         {
-          name: "支持的文件 (*.docx, *.xlsx, *.csv, *.md, *.txt)",
-          extensions: ["docx", "xlsx", "csv", "md", "txt"],
+          name: "支持的文件 (*.docx, *.xlsx, *.csv, *.md, *.txt, *.pdf)",
+          extensions: ["docx", "xlsx", "csv", "md", "txt", "pdf"],
         },
       ],
     });
@@ -197,8 +218,14 @@ async function doIngest(paths: string[]) {
     const results = await projectStore.ingestFiles(engine.baseUrl, paths);
     const failed = results.filter((r) => r.status === "error");
     if (failed.length > 0) {
-      showMsg(`摄取完成，部分文件失败: ${failed.map((f) => f.filename).join(", ")}`, "error");
+      ingestFailures.value = failed.map((f) => ({
+        filename: f.filename,
+        error: f.error || (f.ext === ".pdf" ? "未检测到可提取文字（纯图片扫描件，需先经 OCR 识别转文字）" : "解析失败或内容为空"),
+        isPdfScan: f.ext === ".pdf" || (f.error?.includes("扫描件") ?? false),
+      }));
+      showMsg(`摄取完成，${failed.length} 份文件无法解析入库，请查看下方排查卡片`, "error");
     } else {
+      ingestFailures.value = [];
       showMsg(`成功摄取 ${results.length} 份文件并完成向量化！`);
     }
   } catch (err) {
@@ -340,12 +367,12 @@ function nextStep() {
             <strong>{{ projectStore.genericStatus.version || "未知版本" }}</strong>
           </p>
           <p class="text-muted">
-            安装时间：{{ formatDate(projectStore.genericStatus.installed_at || "") }}
+            安装时间：{{ formatDate(projectStore.genericStatus.installed_at || "") }}（含 15 类咨询交付物标准模板与国家规范向量库）
           </p>
         </div>
         <div v-else class="generic-info">
           <p class="text-warning">
-            本地尚未检测到通用知识包（规程规范与模板数据），可能影响大纲推荐与规范检索。
+            本地尚未同步通用知识包（包含 15 类报告标准模板与国家规范向量库）。知识包由云端统一维护和更新，请点击右侧「从云端同步知识包」。
           </p>
         </div>
 
@@ -356,7 +383,7 @@ function nextStep() {
         >
           <span v-if="projectStore.updatingGeneric">同步中...</span>
           <span v-else>
-            {{ projectStore.genericStatus?.installed ? "重新同步通用包" : "一键同步通用知识包" }}
+            {{ projectStore.genericStatus?.installed ? "检查云端更新" : "从云端同步知识包" }}
           </span>
         </button>
       </div>
@@ -416,7 +443,7 @@ function nextStep() {
                   点击按钮选取文件，或将本地文件拖拽至此处
                 </p>
                 <p class="secondary-text">
-                  支持格式：.docx, .xlsx, .csv, .md, .txt。可点击「选择文件」选取，或点击上方「📁 打开资料目录」将文件直接拷入后点击「🔄 扫描本地资料」一键向量化入库。
+                  支持格式：.docx, .xlsx, .csv, .md, .txt, .pdf。可点击「选择文件」选取，或点击上方「📁 打开资料目录」将文件直接拷入后点击「🔄 扫描本地资料」一键向量化入库。
                 </p>
               </div>
               <button
@@ -433,6 +460,33 @@ function nextStep() {
           <div v-if="projectStore.ingesting" class="loading-bar">
             <div class="spinner"></div>
             <span>文件解析与分块向量化入库中，请稍候...</span>
+          </div>
+
+          <!-- 摄取失败醒目常驻排查卡片 -->
+          <div v-if="ingestFailures.length > 0" class="ingest-failures-card">
+            <div class="failures-header">
+              <div class="failures-title">
+                <span class="warning-badge-icon">⚠️</span>
+                <span class="title-text">发现 {{ ingestFailures.length }} 份文件未能成功解析入库</span>
+              </div>
+              <button class="btn-dismiss-failures" type="button" @click="ingestFailures = []">
+                ✕ 关闭提示
+              </button>
+            </div>
+            <div class="failures-list">
+              <div v-for="item in ingestFailures" :key="item.filename" class="failure-row">
+                <span class="failure-fname">📄 {{ item.filename }}</span>
+                <span class="failure-reason">{{ item.error }}</span>
+              </div>
+            </div>
+            <div v-if="ingestFailures.some((f) => f.isPdfScan)" class="failures-guide-box">
+              <div class="guide-title">💡 纯图片扫描件 PDF 处理建议</div>
+              <div class="guide-body">
+                检测到纯图片扫描版 PDF（由纸质原件拍照或扫描生成，<strong>内部无文字层</strong>），本地语义引擎无法直接提取纯文本。
+                <br />
+                <strong>操作指引</strong>：建议使用<strong>电脑微信（聊天框发送后右键点击“提取文字”）、WPS 或福昕阅读器</strong>自带的“OCR 文字识别”功能，将其另存为 <code>.docx</code>、<code>.txt</code> 或 <code>.md</code> 文档后重新拖入，即可秒级向量化入库。
+              </div>
+            </div>
           </div>
 
           <!-- 资料列表表格 -->
@@ -519,6 +573,11 @@ function nextStep() {
   background: #ffebee;
   color: #c62828;
   border: 1px solid #ffcdd2;
+}
+.alert-banner.info {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
 }
 
 .card {
@@ -866,5 +925,102 @@ function nextStep() {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 摄取失败排查卡片样式 */
+.ingest-failures-card {
+  margin: 16px 0;
+  padding: 16px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6px;
+}
+
+.failures-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.failures-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #92400e;
+  font-size: 14px;
+}
+
+.btn-dismiss-failures {
+  background: #fff;
+  border: 1px solid #fde68a;
+  color: #b45309;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-dismiss-failures:hover {
+  background: #fef3c7;
+  color: #78350f;
+}
+
+.failures-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.failure-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+  background: #fff;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid #fef08a;
+}
+
+.failure-fname {
+  font-weight: 600;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 450px;
+}
+
+.failure-reason {
+  color: #dc2626;
+  font-size: 12px;
+}
+
+.failures-guide-box {
+  background: #fefce8;
+  border: 1px dashed #fcd34d;
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #78350f;
+  line-height: 1.6;
+}
+
+.guide-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #b45309;
+}
+
+.failures-guide-box code {
+  background: #fef08a;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: Consolas, monospace;
 }
 </style>

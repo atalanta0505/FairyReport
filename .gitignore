@@ -59,3 +59,7 @@ data/
 desktop/node_modules/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+desktop/src-tauri/binaries/
+build_engine_pyinstaller/
+engine/generic_pack/*.zip
+scratch/

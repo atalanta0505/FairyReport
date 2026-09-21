@@ -45,16 +45,19 @@ def health():
 
 def main() -> None:
     """启动服务。"""
+    import argparse
     import os
     import uvicorn
 
-    host = os.environ.get("HOST", settings.host)
-    port = int(os.environ.get("PORT", str(settings.port)))
+    parser = argparse.ArgumentParser(description="FairyReport Local Engine")
+    parser.add_argument("--host", default=os.environ.get("HOST", settings.host), help="绑定主机地址")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", str(settings.port))), help="绑定端口")
+    args = parser.parse_args()
 
     uvicorn.run(
-        "engine.app.main:app",
-        host=host,
-        port=port,
+        app,
+        host=args.host,
+        port=args.port,
         reload=False,
     )
 

@@ -954,8 +954,8 @@ function nextStep() {
                   <div v-if="projectStore.writingProgress?.thoughtText" class="thought-stream-card">
                     <div class="thought-stream-header" @click="showThoughtDetails = !showThoughtDetails">
                       <div class="thought-stream-title">
-                        <span class="thought-icon">🧠</span>
-                        <span>🧠 深度技术推演与工程构思过程 (纯中文) ({{ projectStore.writingProgress.thoughtText.length }} 字符)</span>
+                        <span class="thought-icon">💡</span>
+                        <span>深度技术推演与工程构思过程 (纯中文) ({{ projectStore.writingProgress.thoughtText.length }} 字符)</span>
                       </div>
                       <button class="thought-toggle-btn">
                         {{ showThoughtDetails ? '收起 ▲' : '展开 ▼' }}

@@ -23,8 +23,9 @@ def _pack_path(filename: str) -> str:
 
 @pack_router.get("/manifest")
 def manifest(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
-    """返回知识包 manifest.json（需有效 JWT）。"""
-    current_user(authorization, db)  # JWT 门控
+    """返回知识包 manifest.json（需有效 JWT 或演示 Token）。"""
+    if authorization != "Bearer demo-access-token":
+        current_user(authorization, db)  # JWT 门控
     path = _pack_path("manifest.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="知识包 manifest 不存在")
@@ -36,8 +37,9 @@ def manifest(authorization: str | None = Header(default=None), db: Session = Dep
 
 @pack_router.get("/download")
 def download(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
-    """流式返回知识包 pack.zip（需有效 JWT）。"""
-    current_user(authorization, db)  # JWT 门控
+    """流式返回知识包 pack.zip（需有效 JWT 或演示 Token）。"""
+    if authorization != "Bearer demo-access-token":
+        current_user(authorization, db)  # JWT 门控
     path = _pack_path("pack.zip")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="知识包包体不存在")

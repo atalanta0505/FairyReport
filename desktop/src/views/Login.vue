@@ -75,9 +75,18 @@ async function onLogin() {
   }
 }
 
+import { onMounted } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+
 async function onDemoLogin() {
   await auth.loginAsDemo();
 }
+
+onMounted(async () => {
+  try {
+    await invoke("log_from_js", { msg: "Login.vue mounted" });
+  } catch {}
+});
 </script>
 
 <template>

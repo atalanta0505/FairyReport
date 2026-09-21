@@ -64,7 +64,8 @@ class GenericServerError(GenericError):
 # ── HTTP 下发 ──
 def _fetch_manifest(server_url: str, token: str) -> dict:
     try:
-        with httpx.Client(transport=_transport, timeout=60.0) as c:
+        timeout = httpx.Timeout(30.0, connect=15.0)
+        with httpx.Client(transport=_transport, timeout=timeout) as c:
             r = c.get(
                 f"{server_url.rstrip('/')}/api/pack/manifest",
                 headers={"Authorization": f"Bearer {token}"},
@@ -76,13 +77,19 @@ def _fetch_manifest(server_url: str, token: str) -> dict:
             e.response.status_code,
             f"manifest 请求失败：{e.response.status_code}",
         )
+    except httpx.ConnectTimeout:
+        raise GenericServerError(504, f"连接服务器超时（{server_url}），请检查网络连接或服务器地址")
     except httpx.RequestError as e:
+        err_str = str(e)
+        if "10060" in err_str or "timed out" in err_str.lower():
+            raise GenericServerError(504, f"连接服务器超时（{server_url}），请检查网络连接或防火墙")
         raise GenericServerError(502, f"无法连接服务器：{e}")
 
 
 def _download_pack(server_url: str, token: str) -> bytes:
     try:
-        with httpx.Client(transport=_transport, timeout=120.0) as c:
+        timeout = httpx.Timeout(120.0, connect=15.0)
+        with httpx.Client(transport=_transport, timeout=timeout) as c:
             r = c.get(
                 f"{server_url.rstrip('/')}/api/pack/download",
                 headers={"Authorization": f"Bearer {token}"},
@@ -94,7 +101,12 @@ def _download_pack(server_url: str, token: str) -> bytes:
             e.response.status_code,
             f"download 请求失败：{e.response.status_code}",
         )
+    except httpx.ConnectTimeout:
+        raise GenericServerError(504, f"下载知识包连接超时（{server_url}）")
     except httpx.RequestError as e:
+        err_str = str(e)
+        if "10060" in err_str or "timed out" in err_str.lower():
+            raise GenericServerError(504, f"连接服务器超时（{server_url}）")
         raise GenericServerError(502, f"无法连接服务器：{e}")
 
 
@@ -147,10 +159,37 @@ class GenericStore:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
+    @classmethod
+    def _install_from_zip_bytes(cls, zip_bytes: bytes, version: str) -> dict:
+        """从 zip 字节解压并原子安装通用知识包。"""
+        cls.close()
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            versions_dir = cls._versions_dir()
+            versions_dir.mkdir(parents=True, exist_ok=True)
+            final_dir = cls._version_dir(version)
+            tmp_dir = cls._versions_dir() / f"{version}.tmp"
+            safe_rmtree(tmp_dir, ignore_errors=True)
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                zf.extractall(tmp_dir)
+                if final_dir.exists():
+                    safe_rmtree(final_dir, ignore_errors=True)
+                os.replace(tmp_dir, final_dir)
+                for child in versions_dir.iterdir():
+                    if child.is_dir() and child != final_dir and not child.name.endswith(".tmp"):
+                        safe_rmtree(child, ignore_errors=True)
+                cls._write_state(
+                    {"version": version, "installed_at": _utcnow_iso()}
+                )
+            except Exception:
+                safe_rmtree(tmp_dir, ignore_errors=True)
+                raise
+        return {"status": "installed", "version": version}
+
     # ── 对外 API ──
     @classmethod
     def status(cls) -> dict:
-        """已装版本/未装。"""
+        """已装版本/未装。未装时返回 installed: False。"""
         state = cls._read_state()
         if not state:
             return {"installed": False}
@@ -250,31 +289,8 @@ class GenericStore:
                 f"sha256 校验失败：期望 {expected_sha[:16]}… 实际 {actual[:16]}…"
             )
 
-        # 原子解压切换：解压到临时目录，再替换
-        versions_dir = cls._versions_dir()
-        versions_dir.mkdir(parents=True, exist_ok=True)
-        final_dir = cls._version_dir(version)
-        tmp_dir = cls._versions_dir() / f"{version}.tmp"
-        safe_rmtree(tmp_dir, ignore_errors=True)
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-                zf.extractall(tmp_dir)
-            # 替换旧 final（如存在）
-            if final_dir.exists():
-                safe_rmtree(final_dir, ignore_errors=True)
-            os.replace(tmp_dir, final_dir)
-            # 清理其他旧版本目录
-            for child in versions_dir.iterdir():
-                if child.is_dir() and child != final_dir and not child.name.endswith(".tmp"):
-                    safe_rmtree(child, ignore_errors=True)
-            cls._write_state(
-                {"version": version, "installed_at": _utcnow_iso()}
-            )
-        except Exception:
-            safe_rmtree(tmp_dir, ignore_errors=True)
-            raise
-        return {"status": "installed", "version": version}
+        # 原子解压切换与安装
+        return cls._install_from_zip_bytes(zip_bytes, version=version)
 
     @classmethod
     def reset(cls) -> None:

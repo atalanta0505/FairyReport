@@ -28,7 +28,7 @@ export interface EngineHandle {
   stop: () => Promise<void>;
 }
 
-export const ENGINE_HEALTH_MAX_ATTEMPTS = 30;
+export const ENGINE_HEALTH_MAX_ATTEMPTS = 60;
 export const ENGINE_HEALTH_INTERVAL_MS = 500;
 
 /** 选空闲端口（默认：Rust 命令 pick_free_port，绑定 127.0.0.1:0 取系统分配端口）。 */
@@ -43,19 +43,41 @@ export async function engineCwd(): Promise<string> {
   return invoke<string>("engine_cwd");
 }
 
-/** 默认 spawn：经 tauri-plugin-shell 启动 python（scope 白名单 python-uvicorn → python）。 */
+/** 默认 spawn：优先调用 Rust 原生命令启动独立引擎，失败时平滑回退至 python-uvicorn（开发环境）。 */
 export async function defaultSpawn(args: string[], cwd: string): Promise<EngineChild> {
-  const { Command } = await import("@tauri-apps/plugin-shell");
-  const cmd = Command.create("python-uvicorn", args, { cwd });
-  const child = await cmd.spawn();
-  return {
-    kill: async () => {
-      await child.kill();
-    },
-  };
+  const { invoke } = await import("@tauri-apps/api/core");
+
+  // 提取 port 参数
+  const portIdx = args.indexOf("--port");
+  const port = portIdx !== -1 && portIdx + 1 < args.length ? parseInt(args[portIdx + 1], 10) : 8000;
+
+  try {
+    // 1. 优先调用 Rust 原生指令启动本地独立引擎（保留系统环境变量，Windows 下不弹黑框）
+    await invoke<string>("start_local_engine", { port });
+    return {
+      kill: async () => {
+        try {
+          await invoke("stop_local_engine");
+        } catch {
+          /* 忽略停止错误 */
+        }
+      },
+    };
+  } catch (nativeErr) {
+    console.warn("未能通过原生指令启动独立引擎，尝试回退到开发环境 python-uvicorn:", nativeErr);
+    // 2. 平滑回退到开发环境的 python-uvicorn
+    const { Command } = await import("@tauri-apps/plugin-shell");
+    const cmd = Command.create("python-uvicorn", args, { cwd });
+    const child = await cmd.spawn();
+    return {
+      kill: async () => {
+        await child.kill();
+      },
+    };
+  }
 }
 
-/** 轮询 /health 直到 ok 或超时（默认 fetcher 走 plugin-http 原生 fetch）。 */
+/** 轮询 /health 直到 ok 或超时（本地引擎走 Rust 原生 TCP 探针，云端走 plugin-http）。 */
 export async function pollHealth(
   baseUrl: string,
   deps?: Partial<EngineDeps>,
@@ -63,10 +85,27 @@ export async function pollHealth(
   const fetcher = deps?.fetcher ?? pluginFetch;
   const sleep = deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const maxAttempts = deps?.maxAttempts ?? ENGINE_HEALTH_MAX_ATTEMPTS;
+
+  let port = 0;
+  let isLocal = false;
+  try {
+    const u = new URL(baseUrl);
+    isLocal = u.hostname === "127.0.0.1" || u.hostname === "localhost";
+    port = parseInt(u.port, 10);
+  } catch {
+    /* 忽略非标准 URL 解析 */
+  }
+
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      const resp = await fetcher(`${baseUrl}/health`);
-      if (resp.ok) return;
+      if (isLocal && port && !deps?.fetcher) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const ok = await invoke<boolean>("check_engine_health", { port });
+        if (ok) return;
+      } else {
+        const resp = await fetcher(`${baseUrl}/health`);
+        if (resp.ok) return;
+      }
     } catch {
       /* 引擎尚未就绪，重试 */
     }

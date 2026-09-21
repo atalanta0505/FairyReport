@@ -33,17 +33,30 @@ function scrollToTop() {
   });
 }
 
+import { invoke } from "@tauri-apps/api/core";
+
 onMounted(async () => {
   try {
+    await invoke("log_from_js", { msg: "Home.vue onMounted start" });
+  } catch {}
+  try {
     await engine.start();
+    try {
+      await invoke("log_from_js", { msg: `Home.vue engine.start ok: baseUrl=${engine.baseUrl}` });
+    } catch {}
     if (engine.baseUrl) {
       await Promise.all([
         projectStore.loadProjects(engine.baseUrl),
         projectStore.checkGenericStatus(engine.baseUrl),
       ]);
+      try {
+        await invoke("log_from_js", { msg: "Home.vue projects and generic status loaded" });
+      } catch {}
     }
-  } catch {
-    /* 引擎启动异常显示状态指示灯，不阻断 UI */
+  } catch (err: any) {
+    try {
+      await invoke("log_from_js", { msg: `Home.vue engine.start failed: ${err?.message || err}` });
+    } catch {}
   }
 });
 
