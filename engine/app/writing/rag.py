@@ -166,7 +166,7 @@ def query_rag(
                 metas = (res.get("metadatas") or [[]])[0]
                 for idx, doc in enumerate(docs):
                     meta = metas[idx] if idx < len(metas) and metas[idx] else {}
-                    title = meta.get("title") or meta.get("name") or meta.get("source") or "国家与行业标准规程"
+                    title = meta.get("title") or meta.get("name") or meta.get("source") or "行业标准与技术规程"
                     results.append(f"【标:{title}】: {doc}")
         except Exception as e:
             _logger.warning("通用规程库检索失败: %s", e)

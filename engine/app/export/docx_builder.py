@@ -1,7 +1,7 @@
 """
 Markdown -> Word (.docx) 导出 — 移植自根目录 exporter.py（出版级排版升级）。
 
-- 符合国家公文与工程咨询出版级排版规范
+- 符合公文与工程咨询出版级排版规范
 - 正文字体：仿宋 / Times New Roman，小四（12pt），1.35 倍行距，严格首行缩进 2 字符（24pt），两端对齐
 - 标题层级：
   * Title（报告总标题 / Level 0）：黑体 22pt（二号），居中加粗，段前/后 12pt，无首行缩进
@@ -10,7 +10,7 @@ Markdown -> Word (.docx) 导出 — 移植自根目录 exporter.py（出版级�
   * Heading 3（Level 3）：楷体 12pt（小四），居左加粗，段前 3pt / 段后 2pt，无首行缩进，keep_with_next
   * Heading 4/5（Level 4+）：仿宋 12pt（小四），居左加粗，段前 2pt / 段后 1pt，无首行缩进，keep_with_next
 - 无序列表与引用块：悬挂缩进、楷体引用底纹修饰
-- 国家标准三线表：顶底 1.5pt (#334155)、栏目线 0.75pt (#475569)、淡灰表头 (#F1F5F9)、表头加粗居中、cantSplit 跨页防断与 tblHeader 表头跨页重复
+- 标准三线表：顶底 1.5pt (#334155)、栏目线 0.75pt (#475569)、淡灰表头 (#F1F5F9)、表头加粗居中、cantSplit 跨页防断与 tblHeader 表头跨页重复
 - 支持 LaTeX 公式（$...$ / $$...$$）提取与斜体排版
 - 引用函数复用 engine/app/writing/refs.py
 """
@@ -297,7 +297,7 @@ def md_to_docx(
 
 
 def _add_heading(doc: Document, text: str, level: int):
-    """添加符合国家工程咨询出版级规范的各级标题：
+    """添加符合工程咨询出版级规范的各级标题：
 
     - Title（Level 0）：黑体 22pt（二号），居中加粗，段前 12pt / 段后 12pt，无首行缩进
     - Heading 1（Level 1）：黑体 16pt（三号），居左加粗，段前 12pt / 段后 6pt，无首行缩进，keep_with_next
@@ -549,7 +549,7 @@ def _parse_mermaid_to_topology(mermaid_code: str):
 
 
 def _add_mermaid_flow_table(doc: Document, mermaid_code: str):
-    """把 Mermaid 流程图转换为符合国家标准规范的出版级【工艺/工程流程步骤与拓扑关系对照表】。"""
+    """把 Mermaid 流程图转换为符合标准规范的出版级【工艺/工程流程步骤与拓扑关系对照表】。"""
     nodes, edges = _parse_mermaid_to_topology(mermaid_code)
     if not nodes:
         return
@@ -1005,7 +1005,7 @@ def _parse_md_line(line: str):
 
 
 def format_ref_appendix(global_refs: list, numbering: dict) -> str:
-    """生成符合学术论文与国家标准规范（GB/T 7714 顺序编码制）的《参考文献》章 Markdown。"""
+    """生成符合学术论文与著录规范（GB/T 7714 顺序编码制）的《参考文献》章 Markdown。"""
     if not global_refs:
         return "# 参考文献\n\n（全书未引用外部参考资料）\n"
 

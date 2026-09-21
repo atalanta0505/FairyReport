@@ -121,7 +121,7 @@ def test_pure_chinese_reasoning_constraint_in_prompts():
 
     # 1. 核心防御常量硬性规范核验
     assert "【思考链与语言规范（最高优先级·纯中文绝对纯化防线）】" in REASONING_CHINESE_DEFENSE_PROMPT
-    assert "100% 使用国家通用规范简体中文进行投资项目与工程咨询专业论证" in REASONING_CHINESE_DEFENSE_PROMPT
+    assert "100% 使用通用规范简体中文进行投资项目与工程咨询专业论证" in REASONING_CHINESE_DEFENSE_PROMPT
     assert "绝对禁止夹杂任何英文思考句子、英文短语或英文分析单词" in REASONING_CHINESE_DEFENSE_PROMPT
     assert "'Okay', 'Let me', 'First', 'Next', 'I should', 'We need to'" in REASONING_CHINESE_DEFENSE_PROMPT
 
@@ -314,8 +314,8 @@ def test_normalize_chapter_markdown_heading_separation_and_skeleton():
     assert normalize_chapter_markdown(raw2) == "### 1.1.1 建设地点\n\n本项目位于武汉市。"
 
     # 3. 标题与加粗/表格粘连拆解
-    raw3 = "### 1.1.2 编制依据**发改委文件**"
-    assert normalize_chapter_markdown(raw3) == "### 1.1.2 编制依据\n\n**发改委文件**"
+    raw3 = "### 1.1.2 编制依据**产业指导文件**"
+    assert normalize_chapter_markdown(raw3) == "### 1.1.2 编制依据\n\n**产业指导文件**"
 
     # 4. 表格单行 || 拆分
     raw4 = "| 指标 | 数值 || --- | --- || 投资 | 5000 |"
@@ -327,7 +327,7 @@ def test_normalize_chapter_markdown_heading_separation_and_skeleton():
     assert normalize_chapter_markdown(raw5) == "### 1.1.3 建设内容\n\n本项目建设内容包含泵站与涵闸。"
 
     # 6. V2-T47: 引用标记行内紧随融合（消除孤立换行）
-    raw6 = "根据发改委产业指导目录。\n\n【源:产业目录.docx】\n本项目属于国家鼓励类投资项目。"
+    raw6 = "根据产业指导目录。\n\n【源:产业目录.docx】\n本项目属于鼓励类投资项目。"
     res6 = normalize_chapter_markdown(raw6)
     assert "【源:产业目录.docx】。" in res6
     assert "\n\n【源:产业目录.docx】" not in res6
@@ -537,7 +537,7 @@ def test_strip_markdown_tables_and_count_content_chars():
         "| :--- | :---: | ---: | :--- |\n"
         "| 1 | 总库容 | 万m³ | 1500 |\n"
         "| 2 | 防洪标准 | 年一遇 | 100 |\n\n"
-        "各项规划指标均符合发改委与水利行业编制规范要求。"
+        "各项规划指标均符合行业编制规范要求。"
     )
 
     stripped = _strip_markdown_tables(md)
@@ -545,18 +545,18 @@ def test_strip_markdown_tables_and_count_content_chars():
     assert "| :--- |" not in stripped
     assert "| 1 |" not in stripped
     assert "本项目位于湖北省武汉市江夏区。" in stripped
-    assert "各项规划指标均符合发改委与水利行业编制规范要求。" in stripped
+    assert "各项规划指标均符合行业编制规范要求。" in stripped
 
     # 正文：
     # "本项目位于湖北省武汉市江夏区。" (15 中文/标点字符)
-    # "各项规划指标均符合发改委与水利行业编制规范要求。" (24 中文/标点字符)
-    # 共 15 + 24 = 39 字符
+    # "各项规划指标均符合行业编制规范要求。" (18 中文/标点字符)
+    # 共 15 + 18 = 33 字符
     wc = _count_content_chars(md)
-    assert wc == 39
+    assert wc == 33
 
 
 def test_ndrc_financial_table_prompt_full_elements():
-    """验证发改委教材标准全要素财务报表强化提示词规范。"""
+    """验证教材标准全要素财务报表强化提示词规范。"""
     from engine.app.writing.prompts import _BASE_WRITING_PROMPT
     from engine.app.writing.writer import _build_writing_system_prompt
 

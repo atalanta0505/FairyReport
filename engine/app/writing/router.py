@@ -601,7 +601,7 @@ def _stream_review(writer: ChapterWriter, llm: LLMClient, req: ReviewRequest):
         if mode == "fast":
             stage_msg = "⚡ 正在执行常规快速体检：校核专有名词称谓、关键数值自洽与底线合规..."
         elif mode == "compliance":
-            stage_msg = "🔍 正在对照国家政策法规与行业技术规程进行专项合规校核..."
+            stage_msg = "🔍 正在对照现行政策法规与行业技术规程进行专项合规校核..."
         elif mode in ("numeric", "numerical"):
             stage_msg = "🔢 正在提取并复核关键工程技术参数与投资测算自洽性..."
         elif mode == "technical":

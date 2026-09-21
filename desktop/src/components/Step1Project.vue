@@ -367,12 +367,12 @@ function nextStep() {
             <strong>{{ projectStore.genericStatus.version || "未知版本" }}</strong>
           </p>
           <p class="text-muted">
-            安装时间：{{ formatDate(projectStore.genericStatus.installed_at || "") }}（含 15 类咨询交付物标准模板与国家规范向量库）
+            安装时间：{{ formatDate(projectStore.genericStatus.installed_at || "") }}（含 15 类咨询交付物标准模板与行业规范向量库）
           </p>
         </div>
         <div v-else class="generic-info">
           <p class="text-warning">
-            本地尚未同步通用知识包（包含 15 类报告标准模板与国家规范向量库）。知识包由云端统一维护和更新，请点击右侧「从云端同步知识包」。
+            本地尚未同步通用知识包（包含 15 类报告标准模板与行业规范向量库）。知识包由云端统一维护和更新，请点击右侧「从云端同步知识包」。
           </p>
         </div>
 
