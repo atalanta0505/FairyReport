@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import {
   assignGlobalRefNumbers,
   convertRefsToNumberedCitations,
@@ -24,6 +24,13 @@ const exportError = ref("");
 const toastMessage = ref("");
 const toastType = ref<"success" | "error" | "info">("info");
 let toastTimer: any = null;
+
+// ── 导出前上下文与自洽性核验状态 ──
+const verifyingContext = ref(false);
+const verificationResult = ref<engineApi.ContextVerifyResponse | null>(null);
+const verificationFilter = ref<"all" | "conflict" | "warning" | "pass">("all");
+const showConflictModal = ref(false);
+const pendingExportType = ref<"docx" | "md" | null>(null);
 
 function showMsg(msg: string, type: "success" | "error" | "info" = "info") {
   toastMessage.value = msg;
@@ -100,8 +107,56 @@ function buildFullReportNumberedMarkdown(): string {
   return sections.join("\n\n---\n\n");
 }
 
-// ── 一键导出 Word (.docx) ──
-async function handleExportDocx() {
+// ── 过滤核验项目 ──
+const filteredVerificationItems = computed(() => {
+  if (!verificationResult.value) return [];
+  if (verificationFilter.value === "conflict") {
+    return verificationResult.value.items.filter((i) => i.status === "conflict");
+  }
+  if (verificationFilter.value === "warning") {
+    return verificationResult.value.items.filter((i) => i.status === "warning");
+  }
+  if (verificationFilter.value === "pass") {
+    return verificationResult.value.items.filter((i) => i.status === "pass");
+  }
+  return verificationResult.value.items;
+});
+
+// ── 触发自洽性核验 ──
+async function runContextVerification() {
+  if (!engine.baseUrl) return;
+  if (!projectStore.currentProject) return;
+  if (writtenChaptersCount.value === 0) return;
+
+  verifyingContext.value = true;
+  try {
+    const res = await engineApi.verifyContext(engine.baseUrl, {
+      project: projectStore.currentProject.name,
+      report_type: projectStore.currentProject.report_type || "",
+      chapters: projectStore.chapters,
+    });
+    verificationResult.value = res;
+  } catch (err: any) {
+    console.error("Context verification failed:", err);
+  } finally {
+    verifyingContext.value = false;
+  }
+}
+
+onMounted(() => {
+  if (engine.baseUrl && projectStore.currentProject && writtenChaptersCount.value > 0) {
+    runContextVerification();
+  }
+});
+
+// ── 定位至问题章节修改 ──
+function jumpToChapter(seq: number) {
+  projectStore.selectedChapterSeq = seq;
+  projectStore.setStep(4);
+}
+
+// ── 执行 Word (.docx) 导出 ──
+async function executeExportDocx() {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -138,8 +193,18 @@ async function handleExportDocx() {
   }
 }
 
-// ── 一键导出 Markdown (.md) ──
-async function handleExportMd() {
+// ── 一键导出 Word (.docx)（含自洽性门禁拦截） ──
+function handleExportDocx() {
+  if (verificationResult.value && verificationResult.value.conflicts_count > 0) {
+    pendingExportType.value = "docx";
+    showConflictModal.value = true;
+    return;
+  }
+  executeExportDocx();
+}
+
+// ── 执行 Markdown (.md) 导出 ──
+async function executeExportMd() {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -174,6 +239,27 @@ async function handleExportMd() {
   } finally {
     exportingMd.value = false;
   }
+}
+
+// ── 一键导出 Markdown (.md)（含自洽性门禁拦截） ──
+function handleExportMd() {
+  if (verificationResult.value && verificationResult.value.conflicts_count > 0) {
+    pendingExportType.value = "md";
+    showConflictModal.value = true;
+    return;
+  }
+  executeExportMd();
+}
+
+// ── 确认强制导出 ──
+function confirmForceExport() {
+  showConflictModal.value = false;
+  if (pendingExportType.value === "docx") {
+    executeExportDocx();
+  } else if (pendingExportType.value === "md") {
+    executeExportMd();
+  }
+  pendingExportType.value = null;
 }
 
 // ── 复制全书 Markdown 源码（学术编号版） ──
@@ -297,6 +383,139 @@ async function handleDownloadExport(filePath?: string) {
           <div class="stat-item">
             <div class="stat-num">GB/T 7714</div>
             <div class="stat-lbl">著录规范标准</div>
+          </div>
+        </div>
+
+        <!-- 0. 导出前上下文与自洽性复核卡片 (意见 1 落地) -->
+        <div class="consistency-card">
+          <div class="consistency-header">
+            <div class="consistency-title-area">
+              <span class="consistency-icon">📋</span>
+              <div class="consistency-title-text">
+                <h3>导出前修改上下文与自洽性复核</h3>
+                <p class="consistency-sub">
+                  智能核验跨章节工程技术经济指标自洽性、底稿规程出处溯源闭环与上下游逻辑呼应
+                </p>
+              </div>
+            </div>
+            <div class="consistency-header-actions">
+              <div
+                v-if="verificationResult"
+                class="score-badge"
+                :class="{
+                  'score-pass': verificationResult.score >= 90,
+                  'score-warn': verificationResult.score >= 70 && verificationResult.score < 90,
+                  'score-danger': verificationResult.score < 70
+                }"
+              >
+                <span class="score-prefix">综合自洽度</span>
+                <span class="score-val">{{ verificationResult.score }}分</span>
+              </div>
+              <button
+                class="btn btn-secondary btn-sm"
+                :disabled="verifyingContext || writtenChaptersCount === 0"
+                @click="runContextVerification"
+              >
+                <span v-if="verifyingContext" class="spinner-inline dark"></span>
+                {{ verifyingContext ? '核验中...' : '🔄 重新核验' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 摘要提示 -->
+          <div
+            v-if="verificationResult"
+            class="consistency-summary"
+            :class="{
+              'summary-pass': verificationResult.conflicts_count === 0 && verificationResult.warnings_count === 0,
+              'summary-warn': verificationResult.conflicts_count === 0 && verificationResult.warnings_count > 0,
+              'summary-danger': verificationResult.conflicts_count > 0
+            }"
+          >
+            {{ verificationResult.summary }}
+          </div>
+          <div v-else-if="verifyingContext" class="consistency-loading">
+            <span class="spinner-inline dark"></span> 正在深度核验跨章节数据一致性与引用出处链...
+          </div>
+          <div v-else class="consistency-empty">
+            尚未执行自洽性复核，点击右上角「🔄 重新核验」启动检测。
+          </div>
+
+          <!-- 过滤器 Tab -->
+          <div v-if="verificationResult && verificationResult.items.length > 0" class="verification-tabs">
+            <button
+              class="vtab-btn"
+              :class="{ active: verificationFilter === 'all' }"
+              @click="verificationFilter = 'all'"
+            >
+              全部 ({{ verificationResult.items.length }})
+            </button>
+            <button
+              v-if="verificationResult.conflicts_count > 0"
+              class="vtab-btn vtab-conflict"
+              :class="{ active: verificationFilter === 'conflict' }"
+              @click="verificationFilter = 'conflict'"
+            >
+              🚨 数据矛盾 ({{ verificationResult.conflicts_count }})
+            </button>
+            <button
+              v-if="verificationResult.warnings_count > 0"
+              class="vtab-btn vtab-warn"
+              :class="{ active: verificationFilter === 'warning' }"
+              @click="verificationFilter = 'warning'"
+            >
+              ⚠️ 关联预警 ({{ verificationResult.warnings_count }})
+            </button>
+            <button
+              v-if="verificationResult.passed_count > 0"
+              class="vtab-btn vtab-pass"
+              :class="{ active: verificationFilter === 'pass' }"
+              @click="verificationFilter = 'pass'"
+            >
+              ✅ 自洽通过 ({{ verificationResult.passed_count }})
+            </button>
+          </div>
+
+          <!-- 诊断清单 -->
+          <div v-if="verificationResult && filteredVerificationItems.length > 0" class="verification-list">
+            <div
+              v-for="item in filteredVerificationItems"
+              :key="item.id"
+              class="vitem-card"
+              :class="`vitem-${item.status}`"
+            >
+              <div class="vitem-main">
+                <div class="vitem-top">
+                  <span class="vitem-status-icon">
+                    {{ item.status === 'conflict' ? '🚨' : item.status === 'warning' ? '⚠️' : item.status === 'pass' ? '✅' : 'ℹ️' }}
+                  </span>
+                  <strong class="vitem-title">{{ item.title }}</strong>
+                  <span class="vitem-tag" :class="`tag-${item.type}`">
+                    {{ item.type === 'indicator' ? '核心指标' : item.type === 'citation' ? '出处溯源' : '上下游逻辑' }}
+                  </span>
+                </div>
+                <div class="vitem-desc">{{ item.description }}</div>
+                <div v-if="item.suggestion" class="vitem-sug">
+                  💡 <strong>修改建议：</strong>{{ item.suggestion }}
+                </div>
+              </div>
+
+              <!-- 涉及章节与快速定位按钮 -->
+              <div v-if="item.affected_chapters && item.affected_chapters.length > 0" class="vitem-actions">
+                <span class="vitem-chs-label">涉及章节：</span>
+                <div class="vitem-chs-btns">
+                  <button
+                    v-for="chSeq in item.affected_chapters"
+                    :key="chSeq"
+                    class="btn btn-outline btn-xs"
+                    @click="jumpToChapter(chSeq)"
+                    title="点击立即跳转至步骤 4 对应章节进行修改"
+                  >
+                    📍 定位第 {{ chSeq }} 章修改
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -472,6 +691,39 @@ async function handleDownloadExport(filePath?: string) {
               <div class="empty-desc">在正文中使用【源:...】、【标:...】或【网:...】即可自动生成编号。</div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 冲突拦截确认模态框 -->
+    <div v-if="showConflictModal" class="modal-backdrop" @click.self="showConflictModal = false">
+      <div class="modal-card">
+        <div class="modal-header danger">
+          <span class="modal-icon">⚠️</span>
+          <h3>存在未消除的跨章节核心数据矛盾</h3>
+        </div>
+        <div class="modal-body">
+          <p>
+            系统检测到全书存在 <strong>{{ verificationResult?.conflicts_count }}</strong> 处跨章节核心技术经济指标矛盾（如总投资、用地等前后数据打架）。
+          </p>
+          <p class="modal-tip">
+            直接导出未经对齐的成果可能导致送审被退回或专家对报告自洽性提出重大质询。建议先返回对应章节核对修改。
+          </p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" @click="showConflictModal = false">
+            取消并检查
+          </button>
+          <button
+            v-if="verificationResult?.items.find(i => i.status === 'conflict')?.affected_chapters[0]"
+            class="btn btn-primary"
+            @click="jumpToChapter(verificationResult!.items.find(i => i.status === 'conflict')!.affected_chapters[0]); showConflictModal = false;"
+          >
+            📍 定位到第 {{ verificationResult!.items.find(i => i.status === 'conflict')!.affected_chapters[0] }} 章修改
+          </button>
+          <button class="btn btn-outline-danger" @click="confirmForceExport">
+            仍要强制导出
+          </button>
         </div>
       </div>
     </div>
@@ -950,5 +1202,388 @@ async function handleDownloadExport(filePath?: string) {
 .toast-fade-leave-to {
   opacity: 0;
   transform: translate(-50%, -10px);
+}
+
+/* 自洽性复核卡片 (意见 1 落地) */
+.consistency-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.consistency-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.consistency-title-area {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.consistency-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.consistency-title-text h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.consistency-sub {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.consistency-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.score-badge {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.score-badge.score-pass {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.score-badge.score-warn {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.score-badge.score-danger {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.score-val {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.consistency-summary {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.summary-pass {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.summary-warn {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fef3c7;
+}
+
+.summary-danger {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fee2e2;
+}
+
+.consistency-loading {
+  font-size: 13px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.spinner-inline.dark {
+  border: 2px solid rgba(15, 23, 42, 0.2);
+  border-top-color: #0f172a;
+}
+
+.consistency-empty {
+  font-size: 13px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.verification-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 8px;
+}
+
+.vtab-btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.vtab-btn:hover {
+  background: #f1f5f9;
+}
+
+.vtab-btn.active {
+  background: #0f172a;
+  color: #ffffff;
+  border-color: #0f172a;
+  font-weight: 600;
+}
+
+.vtab-btn.vtab-conflict.active {
+  background: #ef4444;
+  border-color: #ef4444;
+}
+
+.vtab-btn.vtab-warn.active {
+  background: #f59e0b;
+  border-color: #f59e0b;
+}
+
+.vtab-btn.vtab-pass.active {
+  background: #10b981;
+  border-color: #10b981;
+}
+
+.verification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.vitem-card {
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.vitem-card.vitem-conflict {
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+}
+
+.vitem-card.vitem-warning {
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+}
+
+.vitem-card.vitem-pass {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.vitem-card.vitem-info {
+  background: #f0f9ff;
+  border: 1px solid #e0f2fe;
+}
+
+.vitem-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vitem-status-icon {
+  font-size: 14px;
+}
+
+.vitem-title {
+  color: #1e293b;
+  font-size: 13.5px;
+}
+
+.vitem-tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.vitem-tag.tag-indicator {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.vitem-tag.tag-citation {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.vitem-tag.tag-logic {
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+
+.vitem-desc {
+  color: #334155;
+  line-height: 1.5;
+}
+
+.vitem-sug {
+  background: rgba(255, 255, 255, 0.75);
+  border-left: 3px solid #f59e0b;
+  padding: 6px 10px;
+  border-radius: 0 4px 4px 0;
+  color: #78350f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.vitem-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.08);
+}
+
+.vitem-chs-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.vitem-chs-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 11.5px;
+  border-radius: 4px;
+}
+
+/* Modal */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.modal-card {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 520px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: modal-in 0.2s ease-out;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.modal-header.danger h3 {
+  color: #991b1b;
+}
+
+.modal-icon {
+  font-size: 24px;
+}
+
+.modal-body {
+  font-size: 13.5px;
+  color: #334155;
+  line-height: 1.6;
+}
+
+.modal-body p {
+  margin: 0 0 10px;
+}
+
+.modal-tip {
+  color: #64748b;
+  font-size: 12.5px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn-outline-danger {
+  background: transparent;
+  color: #dc2626;
+  border: 1px solid #fca5a5;
+}
+
+.btn-outline-danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #ef4444;
 }
 </style>

@@ -1314,6 +1314,45 @@ export async function deleteProjectFullReview(
   );
 }
 
+export interface ConsistencyItem {
+  id: string;
+  type: "indicator" | "citation" | "logic" | string;
+  status: "pass" | "conflict" | "warning" | "info" | string;
+  severity: "critical" | "high" | "medium" | "low" | string;
+  title: string;
+  description: string;
+  affected_chapters: number[];
+  suggestion: string;
+  details?: Record<string, any> | null;
+}
+
+export interface ContextVerifyResponse {
+  is_consistent: boolean;
+  score: number;
+  summary: string;
+  conflicts_count: number;
+  warnings_count: number;
+  passed_count: number;
+  items: ConsistencyItem[];
+}
+
+export interface VerifyContextRequest {
+  project?: string;
+  report_type?: string;
+  chapters: Record<string | number, string>;
+}
+
+/** 导出前报告修改上下文与自洽性核验 */
+export async function verifyContext(
+  baseUrl: string,
+  req: VerifyContextRequest,
+): Promise<ContextVerifyResponse> {
+  return request<ContextVerifyResponse>(baseUrl, "/export/verify-context", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
 export interface ExportDocxRequest {
   project: string;
   title: string;

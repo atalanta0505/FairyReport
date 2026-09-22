@@ -54,8 +54,40 @@ def render(llm):
 
     st.divider()
 
-    # ── 第二步：选择格式 ──
-    st.subheader("② 选择格式")
+    # ── 第二步：修改上下文与自洽性复核（意见 1 落地）──
+    st.subheader("② 导出前修改上下文与自洽性复核")
+    from engine.app.writing.context_verifier import run_full_context_verification
+    with st.spinner("正在智能核验跨章节核心数据自洽性与引用溯源..."):
+        verify_resp = run_full_context_verification(
+            chapters=chapters,
+            project=st.session_state.get("project_name", ""),
+            report_type=st.session_state.get("report_type", "")
+        )
+
+    if verify_resp.conflicts_count > 0:
+        st.error(f"🚨 **存在 {verify_resp.conflicts_count} 处跨章节核心数据矛盾！**（综合自洽度：{verify_resp.score}分）\n\n{verify_resp.summary}")
+    elif verify_resp.warnings_count > 0:
+        st.warning(f"🟡 **检测到 {verify_resp.warnings_count} 处建议关注的细节**（综合自洽度：{verify_resp.score}分）\n\n{verify_resp.summary}")
+    else:
+        st.success(f"✅ **全文跨章节核心指标高度自洽，出处溯源链闭环！**（综合自洽度：{verify_resp.score}分）\n\n{verify_resp.summary}")
+
+    with st.expander(f"📋 查看详细自洽性核验清单 ({len(verify_resp.items)} 项)", expanded=(verify_resp.conflicts_count > 0)):
+        for item in verify_resp.items:
+            prefix = "🚨" if item.status == "conflict" else "⚠️" if item.status == "warning" else "✅" if item.status == "pass" else "ℹ️"
+            st.markdown(f"**{prefix} {item.title}**")
+            st.caption(f"涉及章节：第 {item.affected_chapters} 章 · {item.description}")
+            if item.suggestion:
+                st.info(f"💡 修改建议：{item.suggestion}")
+            st.write("---")
+
+    allow_force_export = True
+    if verify_resp.conflicts_count > 0:
+        allow_force_export = st.checkbox("⚠️ 已知晓以上跨章节数据矛盾，仍强制导出", value=False)
+
+    st.divider()
+
+    # ── 第三步：选择格式 ──
+    st.subheader("③ 选择格式")
     export_format = st.radio("导出格式", options=["docx", "md"],
                              format_func=lambda x: "📄 Word 文档 (.docx)" if x == "docx" else "📝 Markdown (.md)",
                              horizontal=True)
@@ -66,8 +98,8 @@ def render(llm):
 
     st.divider()
 
-    # ── 第三步：选择文件夹导出 ──
-    st.subheader("③ 导出到本地文件夹")
+    # ── 第四步：选择文件夹导出 ──
+    st.subheader("④ 导出到本地文件夹")
 
     # 在 text_input 渲染之前注入 picked 路径
     if st.session_state.get('_pending_export_dir'):
@@ -91,7 +123,7 @@ def render(llm):
     col_exp, col_new, col_back = st.columns([1, 1, 1])
     with col_exp:
         if st.button("📥 导出", type="primary",
-                     disabled=not (export_dir and os.path.isdir(export_dir))):
+                     disabled=not (export_dir and os.path.isdir(export_dir) and allow_force_export)):
             out_path = os.path.join(export_dir, f"{st.session_state.project_name}.{export_format}")
             try:
                 with st.spinner("正在导出..."):

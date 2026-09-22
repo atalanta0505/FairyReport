@@ -16,9 +16,34 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..config import settings
+from ..writing.context_verifier import ContextVerifyResponse, run_full_context_verification
 from .docx_builder import build_merged_md, md_to_docx
 
 router = APIRouter(prefix="/export", tags=["export"])
+
+
+class VerifyContextRequest(BaseModel):
+    project: str = ""
+    report_type: str = ""
+    chapters: dict = Field(default_factory=dict)
+
+
+@router.post("/verify-context", response_model=ContextVerifyResponse)
+def verify_context_endpoint(req: VerifyContextRequest):
+    """导出前全文与修改上下文自洽性核验：跨章节数据比对、出处溯源完整性与逻辑呼应。"""
+    if not req.chapters or not isinstance(req.chapters, dict):
+        raise HTTPException(status_code=422, detail="chapters 不能为空")
+    for k, v in req.chapters.items():
+        if not isinstance(v, str):
+            raise HTTPException(status_code=422, detail=f"chapter {k} 内容必须为字符串")
+
+    res = run_full_context_verification(
+        chapters=req.chapters,
+        project=req.project,
+        report_type=req.report_type,
+    )
+    return res
+
 
 
 class ExportDocxRequest(BaseModel):
