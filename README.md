@@ -120,19 +120,25 @@ DEEPSEEK_MODEL=deepseek-chat
 
 ### 4. 启动运行
 
-#### 方式 A：启动 Tauri 2 桌面端（推荐）
+#### 方式 A：启动桌面窗口模式（Tauri 2 客户端）
 ```bash
-# 终端 1：启动本地 Python 引擎服务
+# 终端 1：启动本地 Python 后端引擎服务
 python -m uvicorn engine.app.main:app --host 127.0.0.1 --port 8001
 
-# 终端 2：启动桌面前端与 Tauri 壳
+# 终端 2：启动桌面客户端工作台
 cd desktop
 npm run tauri dev
 ```
 
-#### 方式 B：启动经典 Web 版（Streamlit）
+#### 方式 B：启动浏览器极速开发模式（无需 Rust 环境）
 ```bash
-streamlit run app.py
+# 终端 1：启动本地 Python 后端引擎服务
+python -m uvicorn engine.app.main:app --host 127.0.0.1 --port 8001
+
+# 终端 2：启动前端调试服务
+cd desktop
+npm run dev
+# 浏览器直接访问 http://localhost:5173
 ```
 
 ---
