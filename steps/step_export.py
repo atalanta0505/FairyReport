@@ -104,8 +104,8 @@ def render(llm):
                     numbered_body, numbering = global_assign_ref_numbers(export_body)
 
                     if export_format == "docx":
-                        md_to_docx(numbered_body, out_path)
-                        # v13: 在标题后插入 Word TOC 域
+                        report_title = st.session_state.get("report_name") or st.session_state.get("project_name") or "工程咨询报告"
+                        md_to_docx(numbered_body, out_path, title=report_title)
                         _insert_toc_after_title(out_path)
                     else:
                         with open(out_path, 'w', encoding='utf-8') as f:
@@ -138,11 +138,16 @@ def render(llm):
 
 
 def _insert_toc_after_title(docx_path: str):
-    """在 Word 文档标题后插入 TOC 域（Word 打开后右击 → 更新域即可生成目录）。"""
+    """在 Word 文档标题后插入 TOC 域（Word 打开后右击 → 更新域即可生成目录；若已有 TOC 则幂等跳过）。"""
     from docx import Document as _Doc
     doc = _Doc(docx_path)
     if not doc.paragraphs:
         return
+
+    # 若文档中已包含原生 TOC 域代码，则直接返回避免重复
+    for p in doc.paragraphs:
+        if 'TOC \\o' in p._p.xml:
+            return
 
     # 构建 TOC 域段落
     toc_para = OxmlElement('w:p')

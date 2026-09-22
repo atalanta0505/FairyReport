@@ -26,6 +26,11 @@ class ExportDocxRequest(BaseModel):
     title: str = ""
     chapters: dict = Field(default_factory=dict)
     include_refs: bool = True
+    author_org: str = ""
+    qualification: str = ""
+    date_str: str = ""
+    include_cover: bool = True
+    include_toc: bool = True
 
 
 def _safe_filename(name: str) -> str:
@@ -65,7 +70,17 @@ def export_docx(req: ExportDocxRequest):
     out_path = os.path.join(_exports_dir(), fname)
 
     try:
-        md_to_docx(final_md, out_path, title=req.title, project=req.project)
+        md_to_docx(
+            final_md,
+            out_path,
+            title=req.title,
+            project=req.project,
+            author_org=req.author_org,
+            qualification=req.qualification,
+            date_str=req.date_str,
+            include_cover=req.include_cover,
+            include_toc=req.include_toc,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"docx 生成失败：{e}")
 

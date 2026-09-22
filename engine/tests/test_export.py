@@ -498,3 +498,95 @@ def test_export_docx_and_download(client):
     # 测试下载不存在的文件返回 404
     bad_res = client.get("/export/download/nonexistent.docx")
     assert bad_res.status_code == 404
+
+
+def test_export_standard_cover_toc_and_sections(client):
+    """验证甲级送审标准排版：独立标准封面（机构/资质/日期）、自动目录页（TOC 域）、正文独立分节（页眉下划线与重置页脚）。"""
+    res = client.post(
+        "/export/docx",
+        json={
+            "project": "standard_audit",
+            "title": "利辛县生态皮革产业园可行性研究报告",
+            "author_org": "华东工程咨询设计研究院有限公司",
+            "qualification": "甲级工程咨询资信证书：工咨甲88888888",
+            "date_str": "2026 年 09 月",
+            "include_cover": True,
+            "include_toc": True,
+            "chapters": {"1": "# 第一章 建设背景与必要性\n\n本项目符合国家绿色工业规划要求。"},
+        },
+    )
+    assert res.status_code == 200
+    path = res.json()["path"]
+    assert os.path.exists(path)
+
+    doc = Document(path)
+
+    # 1. 验证分为 3 个独立节：封面节、目录节、正文节
+    assert len(doc.sections) == 3, f"期望 3 个 Section，实际得到 {len(doc.sections)}"
+    sec_cover, sec_toc, sec_body = doc.sections[0], doc.sections[1], doc.sections[2]
+
+    # 2. 封面节验证：包含总标题、送审版标识、编制单位、资质等级、编制时间；无页眉页脚
+    paras_text = [p.text for p in doc.paragraphs]
+    assert any("利辛县生态皮革产业园可行性研究报告" in t for t in paras_text)
+    assert any("送 审 版" in t for t in paras_text)
+    assert any("华东工程咨询设计研究院有限公司" in t for t in paras_text)
+    assert any("工咨甲88888888" in t for t in paras_text)
+    assert any("2026 年 09 月" in t for t in paras_text)
+    assert sec_cover.header.paragraphs[0].text.strip() == ""
+    assert sec_cover.footer.paragraphs[0].text.strip() == ""
+
+    # 3. 目录节验证：居中“目    录”标题，包含 TOC 域代码，Word 设置启用 updateFields
+    assert any("目    录" in t for t in paras_text)
+    assert "updateFields" in doc.settings.element.xml
+    all_paras_xml = "".join(p._p.xml for p in doc.paragraphs)
+    assert 'TOC \\o "1-3"' in all_paras_xml
+
+    # 4. 正文节验证：页眉包含报告名与下划横线；页脚包含 PAGE 域且从 1 开始重新起算
+    hp = sec_body.header.paragraphs[0]
+    assert "利辛县生态皮革产业园可行性研究报告" in hp.text
+    assert "w:pBdr" in hp._p.pPr.xml
+    assert 'w:bottom w:val="single"' in hp._p.pPr.xml
+
+    fp = sec_body.footer.paragraphs[0]
+    assert "PAGE" in fp._p.xml
+    assert 'w:start="1"' in sec_body._sectPr.xml
+
+
+def test_root_exporter_standard_layout(tmp_path):
+    """验证根目录 exporter.py 在单机/Streamlit 导出场景同样生成标准封面、TOC 与正文分节。"""
+    from exporter import md_to_docx as root_md_to_docx
+
+    md_content = (
+        "# 第一章 项目概述\n\n"
+        "## 1.1 项目基本情况\n\n"
+        "本项目规划投资2000万元。\n\n"
+        "| 序号 | 项目 | 数值 |\n| :---: | :--- | ---: |\n| 1 | 占地 | 50亩 |\n"
+    )
+    out_file = str(tmp_path / "root_exporter_demo.docx")
+    root_md_to_docx(
+        md_content,
+        out_file,
+        title="综合水利工程项目可行性研究报告",
+        author_org="国家水利水电工程规划总院",
+        qualification="甲级资信证书编号：工咨甲12345678",
+        date_str="2026 年 09 月",
+        include_cover=True,
+        include_toc=True,
+    )
+    assert os.path.exists(out_file)
+
+    doc = Document(out_file)
+    assert len(doc.sections) == 3
+    paras = [p.text for p in doc.paragraphs]
+    assert any("综合水利工程项目可行性研究报告" in t for t in paras)
+    assert any("国家水利水电工程规划总院" in t for t in paras)
+    assert any("工咨甲12345678" in t for t in paras)
+    assert any("目    录" in t for t in paras)
+
+    # 验证正文节页眉与页脚
+    sec_body = doc.sections[2]
+    assert "综合水利工程项目可行性研究报告" in sec_body.header.paragraphs[0].text
+    assert "w:pBdr" in sec_body.header.paragraphs[0]._p.pPr.xml
+    assert "PAGE" in sec_body.footer.paragraphs[0]._p.xml
+    assert 'w:start="1"' in sec_body._sectPr.xml
+

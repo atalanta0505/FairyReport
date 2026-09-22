@@ -14,9 +14,11 @@ Markdown -> Word (.docx) 导出 — 移植自根目录 exporter.py（出版级�
 - 支持 LaTeX 公式（$...$ / $$...$$）提取与斜体排版
 - 引用函数复用 engine/app/writing/refs.py
 """
+from datetime import datetime
 import re
 
 from docx import Document
+from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
@@ -65,14 +67,19 @@ def _format_run(
     rFonts.set(qn('w:hAnsi'), font_name)
 
 
+def _apply_section_margins(section):
+    """设置出版级页面边距：上 2.54cm，下 2.54cm，左 2.8cm，右 2.6cm。"""
+    section.top_margin = Cm(2.54)
+    section.bottom_margin = Cm(2.54)
+    section.left_margin = Cm(2.8)
+    section.right_margin = Cm(2.6)
+
+
 def _init_document_styles(doc: Document):
     """初始化出版级页面设置与基础样式。"""
     # ── 标准页边距：上 2.54cm、下 2.54cm、左 2.8cm、右 2.6cm ──
     for section in doc.sections:
-        section.top_margin = Cm(2.54)
-        section.bottom_margin = Cm(2.54)
-        section.left_margin = Cm(2.8)
-        section.right_margin = Cm(2.6)
+        _apply_section_margins(section)
 
     # ── Normal 正文基础样式 ──
     normal_style = doc.styles['Normal']
@@ -92,16 +99,218 @@ def _init_document_styles(doc: Document):
     normal_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
 
+def _add_cover_page(
+    doc: Document,
+    title: str,
+    subtitle: str = "（ 送 审 版 ）",
+    author_org: str = "",
+    qualification: str = "",
+    date_str: str = "",
+):
+    """添加符合甲级工程咨询送审规范的标准封面页（Section 1）。"""
+    sec = doc.sections[0]
+    _apply_section_margins(sec)
+    sec.header.is_linked_to_previous = False
+    sec.footer.is_linked_to_previous = False
+
+    # 1. 顶部呼吸留白（使用空段落以保持 title_p 的 space_before == 12pt 测试断言）
+    for _ in range(3):
+        p_sp = doc.add_paragraph()
+        p_sp.paragraph_format.space_before = Pt(0)
+        p_sp.paragraph_format.space_after = Pt(0)
+        p_sp.paragraph_format.first_line_indent = Pt(0)
+
+    # 2. 报告总标题（Level 0 / Title 样式）
+    p_title = doc.add_paragraph(style='Title')
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_title.paragraph_format.keep_with_next = True
+    p_title.paragraph_format.first_line_indent = Pt(0)
+    p_title.paragraph_format.space_before = Pt(12)
+    p_title.paragraph_format.space_after = Pt(12)
+    run_t = p_title.add_run(title)
+    _format_run(
+        run_t,
+        font_name='Times New Roman',
+        east_asia='黑体',
+        font_size=Pt(22),
+        bold=True,
+        color=RGBColor(0x0F, 0x17, 0x2A),
+    )
+
+    # 3. 副标题 / 送审状态
+    if subtitle:
+        p_sub = doc.add_paragraph()
+        p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_sub.paragraph_format.keep_with_next = True
+        p_sub.paragraph_format.first_line_indent = Pt(0)
+        p_sub.paragraph_format.space_before = Pt(8)
+        p_sub.paragraph_format.space_after = Pt(16)
+        run_sub = p_sub.add_run(subtitle)
+        _format_run(
+            run_sub,
+            font_name='Times New Roman',
+            east_asia='黑体',
+            font_size=Pt(14),
+            bold=True,
+            color=RGBColor(0x33, 0x41, 0x55),
+        )
+
+    # 4. 中间缓冲间距（推向下部 1/3 黄金分割位）
+    for _ in range(6):
+        p_sp = doc.add_paragraph()
+        p_sp.paragraph_format.space_before = Pt(0)
+        p_sp.paragraph_format.space_after = Pt(0)
+        p_sp.paragraph_format.first_line_indent = Pt(0)
+
+    # 5. 编制机构与资质元数据块（段落排版，杜绝表格以确保 len(tables) == 1 既有测试断言）
+    org_text = author_org or "工程咨询设计研究院有限公司"
+    qual_text = qualification or "甲级工程咨询资信证书编号：工咨甲00000000"
+    date_val = date_str or datetime.now().strftime("%Y 年 %m 月")
+
+    meta_items = [
+        f"编制单位：{org_text}",
+        f"咨询资质：{qual_text}",
+        f"编制时间：{date_val}",
+    ]
+    for item in meta_items:
+        p_meta = doc.add_paragraph()
+        p_meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_meta.paragraph_format.first_line_indent = Pt(0)
+        p_meta.paragraph_format.line_spacing = 1.5
+        p_meta.paragraph_format.space_before = Pt(3)
+        p_meta.paragraph_format.space_after = Pt(3)
+        run_meta = p_meta.add_run(item)
+        _format_run(
+            run_meta,
+            font_name='Times New Roman',
+            east_asia='仿宋',
+            font_size=Pt(12),
+            bold=False,
+            color=RGBColor(0x1E, 0x29, 0x3B),
+        )
+
+
+def _add_toc_page(doc: Document):
+    """添加标准自动化目录页（Section 2），包含原生 Word TOC 域及打开自动更新开关。"""
+    toc_sec = doc.add_section(WD_SECTION.NEW_PAGE)
+    _apply_section_margins(toc_sec)
+    toc_sec.header.is_linked_to_previous = False
+    toc_sec.footer.is_linked_to_previous = False
+
+    # 目录标题（使用 Normal 样式加粗居中，避免被 TOC 域识别为标题自递归）
+    p_toc_title = doc.add_paragraph()
+    p_toc_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_toc_title.paragraph_format.keep_with_next = True
+    p_toc_title.paragraph_format.first_line_indent = Pt(0)
+    p_toc_title.paragraph_format.space_before = Pt(18)
+    p_toc_title.paragraph_format.space_after = Pt(18)
+    run_toc_title = p_toc_title.add_run("目    录")
+    _format_run(
+        run_toc_title,
+        font_name='Times New Roman',
+        east_asia='黑体',
+        font_size=Pt(18),
+        bold=True,
+        color=RGBColor(0x0F, 0x17, 0x2A),
+    )
+
+    # 插入标准 Word TOC 域（1-3 级标题大纲）
+    p_toc = doc.add_paragraph()
+    p_toc.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p_toc.paragraph_format.first_line_indent = Pt(0)
+    run_toc = p_toc.add_run()
+    fld1 = parse_xml(r'<w:fldChar %s w:fldCharType="begin"/>' % nsdecls('w'))
+    instr = parse_xml(r'<w:instrText %s xml:space="preserve"> TOC \o "1-3" \h \z \u </w:instrText>' % nsdecls('w'))
+    fld2 = parse_xml(r'<w:fldChar %s w:fldCharType="separate"/>' % nsdecls('w'))
+    fld3 = parse_xml(r'<w:fldChar %s w:fldCharType="end"/>' % nsdecls('w'))
+    run_toc._r.append(fld1)
+    run_toc._r.append(instr)
+    run_toc._r.append(fld2)
+    run_toc._r.append(fld3)
+
+    # 提示引导段落
+    p_tip = doc.add_paragraph()
+    p_tip.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_tip.paragraph_format.first_line_indent = Pt(0)
+    p_tip.paragraph_format.space_before = Pt(12)
+    run_tip = p_tip.add_run("（在 Word 中打开时将自动加载目录；如未显示可右键选择“更新域”生成全书目录）")
+    _format_run(
+        run_tip,
+        font_name='Times New Roman',
+        east_asia='仿宋',
+        font_size=Pt(9.5),
+        italic=True,
+        color=RGBColor(0x94, 0xA3, 0xB8),
+    )
+
+    # 设置 Word 打开时自动更新域代码（Microsoft Word 专属）
+    try:
+        update_flds = parse_xml(r'<w:updateFields %s w:val="true"/>' % nsdecls('w'))
+        doc.settings.element.append(update_flds)
+    except Exception:
+        pass
+
+
+def _setup_body_section(doc: Document, header_title: str):
+    """建立正文独立分节（Section 3），配置专业下划线页眉与重新起算的居中页脚。"""
+    body_sec = doc.add_section(WD_SECTION.NEW_PAGE)
+    _apply_section_margins(body_sec)
+    body_sec.header.is_linked_to_previous = False
+    body_sec.footer.is_linked_to_previous = False
+
+    # 1. 专业页眉：报告名称 + 下划横线
+    hp = body_sec.header.paragraphs[0]
+    hp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    hp.paragraph_format.space_before = Pt(0)
+    hp.paragraph_format.space_after = Pt(0)
+    hp.paragraph_format.first_line_indent = Pt(0)
+    hrun = hp.add_run(header_title or "工程咨询报告")
+    _format_run(
+        hrun,
+        font_name='Times New Roman',
+        east_asia='仿宋',
+        font_size=Pt(9),
+        color=RGBColor(0x64, 0x74, 0x8B),
+    )
+    pPr = hp._p.get_or_add_pPr()
+    pBdr = parse_xml(
+        r'<w:pBdr %s><w:bottom w:val="single" w:sz="6" w:space="2" w:color="94A3B8"/></w:pBdr>' % nsdecls('w')
+    )
+    pPr.append(pBdr)
+
+    # 2. 专业页脚：- PAGE - 居中页码
+    fp = body_sec.footer.paragraphs[0]
+    fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fp.paragraph_format.space_before = Pt(0)
+    fp.paragraph_format.space_after = Pt(0)
+    fp.paragraph_format.first_line_indent = Pt(0)
+    frun1 = fp.add_run("- ")
+    _format_run(frun1, font_name='Times New Roman', east_asia='宋体', font_size=Pt(10), color=RGBColor(0x64, 0x74, 0x8B))
+    fld_page = parse_xml(r'<w:fldSimple %s w:instr="PAGE"/>' % nsdecls('w'))
+    fp._p.append(fld_page)
+    frun2 = fp.add_run(" -")
+    _format_run(frun2, font_name='Times New Roman', east_asia='宋体', font_size=Pt(10), color=RGBColor(0x64, 0x74, 0x8B))
+
+    # 3. 正文页码从 1 重新起算
+    pgNumType = parse_xml(r'<w:pgNumType %s w:start="1"/>' % nsdecls('w'))
+    body_sec._sectPr.append(pgNumType)
+
+
 def md_to_docx(
     md_content: str,
     output_path: str,
     title: str = "",
     skeleton: str = "",
     project: str = "",
+    author_org: str = "",
+    qualification: str = "",
+    date_str: str = "",
+    include_cover: bool = True,
+    include_toc: bool = True,
 ) -> str:
     """把 Markdown 内容转为符合出版级排版规范的 Word 文档。
 
-    title 非空时在开头插入报告总标题（Level 0 / Title 样式）。
+    title 非空时在开头插入规范标准封面页（Level 0 / Title 样式），支持自动生成目录域及独立正文分节。
     支持 skeleton 大纲骨架或 project 加载大纲，彻底消除节标题与正文粘连。
     """
     if not skeleton and project:
@@ -135,8 +344,20 @@ def md_to_docx(
     doc = Document()
     _init_document_styles(doc)
 
-    # ── 报告标题（Title 样式）──
-    if title:
+    # ── 规范封面、目录与正文分节构建 ──
+    if title and include_cover:
+        _add_cover_page(
+            doc,
+            title=title,
+            subtitle="（ 送 审 版 ）",
+            author_org=author_org,
+            qualification=qualification,
+            date_str=date_str,
+        )
+        if include_toc:
+            _add_toc_page(doc)
+        _setup_body_section(doc, header_title=title or project)
+    elif title:
         _add_heading(doc, title, level=0)
 
     # ── 预处理：提取块级公式（$$...$$），替换为占位防止行分割 ──
@@ -145,7 +366,7 @@ def md_to_docx(
 
     def _replace_display(m):
         _df_counter[0] += 1
-        key = f"\x00LATEX_DISPLAY_{_df_counter[0]}\x00"
+        key = f"__LATEX_DISPLAY_{_df_counter[0]}__"
         display_formulas[key] = m.group(1).strip()
         return key
 
@@ -158,7 +379,7 @@ def md_to_docx(
         stripped = line.strip()
 
         # ── 块级公式占位 → 插入居中公式段 ──
-        if stripped.startswith('\x00LATEX_DISPLAY_'):
+        if stripped.startswith('__LATEX_DISPLAY_'):
             key = stripped
             if key in display_formulas:
                 p = doc.add_paragraph()
@@ -168,6 +389,8 @@ def md_to_docx(
                 p.paragraph_format.first_line_indent = Pt(0)
                 run = p.add_run(f"${display_formulas[key]}$")
                 _format_run(run, font_name='Times New Roman', east_asia='仿宋', font_size=Pt(11), italic=True)
+            i += 1
+            continue
         # ── Mermaid 流程图代码块检测 ──
         if stripped.startswith('```mermaid'):
             mermaid_lines = []
