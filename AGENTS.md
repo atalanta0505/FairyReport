@@ -5,11 +5,11 @@
 
 ## 项目概况
 
-- FairyReport v1.0.5：基于 Streamlit + LLM + RAG 的工程咨询报告生成工具（12 类投前咨询交付物）。
-- 技术栈：Python 3.10+、streamlit、openai 兼容 API、chromadb、sentence-transformers、python-docx、openpyxl。
-- 入口：`app.py`（`streamlit run app.py`）。
-- 核心模块：`pipeline.py`（解析/分块）、`kb.py`（向量库）、`outline.py`（大纲）、`writer.py`（写作）、`exporter.py`（导出）、`ref_manager.py`、`hint_store.py`、`web_search.py`、`steps/`（UI 步骤）、`components/`、`converters/`（格式转换）、`generic_knowledge/`（只读资源与模板 JSON）。
-- 全局配置：`config.py`（支持 `.env` 覆盖）。数据目录：开发模式为仓库根目录下 `data/`；打包后为 `%LOCALAPPDATA%\FairyReport`（可用 `FRL_DATA_DIR` 覆盖）。
+- FairyReport：基于 **Tauri 2 + Vue 3 + FastAPI + LLM + 三源 RAG** 架构的工程咨询智能报告生成平台（12 类投前咨询交付物）。
+- 技术栈：Rust (Tauri 2)、Vue 3 + TypeScript + Vite + Pinia、Python 3.10+ (FastAPI + Pydantic + fastembed + chromadb)、python-docx、openpyxl。
+- 前端入口：`desktop/`；后端引擎入口：`engine/app/main.py`。
+- 核心模块：`engine/app/materials/`（解析/分块/向量化）、`engine/app/writing/`（大纲/流式撰写/审阅/自洽性核验）、`engine/app/export/`（出版级 Word 与 Markdown 导出）、`generic_knowledge/`（只读行业规程与模板 JSON 库）。
+- 全局配置：`engine/app/config.py`（支持 `.env` 覆盖）。数据目录：开发模式为 `data/`（可用 `ENGINE_DATA_DIR` 覆盖）。
 
 ## 单写入者规则
 

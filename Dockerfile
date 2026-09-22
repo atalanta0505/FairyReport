@@ -29,7 +29,6 @@ RUN pip install --no-cache-dir -i https://mirrors.tencentyun.com/pypi/simple/ -r
 # 复制代码与只读资源库
 COPY engine/ /app/engine/
 COPY generic_knowledge/ /app/generic_knowledge/
-COPY config.py /app/config.py
 
 # 创建持久化数据挂载目录
 RUN mkdir -p /app/data

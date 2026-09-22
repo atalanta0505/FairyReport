@@ -552,9 +552,9 @@ def test_export_standard_cover_toc_and_sections(client):
     assert 'w:start="1"' in sec_body._sectPr.xml
 
 
-def test_root_exporter_standard_layout(tmp_path):
-    """验证根目录 exporter.py 在单机/Streamlit 导出场景同样生成标准封面、TOC 与正文分节。"""
-    from exporter import md_to_docx as root_md_to_docx
+def test_export_custom_metadata_cover_and_sections(tmp_path):
+    """验证 docx_builder 在指定编制机构与资质证书等元数据时生成标准封面、TOC 与正文分节。"""
+    from engine.app.export.docx_builder import md_to_docx as core_md_to_docx
 
     md_content = (
         "# 第一章 项目概述\n\n"
@@ -562,8 +562,8 @@ def test_root_exporter_standard_layout(tmp_path):
         "本项目规划投资2000万元。\n\n"
         "| 序号 | 项目 | 数值 |\n| :---: | :--- | ---: |\n| 1 | 占地 | 50亩 |\n"
     )
-    out_file = str(tmp_path / "root_exporter_demo.docx")
-    root_md_to_docx(
+    out_file = str(tmp_path / "custom_metadata_demo.docx")
+    core_md_to_docx(
         md_content,
         out_file,
         title="综合水利工程项目可行性研究报告",

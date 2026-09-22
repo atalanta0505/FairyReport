@@ -11,9 +11,9 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# 确保能直接导入 exporter
+# 确保能直接导入 engine 模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from exporter import md_to_docx
+from engine.app.export.docx_builder import md_to_docx
 
 if hasattr(sys.stdout, 'reconfigure'):
     try:
