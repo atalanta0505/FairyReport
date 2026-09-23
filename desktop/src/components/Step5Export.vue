@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   assignGlobalRefNumbers,
   convertRefsToNumberedCitations,
@@ -148,6 +148,17 @@ onMounted(() => {
     runContextVerification();
   }
 });
+
+// 监听引擎就绪或章节数据载入，全自动静默执行核验，无需用户手动点按
+watch(
+  [() => engine.baseUrl, () => projectStore.currentProject?.name, writtenChaptersCount],
+  ([url, proj, count]) => {
+    if (url && proj && count > 0 && !verificationResult.value && !verifyingContext.value) {
+      runContextVerification();
+    }
+  },
+  { immediate: true },
+);
 
 // ── 定位至问题章节修改 ──
 function jumpToChapter(seq: number) {
