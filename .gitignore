@@ -63,3 +63,8 @@ desktop/src-tauri/binaries/
 build_engine_pyinstaller/
 engine/generic_pack/*.zip
 scratch/
+
+# Documentation website build artifacts
+site/node_modules/
+site/.vitepress/dist/
+site/.vitepress/cache/
