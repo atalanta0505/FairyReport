@@ -758,11 +758,18 @@ export const useProjectStore = defineStore("project", () => {
     error.value = null;
     try {
       const list = await engineApi.getTemplates(baseUrl);
-      templates.value = list;
-      if (list.length > 0 && !list.find((t) => t.report_type === reportType.value)) {
-        reportType.value = list[0].report_type;
+      const normalized = list.map((t) => ({
+        ...t,
+        report_type: t.report_type === "智库决策专报与建言报告" ? "智库专报" : t.report_type,
+      }));
+      templates.value = normalized;
+      if (reportType.value === "智库决策专报与建言报告") {
+        reportType.value = "智库专报";
       }
-      return list;
+      if (normalized.length > 0 && !normalized.find((t) => t.report_type === reportType.value)) {
+        reportType.value = normalized[0].report_type;
+      }
+      return normalized;
     } catch (e) {
       error.value = (e as Error).message;
       throw e;
@@ -848,7 +855,7 @@ export const useProjectStore = defineStore("project", () => {
               ? res.chapters
               : parseChaptersFromOutline(res.outline_md || "");
           if (res.report_type) {
-            reportType.value = res.report_type;
+            reportType.value = res.report_type === "智库决策专报与建言报告" ? "智库专报" : res.report_type;
           }
           if (res.writing_order && res.writing_order.length > 0) {
             writingOrder.value = res.writing_order;
@@ -892,7 +899,7 @@ export const useProjectStore = defineStore("project", () => {
       const local = loadOutlineFromLocal(targetName);
       if (local) {
         if (local.report_type) {
-          reportType.value = local.report_type;
+          reportType.value = local.report_type === "智库决策专报与建言报告" ? "智库专报" : local.report_type;
         }
         outlineMd.value = local.outline_md || "";
         outlineChapters.value =
@@ -988,7 +995,7 @@ export const useProjectStore = defineStore("project", () => {
   }
 
   function setReportType(type: string, baseUrl?: string) {
-    reportType.value = type;
+    reportType.value = type === "智库决策专报与建言报告" ? "智库专报" : type;
     triggerAutoSaveOutline(baseUrl);
   }
 

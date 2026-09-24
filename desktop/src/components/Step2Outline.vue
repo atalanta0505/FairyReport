@@ -65,8 +65,29 @@ watch(
   },
 );
 
+function formatReportTypeName(type: string): string {
+  if (type === "智库决策专报与建言报告") return "智库专报";
+  return type;
+}
+
+function isTemplateActive(type: string): boolean {
+  if (projectStore.reportType === type) return true;
+  if (
+    (type === "智库专报" || type === "智库决策专报与建言报告") &&
+    (projectStore.reportType === "智库专报" || projectStore.reportType === "智库决策专报与建言报告")
+  ) {
+    return true;
+  }
+  return false;
+}
+
 const currentTemplate = computed(() => {
-  return projectStore.templates.find((t) => t.report_type === projectStore.reportType);
+  return projectStore.templates.find(
+    (t) =>
+      t.report_type === projectStore.reportType ||
+      (t.report_type === "智库决策专报与建言报告" && projectStore.reportType === "智库专报") ||
+      (t.report_type === "智库专报" && projectStore.reportType === "智库决策专报与建言报告"),
+  );
 });
 
 const wordCount = computed(() => {
@@ -78,7 +99,8 @@ const lineCount = computed(() => {
 });
 
 function onSelectTemplate(reportType: string) {
-  projectStore.setReportType(reportType, engine.baseUrl);
+  const normalized = reportType === "智库决策专报与建言报告" ? "智库专报" : reportType;
+  projectStore.setReportType(normalized, engine.baseUrl);
 }
 
 async function handleGenerateOutline() {
@@ -152,12 +174,12 @@ function nextStep() {
             v-for="t in projectStore.templates"
             :key="t.report_type"
             class="template-item"
-            :class="{ active: projectStore.reportType === t.report_type }"
+            :class="{ active: isTemplateActive(t.report_type) }"
             @click="onSelectTemplate(t.report_type)"
           >
             <div class="template-item-top">
               <span class="template-icon">📄</span>
-              <span class="template-name">{{ t.report_type }}</span>
+              <span class="template-name">{{ formatReportTypeName(t.report_type) }}</span>
             </div>
           </div>
         </div>
@@ -201,7 +223,7 @@ function nextStep() {
           <div class="spinner"></div>
           <div>
             <strong>AI 正在结合项目资料与通用规范生成报告大纲...</strong>
-            <p>基于 {{ projectStore.reportType }} 规范自动规划章节层级与标准结构体系，请稍候。</p>
+            <p>基于 {{ formatReportTypeName(projectStore.reportType) }} 规范自动规划章节层级与标准结构体系，请稍候。</p>
           </div>
         </div>
 

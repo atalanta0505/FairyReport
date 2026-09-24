@@ -53,6 +53,7 @@ REPORT_WORD_LIMITS = {
     "专题研究报告": 30000,
     "投资机会研究报告": 20000,
     "智库专报": 30000,
+    "智库决策专报与建言报告": 30000,  # 兼容历史别名
 }
 
 MAX_WORDS_PER_CHAPTER = {
@@ -78,6 +79,7 @@ TEMPLATE_MAP = {
     "专题研究报告": "zhuanti_yanjiu.json",
     "投资机会研究报告": "touzi_jihui.json",
     "智库专报": "zhiku_juece_zhuanbao.json",
+    "智库决策专报与建言报告": "zhiku_juece_zhuanbao.json",  # 兼容历史别名
 }
 
 RAG_RESULTS_PER_SOURCE = 5
