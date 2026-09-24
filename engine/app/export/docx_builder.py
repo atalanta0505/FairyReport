@@ -174,7 +174,7 @@ def _add_cover_page(
         p_sp.paragraph_format.first_line_indent = Pt(0)
 
     # 5. 编制机构与资质元数据块（段落排版，杜绝表格以确保 len(tables) == 1 既有测试断言）
-    org_text = author_org or "中国联合工程设计研究院有限公司"
+    org_text = author_org or "现代工程设计咨询研究院"
     qual_text = qualification or "资信证书编号：ZX11120240088"
     date_val = date_str or _format_chinese_date()
 

@@ -730,11 +730,11 @@ describe("Markdown 解析与排版工具", () => {
   });
 
   describe("V2-T30: 三源参考文献分类统计与内联标签双向联动", () => {
-    it("getReferencesSummary: 准确统计三源分类（项目底稿/国标规程/百度联网）数量与引用频次", () => {
+    it("getReferencesSummary: 准确统计三源分类（项目底稿/标准规程/百度联网）数量与引用频次", () => {
       const refs = [
         { type: "material" as const, typeLabel: "项目底稿", title: "可研报告.docx", raw: "【源:可研报告.docx】", count: 3 },
         { type: "material" as const, typeLabel: "项目底稿", title: "地质勘探.pdf", raw: "【源:地质勘探.pdf】", count: 1 },
-        { type: "standard" as const, typeLabel: "国标规程", title: "防洪标准GB50201", raw: "【标:防洪标准GB50201】", count: 2 },
+        { type: "standard" as const, typeLabel: "标准规程", title: "防洪标准GB50201", raw: "【标:防洪标准GB50201】", count: 2 },
         { type: "web" as const, typeLabel: "百度联网", title: "国家发改委产业目录", raw: "【网:国家发改委产业目录】", count: 4, url: "https://www.ndrc.gov.cn" },
       ];
 

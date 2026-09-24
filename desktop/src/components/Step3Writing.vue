@@ -1046,7 +1046,7 @@ function nextStep() {
                 <div class="summary-stat-card type-standard">
                   <div class="stat-card-header">
                     <span class="stat-icon">⚖️</span>
-                    <span class="stat-label">国标规程</span>
+                    <span class="stat-label">标准规程</span>
                   </div>
                   <div class="stat-card-values">
                     <span class="stat-count"><strong>{{ refSummary.standard.count }}</strong> 项</span>
@@ -1086,7 +1086,7 @@ function nextStep() {
                   :class="{ active: refFilterType === 'standard' }"
                   @click="refFilterType = 'standard'"
                 >
-                  ⚖️ 国标规程 ({{ refSummary.standard.count }})
+                  ⚖️ 标准规程 ({{ refSummary.standard.count }})
                 </button>
                 <button
                   class="subtab-btn"
@@ -1149,7 +1149,7 @@ function nextStep() {
                         : refFilterType === 'material'
                         ? '本章暂无项目底稿资料引用'
                         : refFilterType === 'standard'
-                        ? '本章暂无行业国标规程引用'
+                        ? '本章暂无行业标准规程引用'
                         : '本章暂无百度联网检索引用'
                     }}
                   </p>

@@ -94,7 +94,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: '投资项目与工程智能报告生成平台 | 遵守国家发改委标准指南与行业规程',
+      message: '投资项目与工程智能报告生成平台 | 遵循行业通用编制指南与现行规程',
       copyright: 'Copyright © 2026 FairyReport Team. 保留所有权利。'
     },
 

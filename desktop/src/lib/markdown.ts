@@ -555,11 +555,11 @@ export function extractReferences(text: string, ragContext?: string): ReferenceI
       }
     } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
       type = "standard";
-      typeLabel = "国标规程";
+      typeLabel = "标准规程";
     } else {
       if (/规程|规范|标准|GB|SL|NB|DL|定额|导则|通则|法/i.test(content)) {
         type = "standard";
-        typeLabel = "国标规程";
+        typeLabel = "标准规程";
       } else {
         type = "material";
         typeLabel = "项目底稿";
@@ -632,7 +632,7 @@ export function extractReferences(text: string, ragContext?: string): ReferenceI
     } else {
       map.set(key, {
         type: "standard",
-        typeLabel: "国标规程",
+        typeLabel: "标准规程",
         title: identifier,
         raw: rawTag,
         count: 1,
@@ -1328,11 +1328,11 @@ export function assignGlobalRefNumbers(
         }
       } else if (prefix.startsWith("标") || prefix.startsWith("规") || prefix.startsWith("法")) {
         type = "standard";
-        typeLabel = "国标规程";
+        typeLabel = "标准规程";
       } else {
         if (/规程|规范|标准|GB|SL|NB|DL|定额|导则|通则|法/i.test(content)) {
           type = "standard";
-          typeLabel = "国标规程";
+          typeLabel = "标准规程";
         } else {
           type = "material";
           typeLabel = "项目底稿";
@@ -1417,7 +1417,7 @@ export function assignGlobalRefNumbers(
           title,
           name: title,
           type: "standard",
-          typeLabel: "国标规程",
+          typeLabel: "标准规程",
           count: 1,
           raw: rawTag,
           firstChapterSeq: seq,

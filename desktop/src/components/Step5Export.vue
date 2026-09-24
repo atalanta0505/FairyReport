@@ -216,7 +216,7 @@ async function executeExportDocx() {
       include_refs: true,
       include_cover: true,
       include_toc: true,
-      author_org: "中国联合工程设计研究院有限公司",
+      author_org: "现代工程设计咨询研究院",
       qualification: "资信证书编号：ZX11120240088",
     });
 
