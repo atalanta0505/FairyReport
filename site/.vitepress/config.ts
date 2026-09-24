@@ -24,7 +24,6 @@ export default defineConfig({
           { text: '扫描件 PDF 离线 OCR', link: '/docs/pdf-ocr' }
         ]
       },
-      { text: '宣介素材', link: '/guide/presentation' },
       { text: '更新日志', link: '/changelog' },
       { text: '📥 下载客户端', link: '/download' },
       { text: '常见问题', link: '/guide/faq' }
@@ -37,12 +36,6 @@ export default defineConfig({
           items: [
             { text: '5 分钟极速上手', link: '/guide/getting-started' },
             { text: '新手常见答疑 (FAQ)', link: '/guide/faq' }
-          ]
-        },
-        {
-          text: '宣发底稿',
-          items: [
-            { text: '推介会 PPT 与宣传片分镜', link: '/guide/presentation' }
           ]
         }
       ],
