@@ -34,7 +34,7 @@ REPORT_TYPES = [
     "政府和社会资本合作项目特许经营方案",
     "项目评估报告",
     "专题研究报告",
-    "智库决策专报与建言报告",
+    "智库专报",
 ]
 
 REPORT_WORD_LIMITS = {
@@ -52,7 +52,7 @@ REPORT_WORD_LIMITS = {
     "社会评价报告": 30000,
     "专题研究报告": 30000,
     "投资机会研究报告": 20000,
-    "智库决策专报与建言报告": 30000,
+    "智库专报": 30000,
 }
 
 MAX_WORDS_PER_CHAPTER = {
@@ -77,7 +77,7 @@ TEMPLATE_MAP = {
     "社会评价报告": "shehui_pingjia.json",
     "专题研究报告": "zhuanti_yanjiu.json",
     "投资机会研究报告": "touzi_jihui.json",
-    "智库决策专报与建言报告": "zhiku_juece_zhuanbao.json",
+    "智库专报": "zhiku_juece_zhuanbao.json",
 }
 
 RAG_RESULTS_PER_SOURCE = 5
@@ -97,7 +97,7 @@ TECH_ANALYSIS_CONDITIONAL_REPORT_TYPES = [
     "产业发展规划报告",
     "园区发展规划报告",
     "企业发展规划报告",
-    "智库决策专报与建言报告",
+    "智库专报",
 ]
 
 TECH_CHAPTER_KEYWORDS = [

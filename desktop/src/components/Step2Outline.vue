@@ -165,7 +165,7 @@ function nextStep() {
         <!-- 模板说明提示 -->
         <div v-if="currentTemplate?.notes" class="template-notes-box">
           <span class="notes-icon">💡</span>
-          <span class="notes-text"><strong>模板规范提示：</strong>{{ currentTemplate.notes }}</span>
+          <span class="notes-text"><strong>报告类型介绍：</strong>{{ currentTemplate.notes }}</span>
         </div>
       </div>
     </div>
@@ -364,14 +364,15 @@ function nextStep() {
 .template-item {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 8px 14px;
   cursor: pointer;
   background: #fff;
   transition: all 0.15s ease;
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 6px;
+  align-items: center;
+  min-height: 58px;
+  height: 58px;
+  box-sizing: border-box;
 }
 .template-item:hover {
   border-color: #93c5fd;
@@ -387,14 +388,18 @@ function nextStep() {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
 }
 .template-icon {
   font-size: 16px;
+  flex-shrink: 0;
 }
 .template-name {
   font-size: 13px;
   font-weight: 600;
   color: #1e293b;
+  line-height: 1.35;
+  word-break: break-word;
 }
 .template-item.active .template-name {
   color: #1d4ed8;

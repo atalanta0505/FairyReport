@@ -327,7 +327,7 @@ def test_list_templates_returns_15_types(client):
     report_types = [it["report_type"] for it in items]
     assert "可行性研究报告" in report_types
     assert "产业发展规划报告" in report_types
-    assert "智库决策专报与建言报告" in report_types
+    assert "智库专报" in report_types
     fe = next(it for it in items if it["report_type"] == "可行性研究报告")
     assert fe["total_words_max"] == 0
 
