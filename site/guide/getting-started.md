@@ -124,12 +124,13 @@ FairyReport 内置的「**智库专报**」类型支持**项目资料留空**直
 
 ## 🔑 首次使用：设置大模型 API Key
 
-首次使用前，只需配置一次大模型密钥（如 DeepSeek 等兼容 OpenAI 协议的模型）：
+系统目前支持 **DeepSeek 系列模型**（推荐使用官方最新模型）：
 
 1. 打开应用右上角 **「设置」**（齿轮图标）。
-2. 在 **API Key** 输入框中，粘贴你的 API Key（例如从 DeepSeek 开放平台申请的 Key）。
-3. 接口地址保持默认 `https://api.deepseek.com/v1`（也可根据需要填入自定义兼容中继或私有部署地址）。
-4. 点击 **「保存配置」** 即可。
+2. 在 **API Key** 输入框中，粘贴你的 DeepSeek API Key（从 DeepSeek 开放平台申请）。
+3. 接口地址保持默认 `https://api.deepseek.com/v1`。
+4. 模型选择推荐的 DeepSeek 官方最新模型（如 `deepseek-chat` / `deepseek-reasoner`）。
+5. 点击 **「保存配置」** 即可。
 
 ::: warning 🔒 数据安全提示
 你的 API Key 仅保存在本机本地配置文件中，绝对不会上传到任何第三方或公共服务器。

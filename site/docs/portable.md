@@ -55,5 +55,5 @@ FairyReport.exe
 :::
 
 ::: details 3. 可以在离线局域网或断网机房中使用吗？
-**解答**：可以！FairyReport 的文档解析、向量检索和前端排版完全离线运行。如需在无外网环境下撰写，只需在局域网内搭建 [Ollama](https://ollama.ai/) 本地大模型服务，并将 FairyReport 设置中的 API 地址指向该局域网 IP（例如 `http://192.168.1.100:11434/v1`）即可。
+**解答**：可以！FairyReport 的文档解析、向量检索和前端排版完全离线运行。如需在无外网环境下撰写，只需在局域网内搭建 DeepSeek 本地服务（或 DeepSeek 开源模型推理接口），并将 FairyReport 设置中的 API 地址指向该局域网服务地址即可。
 :::
