@@ -416,7 +416,7 @@ def run_full_context_verification(
     elif len(warnings) > 0:
         summary = f"🟡 全书核心数据前后自洽，检测到 {len(warnings)} 项建议关注的引用或表述细节，综合自洽度为 {score} 分，可放心导出。"
     else:
-        summary = f"✅ 全书跨章节核心指标完全吻合、引用链溯源清晰、上下游逻辑闭环，综合自洽度达到 {score} 分，达到甲级送审标准！"
+        summary = f"✅ 全书跨章节核心指标完全吻合、引用链溯源清晰、上下游逻辑闭环，综合自洽度达到 {score} 分，100%吻合！"
 
     return ContextVerifyResponse(
         is_consistent=is_consistent,

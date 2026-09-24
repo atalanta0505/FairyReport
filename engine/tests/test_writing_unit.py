@@ -121,7 +121,7 @@ def test_pure_chinese_reasoning_constraint_in_prompts():
 
     # 1. 核心防御常量硬性规范核验
     assert "【思考链与语言规范（最高优先级·纯中文绝对纯化防线）】" in REASONING_CHINESE_DEFENSE_PROMPT
-    assert "100% 使用通用规范简体中文进行投资项目与工程咨询专业论证" in REASONING_CHINESE_DEFENSE_PROMPT
+    assert "100% 使用通用规范简体中文进行投资项目专业论证" in REASONING_CHINESE_DEFENSE_PROMPT
     assert "绝对禁止夹杂任何英文思考句子、英文短语或英文分析单词" in REASONING_CHINESE_DEFENSE_PROMPT
     assert "'Okay', 'Let me', 'First', 'Next', 'I should', 'We need to'" in REASONING_CHINESE_DEFENSE_PROMPT
 

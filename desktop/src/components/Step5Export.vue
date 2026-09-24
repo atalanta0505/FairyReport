@@ -29,6 +29,7 @@ let toastTimer: any = null;
 const verifyingContext = ref(false);
 const verificationResult = ref<engineApi.ContextVerifyResponse | null>(null);
 const verificationFilter = ref<"all" | "conflict" | "warning" | "pass">("all");
+const verificationError = ref("");
 const showConflictModal = ref(false);
 const pendingExportType = ref<"docx" | "md" | null>(null);
 
@@ -123,21 +124,42 @@ const filteredVerificationItems = computed(() => {
 });
 
 // ── 触发自洽性核验 ──
-async function runContextVerification() {
-  if (!engine.baseUrl) return;
-  if (!projectStore.currentProject) return;
-  if (writtenChaptersCount.value === 0) return;
+async function runContextVerification(manual = false) {
+  if (!engine.baseUrl) {
+    if (manual) showMsg("本地引擎未就绪，请等待引擎连接", "error");
+    return;
+  }
+  if (!projectStore.currentProject) {
+    if (manual) showMsg("未选中项目", "error");
+    return;
+  }
+  if (writtenChaptersCount.value === 0) {
+    if (manual) showMsg("全书尚无章节正文，请先在步骤 3 写作或步骤 4 审阅中完善内容", "error");
+    return;
+  }
 
   verifyingContext.value = true;
+  verificationError.value = "";
   try {
     const res = await engineApi.verifyContext(engine.baseUrl, {
       project: projectStore.currentProject.name,
-      report_type: projectStore.currentProject.report_type || "",
+      report_type: projectStore.reportType || "",
       chapters: projectStore.chapters,
     });
     verificationResult.value = res;
+    if (manual) {
+      showMsg("✅ 自洽性核验完成！", "success");
+    }
   } catch (err: any) {
     console.error("Context verification failed:", err);
+    let msg = err.message || "";
+    if (err.status === 404 || msg.includes("404")) {
+      msg = "当前运行的本地引擎版本过旧（缺少自洽性核验接口 404），请重新打包或重启最新引擎。";
+    }
+    verificationError.value = msg;
+    if (manual) {
+      showMsg(`自洽性核验失败: ${msg}`, "error");
+    }
   } finally {
     verifyingContext.value = false;
   }
@@ -145,7 +167,7 @@ async function runContextVerification() {
 
 onMounted(() => {
   if (engine.baseUrl && projectStore.currentProject && writtenChaptersCount.value > 0) {
-    runContextVerification();
+    runContextVerification(false);
   }
 });
 
@@ -154,7 +176,7 @@ watch(
   [() => engine.baseUrl, () => projectStore.currentProject?.name, writtenChaptersCount],
   ([url, proj, count]) => {
     if (url && proj && count > 0 && !verificationResult.value && !verifyingContext.value) {
-      runContextVerification();
+      runContextVerification(false);
     }
   },
   { immediate: true },
@@ -189,8 +211,13 @@ async function executeExportDocx() {
     const res = await engineApi.exportDocx(engine.baseUrl, {
       project: projectStore.currentProject.name,
       title: projectStore.currentProject.name,
+      subtitle: "（ 初 稿 ）",
       chapters: projectStore.chapters,
       include_refs: true,
+      include_cover: true,
+      include_toc: true,
+      author_org: "中国联合工程设计研究院有限公司",
+      qualification: "资信证书编号：ZX11120240088",
     });
 
     exportDocxResultPath.value = res.path;
@@ -424,8 +451,8 @@ async function handleDownloadExport(filePath?: string) {
               </div>
               <button
                 class="btn btn-secondary btn-sm"
-                :disabled="verifyingContext || writtenChaptersCount === 0"
-                @click="runContextVerification"
+                :disabled="verifyingContext"
+                @click="runContextVerification(true)"
               >
                 <span v-if="verifyingContext" class="spinner-inline dark"></span>
                 {{ verifyingContext ? '核验中...' : '🔄 重新核验' }}
@@ -447,6 +474,9 @@ async function handleDownloadExport(filePath?: string) {
           </div>
           <div v-else-if="verifyingContext" class="consistency-loading">
             <span class="spinner-inline dark"></span> 正在深度核验跨章节数据一致性与引用出处链...
+          </div>
+          <div v-else-if="verificationError" class="consistency-summary summary-danger">
+            ⚠️ 自洽性核验未完成：{{ verificationError }}
           </div>
           <div v-else class="consistency-empty">
             尚未执行自洽性复核，点击右上角「🔄 重新核验」启动检测。
@@ -718,7 +748,7 @@ async function handleDownloadExport(filePath?: string) {
             系统检测到全书存在 <strong>{{ verificationResult?.conflicts_count }}</strong> 处跨章节核心技术经济指标矛盾（如总投资、用地等前后数据打架）。
           </p>
           <p class="modal-tip">
-            直接导出未经对齐的成果可能导致送审被退回或专家对报告自洽性提出重大质询。建议先返回对应章节核对修改。
+            直接导出未经对齐的成果可能导致初稿数据矛盾或专家对报告自洽性提出重大质询。建议先返回对应章节核对修改。
           </p>
         </div>
         <div class="modal-actions">

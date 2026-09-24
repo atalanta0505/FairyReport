@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import * as engineApi from "../lib/engineApi";
 import {
   extractIssueCandidateKeys,
@@ -421,9 +421,20 @@ export const useProjectStore = defineStore("project", () => {
   const ingesting = ref<boolean>(false);
   const updatingGeneric = ref<boolean>(false);
   const error = ref<string | null>(null);
+  const isWritingAnyChapter = computed(() => {
+    return (
+      currentWritingSeq.value !== null ||
+      batchWriting.value ||
+      writingProgress.value !== null ||
+      Object.values(chapterStatuses.value).some((s) => s === "writing")
+    );
+  });
 
   function setStep(step: number) {
     if (step >= 1 && step <= 5) {
+      if (isWritingAnyChapter.value && step !== 3) {
+        return;
+      }
       currentStep.value = step;
       setStoredStep(step);
     }
@@ -1348,6 +1359,14 @@ export const useProjectStore = defineStore("project", () => {
           for (const [k, v] of Object.entries(res.reviews)) {
             const seq = Number(k);
             if (!isNaN(seq) && v) {
+              if (v.issues) {
+                v.issues.forEach((iss, idx) => {
+                  if (!iss.id) iss.id = `issue-${seq}-${idx + 1}`;
+                });
+              }
+              if (v.initial_issues_count === undefined) {
+                v.initial_issues_count = v.issues?.length || 0;
+              }
               newReviews[seq] = v;
             }
           }
@@ -1364,6 +1383,19 @@ export const useProjectStore = defineStore("project", () => {
     if (!loaded) {
       const local = loadReviewsFromLocal(targetName);
       if (local) {
+        for (const [k, v] of Object.entries(local)) {
+          const seq = Number(k);
+          if (!isNaN(seq) && v) {
+            if (v.issues) {
+              v.issues.forEach((iss, idx) => {
+                if (!iss.id) iss.id = `issue-${seq}-${idx + 1}`;
+              });
+            }
+            if (v.initial_issues_count === undefined) {
+              v.initial_issues_count = v.issues?.length || 0;
+            }
+          }
+        }
         chapterReviews.value = local;
         return local;
       } else {
@@ -1483,8 +1515,16 @@ export const useProjectStore = defineStore("project", () => {
         },
       );
 
-      const reviewRes = {
+      const issues = res.review?.issues ? [...res.review.issues] : [];
+      issues.forEach((iss, idx) => {
+        if (!iss.id) {
+          iss.id = `issue-${seq}-${idx + 1}-${Date.now()}`;
+        }
+      });
+      const reviewRes: engineApi.ExpertReviewResult = {
         ...res.review,
+        issues,
+        initial_issues_count: issues.length,
         updated_at: new Date().toISOString(),
       };
 
@@ -1628,11 +1668,22 @@ export const useProjectStore = defineStore("project", () => {
       };
       await saveChapter(targetUrl, seq, newChapterText, true);
 
-      // 从该章诊断问题中移除此问题
+      // 从该章诊断问题中精准移除被修复的这单一问题（避免误清空其他问题）
       if (chapterReviews.value[seq]?.issues) {
-        chapterReviews.value[seq].issues = chapterReviews.value[seq].issues.filter(
-          (i) => i.id !== issue.id && i.quote !== issue.quote && i.description !== issue.description
-        );
+        const issues = chapterReviews.value[seq].issues || [];
+        const targetIdx = issues.findIndex((i) => {
+          if (issue.id && i.id && issue.id === i.id) return true;
+          if (issue.quote && i.quote && issue.quote.trim() && i.quote.trim() === issue.quote.trim()) return true;
+          const d1 = (i.description || i.message || "").trim();
+          const d2 = (issue.description || issue.message || "").trim();
+          return Boolean(d1 && d2 && d1 === d2);
+        });
+        if (targetIdx !== -1) {
+          issues.splice(targetIdx, 1);
+        }
+        if (issues.length === 0) {
+          chapterReviews.value[seq].status = "通过";
+        }
         await saveReview(targetUrl, seq, chapterReviews.value[seq]);
       }
 
@@ -2006,8 +2057,16 @@ export const useProjectStore = defineStore("project", () => {
               },
             );
 
+            const issues = res.review?.issues ? [...res.review.issues] : [];
+            issues.forEach((iss, idx) => {
+              if (!iss.id) {
+                iss.id = `issue-${ch.seq}-${idx + 1}-${Date.now()}`;
+              }
+            });
             const reviewRes: engineApi.ExpertReviewResult = {
               ...res.review,
+              issues,
+              initial_issues_count: issues.length,
               updated_at: new Date().toISOString(),
             };
 
@@ -2178,6 +2237,7 @@ export const useProjectStore = defineStore("project", () => {
     batchWriting,
     currentWritingSeq,
     writingProgress,
+    isWritingAnyChapter,
     chapterReviews,
     fullBookReview,
     reviewingSeq,

@@ -85,6 +85,8 @@ def build():
         "--hidden-import",
         "engine.app.export.router",
         "--hidden-import",
+        "engine.app.writing.context_verifier",
+        "--hidden-import",
         "sqlite3",
         "--hidden-import",
         "docx2txt",
@@ -149,6 +151,16 @@ def build():
     target_file = output_dir / f"{binary_name}{ext}"
     if target_file.exists():
         print(f"[+] 成功构建独立引擎：{target_file} ({target_file.stat().st_size / (1024*1024):.1f} MB)")
+        import shutil
+        for sub in ["debug", "release"]:
+            dest_dir = REPO_ROOT / "desktop" / "src-tauri" / "target" / sub
+            if dest_dir.exists():
+                dest_file = dest_dir / f"fairyreport-engine{ext}"
+                try:
+                    shutil.copy2(target_file, dest_file)
+                    print(f"[+] 同步更新运行目录引擎: {dest_file}")
+                except Exception as e:
+                    print(f"[!] 无法更新 {dest_file} (可能因客户端正在运行被锁定，请关闭客户端后重启): {e}")
     else:
         print(f"[!] 未找到预期的构建产物：{target_file}")
         sys.exit(1)

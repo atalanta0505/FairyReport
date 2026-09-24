@@ -49,6 +49,7 @@ def verify_context_endpoint(req: VerifyContextRequest):
 class ExportDocxRequest(BaseModel):
     project: str = ""
     title: str = ""
+    subtitle: str = "（ 初 稿 ）"
     chapters: dict = Field(default_factory=dict)
     include_refs: bool = True
     author_org: str = ""
@@ -99,6 +100,7 @@ def export_docx(req: ExportDocxRequest):
             final_md,
             out_path,
             title=req.title,
+            subtitle=req.subtitle or "（ 初 稿 ）",
             project=req.project,
             author_org=req.author_org,
             qualification=req.qualification,

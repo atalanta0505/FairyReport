@@ -563,6 +563,7 @@ export interface ExpertReviewResult {
   score?: number;
   summary?: string;
   issues?: ReviewIssue[];
+  initial_issues_count?: number;
   numerical_checks?: NumericalCheckItem[];
   data_gap_checklist?: string[];
   suggestions?: string;
@@ -1356,8 +1357,14 @@ export async function verifyContext(
 export interface ExportDocxRequest {
   project: string;
   title: string;
+  subtitle?: string;
   chapters: Record<string | number, string>;
   include_refs?: boolean;
+  author_org?: string;
+  qualification?: string;
+  date_str?: string;
+  include_cover?: boolean;
+  include_toc?: boolean;
 }
 
 /** 导出全书 Word .docx 成果文件（包含顺序编号与末尾参考文献章） */

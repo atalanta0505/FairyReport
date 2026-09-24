@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 脚本：verify_standard_docx_export.py
-功能：使用甲级工程咨询报告全要素样本数据，调用升级后的 exporter.py 生成 standard_export_demo.docx，
+功能：使用报告全要素样本数据，调用升级后的 exporter.py 生成 standard_export_demo.docx，
       并严密检验封面排版、自动目录域（TOC）、正文独立分节、页眉横线、页脚重置、三线表及参考文献附链。
 """
 import os
@@ -100,7 +100,7 @@ def main():
     output_path = os.path.join(output_dir, "standard_export_demo.docx")
 
     print("=" * 70)
-    print("[*] 开始执行甲级工程咨询报告送审级 Word 导出排版验证...")
+    print("[*] 开始执行 Word 导出标准初稿排版验证...")
     print(f"[*] 目标产物路径: {output_path}")
 
     # 调用升级后的 exporter.md_to_docx
@@ -108,8 +108,8 @@ def main():
         md_content=SAMPLE_REPORT_MD,
         output_path=output_path,
         title="利辛县新型智能制造产业园基础设施建设项目可行性研究报告",
-        author_org="中国联合工程咨询设计研究院有限公司",
-        qualification="甲级工程咨询资信证书（工咨甲11120240088）",
+        author_org="中国联合工程设计研究院有限公司",
+        qualification="资信证书编号：ZX11120240088",
         date_str="二〇二六年九月",
         include_cover=True,
         include_toc=True,
@@ -138,12 +138,12 @@ def main():
     print("  • 封面要素校验：")
     assert any("利辛县新型智能制造产业园基础设施建设项目可行性研究报告" in t for t in cover_texts)
     print("    - 报告总标题（Level 0 / 22pt 黑体居中）: [通过]")
-    assert any("送 审 版" in t for t in cover_texts)
-    print("    - 送审版标识: [通过]")
-    assert any("中国联合工程咨询设计研究院有限公司" in t for t in cover_texts)
+    assert any("初 稿" in t or "初稿" in t for t in cover_texts)
+    print("    - 初稿标识: [通过]")
+    assert any("中国联合工程设计研究院有限公司" in t for t in cover_texts)
     print("    - 编制单位: [通过]")
-    assert any("工咨甲11120240088" in t for t in cover_texts)
-    print("    - 甲级工程咨询资质: [通过]")
+    assert any("ZX11120240088" in t for t in cover_texts)
+    print("    - 编制资质: [通过]")
     assert any("二〇二六年九月" in t for t in cover_texts)
     print("    - 编制日期: [通过]")
     assert sec_cover.header.paragraphs[0].text.strip() == ""
@@ -198,7 +198,7 @@ def main():
     print("    - 互联网参考资料 100% 附带原始 URL: [通过]")
 
     print("\n" + "=" * 70)
-    print("[SUCCESS] 恭喜！全部排版项均达到甲级工程咨询出版送审标准，各项证据 100% 吻合！")
+    print("[SUCCESS] 100%吻合。")
     print(f"[OUTPUT] 成果文件可直接交付打开查看: {output_path}")
     print("=" * 70)
 

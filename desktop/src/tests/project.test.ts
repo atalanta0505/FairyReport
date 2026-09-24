@@ -1600,6 +1600,93 @@ describe("Pinia useProjectStore", () => {
       expect(store.chapterSnapshots[1]).toBeUndefined();
     });
 
+    it("store: runParagraphRevision 多问题场景精准单项销号，严禁误清空其他问题条目", async () => {
+      const store = useProjectStore();
+      store.currentProject = { id: 1, name: "多问题测试项目", created_at: "2026-08-25T00:00:00Z" };
+      store.chapters[1] = "# 第一章 概述\n\n段落一：项目背景介绍。\n\n段落二：工艺参数需要补充。\n\n段落三：投资测算待校核。";
+      store.outlineChapters = [{ seq: 1, title: "第一章 概述" }];
+      store.chapterReviews[1] = {
+        status: "需补充",
+        score: 80,
+        initial_issues_count: 3,
+        issues: [
+          {
+            id: "iss-1",
+            dimension: "技术工艺",
+            severity: "high",
+            description: "工艺参数需要补充",
+            quote: "",
+          },
+          {
+            id: "iss-2",
+            dimension: "投资估算",
+            severity: "medium",
+            description: "投资测算待校核",
+            quote: "",
+          },
+          {
+            dimension: "环境保护",
+            severity: "suggestion",
+            description: "补充环评批复依据",
+            quote: "",
+          },
+        ],
+      };
+
+      mockFetch.mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.includes("/writing/revise-paragraph") || u.includes("/writing/revise_paragraph_stream")) {
+          return jsonResponse({ revised_paragraph: "段落二：工艺参数已严格补充并论证完备。" });
+        }
+        return jsonResponse({ ok: true });
+      });
+
+      // 仅针对第 1 项问题执行局部精准修改
+      const targetIssue = store.chapterReviews[1].issues![0];
+      await store.runParagraphRevision(BASE_URL, 1, targetIssue, {
+        api_key: "sk-test",
+        base_url: "http://api",
+        model: "m",
+      });
+
+      // 核心断言：仅目标问题被销号，其余 2 个问题完好保留！
+      expect(store.chapterReviews[1].issues?.length).toBe(2);
+      expect(store.chapterReviews[1].issues?.map((i) => i.description)).toEqual([
+        "投资测算待校核",
+        "补充环评批复依据",
+      ]);
+      // 因为还有剩余问题，状态依然是需补充
+      expect(store.chapterReviews[1].status).toBe("需补充");
+      expect(store.chapterReviews[1].initial_issues_count).toBe(3);
+    });
+
+    it("store: isWritingAnyChapter 状态联动与 setStep 写作中流转拦截", () => {
+      const store = useProjectStore();
+      store.setStep(3);
+      expect(store.currentStep).toBe(3);
+      expect(store.isWritingAnyChapter).toBe(false);
+
+      // 模拟章节流式生成中
+      store.currentWritingSeq = 1;
+      store.chapterStatuses[1] = "writing";
+      expect(store.isWritingAnyChapter).toBe(true);
+
+      // 写作中尝试跳往步骤 4 审阅修改或步骤 5 成果导出：必须被硬拦截
+      store.setStep(4);
+      expect(store.currentStep).toBe(3);
+      store.setStep(5);
+      expect(store.currentStep).toBe(3);
+
+      // 写作中止后允许流转
+      store.stopWriting();
+      store.currentWritingSeq = null;
+      store.chapterStatuses[1] = "completed";
+      expect(store.isWritingAnyChapter).toBe(false);
+
+      store.setStep(4);
+      expect(store.currentStep).toBe(4);
+    });
+
     it("store: runAllChaptersReview 批量审查所有章节并维护 batchReviewing 状态", async () => {
       const store = useProjectStore();
       store.currentProject = { id: 1, name: "批量审阅项目", created_at: "2026-08-25T00:00:00Z" };
@@ -2074,7 +2161,7 @@ describe("Pinia useProjectStore", () => {
         const u = String(url);
         if (u.includes("/writing/review_stream")) {
           return mockSSEResponse([
-            '{"type": "stage", "stage": "reasoning", "message": "投资项目与工程咨询专业论证中..."}',
+            '{"type": "stage", "stage": "reasoning", "message": "投资项目专业论证中..."}',
             JSON.stringify({
               type: "done",
               review: {

@@ -86,8 +86,23 @@ watch(
   },
 );
 
+const stepAlertMessage = ref<string | null>(null);
+
+function showStepAlert(msg: string) {
+  stepAlertMessage.value = msg;
+  setTimeout(() => {
+    if (stepAlertMessage.value === msg) {
+      stepAlertMessage.value = null;
+    }
+  }, 4000);
+}
+
 function goToStep(stepNum: number) {
   if (stepNum > 1 && !projectStore.currentProject) {
+    return;
+  }
+  if (projectStore.isWritingAnyChapter && stepNum !== 3) {
+    showStepAlert("当前章节正在流式撰写中，请等待撰写完成或点击「停止写作」后再切换步骤。");
     return;
   }
   if (view.value === "settings") {
@@ -121,8 +136,9 @@ async function onLogout() {
           :class="{
             active: projectStore.currentStep === s.num,
             completed: projectStore.currentStep > s.num,
-            disabled: !projectStore.currentProject && s.num > 1,
+            disabled: (!projectStore.currentProject && s.num > 1) || (projectStore.isWritingAnyChapter && s.num !== 3),
           }"
+          :title="projectStore.isWritingAnyChapter && s.num !== 3 ? '正在生成中，请等待生成完成或点击「停止写作」' : ''"
           @click="goToStep(s.num)"
         >
           <span class="step-num">{{ s.num }}</span>
@@ -180,6 +196,13 @@ async function onLogout() {
         <span>⚠️ 引擎未就绪：请确保云服务器 Docker 容器已启动，并在「设置」中填入引擎地址（如 http://IP:8000）。</span>
         <button class="alert-btn" @click="view = 'settings'">前往配置</button>
       </div>
+
+      <!-- 写作流式生成拦截警告横幅 -->
+      <transition name="fade">
+        <div v-if="stepAlertMessage" class="writing-lock-banner">
+          <span>⚠️ {{ stepAlertMessage }}</span>
+        </div>
+      </transition>
 
       <div v-if="view === 'wizard'" class="wizard-content">
         <!-- 步骤 1：项目与资料管理 -->
@@ -346,6 +369,18 @@ async function onLogout() {
 .engine-dot.error {
   background: #fee2e2;
   color: #dc2626;
+}
+.writing-lock-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fef2f2;
+  border-bottom: 1px solid #fecaca;
+  padding: 10px 20px;
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 8px;
 }
 .engine-alert-bar {
   display: flex;

@@ -501,14 +501,14 @@ def test_export_docx_and_download(client):
 
 
 def test_export_standard_cover_toc_and_sections(client):
-    """验证甲级送审标准排版：独立标准封面（机构/资质/日期）、自动目录页（TOC 域）、正文独立分节（页眉下划线与重置页脚）。"""
+    """验证标准初稿排版：独立标准封面（机构/资质/日期）、自动目录页（TOC 域）、正文独立分节（页眉下划线与重置页脚）。"""
     res = client.post(
         "/export/docx",
         json={
             "project": "standard_audit",
             "title": "利辛县生态皮革产业园可行性研究报告",
-            "author_org": "华东工程咨询设计研究院有限公司",
-            "qualification": "甲级工程咨询资信证书：工咨甲88888888",
+            "author_org": "华东工程设计研究院有限公司",
+            "qualification": "资信证书编号：ZX88888888",
             "date_str": "2026 年 09 月",
             "include_cover": True,
             "include_toc": True,
@@ -525,12 +525,12 @@ def test_export_standard_cover_toc_and_sections(client):
     assert len(doc.sections) == 3, f"期望 3 个 Section，实际得到 {len(doc.sections)}"
     sec_cover, sec_toc, sec_body = doc.sections[0], doc.sections[1], doc.sections[2]
 
-    # 2. 封面节验证：包含总标题、送审版标识、编制单位、资质等级、编制时间；无页眉页脚
+    # 2. 封面节验证：包含总标题、初稿标识、编制单位、资质等级、编制时间；无页眉页脚
     paras_text = [p.text for p in doc.paragraphs]
     assert any("利辛县生态皮革产业园可行性研究报告" in t for t in paras_text)
-    assert any("送 审 版" in t for t in paras_text)
-    assert any("华东工程咨询设计研究院有限公司" in t for t in paras_text)
-    assert any("工咨甲88888888" in t for t in paras_text)
+    assert any("初 稿" in t or "初稿" in t for t in paras_text)
+    assert any("华东工程设计研究院有限公司" in t for t in paras_text)
+    assert any("ZX88888888" in t for t in paras_text)
     assert any("2026 年 09 月" in t for t in paras_text)
     assert sec_cover.header.paragraphs[0].text.strip() == ""
     assert sec_cover.footer.paragraphs[0].text.strip() == ""
@@ -568,7 +568,7 @@ def test_export_custom_metadata_cover_and_sections(tmp_path):
         out_file,
         title="综合水利工程项目可行性研究报告",
         author_org="国家水利水电工程规划总院",
-        qualification="甲级资信证书编号：工咨甲12345678",
+        qualification="资信证书编号：ZX12345678",
         date_str="2026 年 09 月",
         include_cover=True,
         include_toc=True,
@@ -580,7 +580,7 @@ def test_export_custom_metadata_cover_and_sections(tmp_path):
     paras = [p.text for p in doc.paragraphs]
     assert any("综合水利工程项目可行性研究报告" in t for t in paras)
     assert any("国家水利水电工程规划总院" in t for t in paras)
-    assert any("工咨甲12345678" in t for t in paras)
+    assert any("ZX12345678" in t for t in paras)
     assert any("目    录" in t for t in paras)
 
     # 验证正文节页眉与页脚

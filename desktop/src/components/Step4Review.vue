@@ -744,6 +744,10 @@ async function scrollToSubheading(seq: number, headingId: string, sub: SubHeadin
 
 // ── 全书审阅与单章审阅核心逻辑 ──
 async function handleRunFullBookReview(forceAll = false) {
+  if (projectStore.revisingSeq !== null) {
+    showMsg("当前正在执行智能修订，请等待修订完成后再执行全书审阅", "error");
+    return;
+  }
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -778,6 +782,14 @@ async function handleRunFullBookReview(forceAll = false) {
 }
 
 async function handleReviewSingleChapter(seq: number) {
+  if (projectStore.revisingSeq !== null) {
+    showMsg("当前正在执行智能修订，请等待修订完成后再执行审阅", "error");
+    return;
+  }
+  if (projectStore.reviewingSeq !== null) {
+    showMsg("当前正在审阅中，请勿重复点击", "error");
+    return;
+  }
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -838,6 +850,44 @@ function getChapterIssuesCount(seq: number): number {
   return projectStore.chapterReviews[seq]?.issues?.length || 0;
 }
 
+/** 章节状态徽标 4 态计算规范：①待撰写 ②已撰写 ③已审阅共XX个问题 ④已修改X/Y个问题 */
+function getChapterStatusInfo(seq: number): { text: string; cssClass: string } {
+  if (projectStore.reviewingSeq === seq) {
+    return { text: "审阅中…", cssClass: "reviewing" };
+  }
+  if (projectStore.revisingSeq === seq) {
+    return { text: "修订中…", cssClass: "reviewing" };
+  }
+  if (!isChapterWritten(seq)) {
+    return { text: "待撰写", cssClass: "unwritten" };
+  }
+  if (!isChapterReviewed(seq)) {
+    return { text: "已撰写", cssClass: "unreviewed" };
+  }
+
+  const review = projectStore.chapterReviews[seq];
+  const remaining = review?.issues?.length || 0;
+  let total = review?.initial_issues_count;
+  if (total === undefined || total < remaining) {
+    total = remaining;
+    if (review) review.initial_issues_count = total;
+  }
+
+  const modified = Math.max(0, total - remaining);
+
+  if (modified === 0) {
+    return {
+      text: `已审阅共${total}个问题`,
+      cssClass: total === 0 ? "reviewed" : "has-issues",
+    };
+  }
+
+  return {
+    text: `已修改${modified}/${total}个问题`,
+    cssClass: modified >= total ? "reviewed" : "part-modified",
+  };
+}
+
 async function handleFixSingleIssue(issue: engineApi.ReviewIssue) {
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
@@ -887,6 +937,14 @@ async function handleFixSingleIssue(issue: engineApi.ReviewIssue) {
 }
 
 async function handleDirectRevision(seq?: number, customInstruction?: string) {
+  if (projectStore.reviewingSeq !== null) {
+    showMsg("当前正在审阅中，请等待审阅完成后再执行智能修订", "error");
+    return;
+  }
+  if (projectStore.revisingSeq !== null) {
+    showMsg("当前正在执行智能修订中，请勿重复点击", "error");
+    return;
+  }
   if (!engine.baseUrl) {
     showMsg("本地引擎未就绪", "error");
     return;
@@ -906,7 +964,16 @@ async function handleDirectRevision(seq?: number, customInstruction?: string) {
     return;
   }
 
+  if (!isChapterReviewed(targetSeq)) {
+    showMsg("请先点击「审阅本章」完成体检诊断后，再执行智能修订", "error");
+    return;
+  }
+
   const currentIssues = [...(projectStore.chapterReviews[targetSeq]?.issues || [])];
+  if (currentIssues.length === 0 && !customInstruction) {
+    showMsg("本章无待修改的诊断问题", "info");
+    return;
+  }
 
   revisionElapsedSeconds.value = 0;
   revisionStageIndex.value = 0;
@@ -1085,7 +1152,7 @@ onUnmounted(() => {
           <button
             v-else
             class="btn btn-primary btn-block"
-            :disabled="completedChaptersCount === 0 || projectStore.reviewingSeq !== null"
+            :disabled="completedChaptersCount === 0 || projectStore.reviewingSeq !== null || projectStore.revisingSeq !== null"
             @click="handleRunFullBookReview(false)"
           >
             🚀 一键全书审阅
@@ -1116,40 +1183,20 @@ onUnmounted(() => {
               </div>
 
               <div class="row-right">
-                <!-- 状态徽标 -->
+                <!-- 状态徽标 (4 态标准流转) -->
                 <span
                   class="status-pill"
-                  :class="
-                    projectStore.reviewingSeq === ch.seq
-                      ? 'reviewing'
-                      : !isChapterWritten(ch.seq)
-                      ? 'unwritten'
-                      : isChapterReviewed(ch.seq) && getChapterIssuesCount(ch.seq) === 0
-                      ? 'reviewed'
-                      : isChapterReviewed(ch.seq) && getChapterIssuesCount(ch.seq) > 0
-                      ? 'has-issues'
-                      : 'unreviewed'
-                  "
+                  :class="getChapterStatusInfo(ch.seq).cssClass"
                 >
-                  <span v-if="projectStore.reviewingSeq === ch.seq" class="spinner-inline"></span>
-                  {{
-                    projectStore.reviewingSeq === ch.seq
-                      ? "审阅中…"
-                      : !isChapterWritten(ch.seq)
-                      ? "待撰写"
-                      : isChapterReviewed(ch.seq) && getChapterIssuesCount(ch.seq) === 0
-                      ? "已审阅 ✓"
-                      : isChapterReviewed(ch.seq) && getChapterIssuesCount(ch.seq) > 0
-                      ? `待修改 (${getChapterIssuesCount(ch.seq)})`
-                      : "待审阅"
-                  }}
+                  <span v-if="projectStore.reviewingSeq === ch.seq || projectStore.revisingSeq === ch.seq" class="spinner-inline"></span>
+                  {{ getChapterStatusInfo(ch.seq).text }}
                 </span>
 
                 <!-- 单章操作按钮 -->
                 <button
                   class="ch-action-btn"
                   title="审阅该章"
-                  :disabled="projectStore.batchReviewing || projectStore.reviewingSeq === ch.seq || !isChapterWritten(ch.seq)"
+                  :disabled="projectStore.batchReviewing || projectStore.reviewingSeq !== null || projectStore.revisingSeq !== null || !isChapterWritten(ch.seq)"
                   @click.stop="handleReviewSingleChapter(ch.seq)"
                 >
                   🔍
@@ -1238,7 +1285,7 @@ onUnmounted(() => {
           <div class="editor-actions">
             <button
               class="btn btn-outline"
-              :disabled="!isChapterWritten(currentChapter?.seq || 1) || projectStore.reviewingSeq === currentChapter?.seq"
+              :disabled="!isChapterWritten(currentChapter?.seq || 1) || projectStore.reviewingSeq !== null || projectStore.revisingSeq !== null"
               @click="handleReviewSingleChapter(currentChapter?.seq || 1)"
               title="针对本章执行高标准专家诊断质检"
             >
@@ -1247,9 +1294,9 @@ onUnmounted(() => {
 
             <button
               class="btn btn-primary"
-              :disabled="!isChapterWritten(currentChapter?.seq || 1) || projectStore.revisingSeq !== null"
+              :disabled="!isChapterReviewed(currentChapter?.seq || 1) || getChapterIssuesCount(currentChapter?.seq || 1) === 0 || projectStore.revisingSeq !== null || projectStore.reviewingSeq !== null"
               @click="handleDirectRevision(currentChapter?.seq)"
-              title="代入本章专家诊断建议，一键执行外科手术式精准修补"
+              :title="!isChapterReviewed(currentChapter?.seq || 1) ? '请先点击「审阅本章」执行诊断体检' : (getChapterIssuesCount(currentChapter?.seq || 1) === 0 ? '本章无待修改的诊断问题' : '代入本章专家诊断建议，一键执行外科手术式精准修补')"
             >
               <span v-if="projectStore.revisingSeq === currentChapter?.seq" class="spinner-inline"></span>
               ⚡ AI 智能修订
@@ -2105,10 +2152,15 @@ onUnmounted(() => {
   color: #b45309;
   border: 1px solid #fde68a;
 }
+.status-pill.part-modified {
+  background: #ede9fe;
+  color: #6d28d9;
+  border: 1px solid #ddd6fe;
+}
 .status-pill.unreviewed {
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #e2e8f0;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
 }
 .status-pill.unwritten {
   background: #f8fafc;

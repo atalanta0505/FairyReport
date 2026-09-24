@@ -152,7 +152,7 @@ def test_full_context_verification_scoring():
     assert resp_perfect.is_consistent is True
     assert resp_perfect.conflicts_count == 0
     assert resp_perfect.score >= 90
-    assert "达到甲级送审标准" in resp_perfect.summary
+    assert "100%吻合" in resp_perfect.summary
 
     # 2. 存在重大数值冲突样本
     flawed_chapters = {

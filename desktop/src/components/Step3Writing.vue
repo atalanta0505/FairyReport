@@ -327,6 +327,17 @@ const isCurrentChapterWriting = computed(() => {
   );
 });
 
+const isWritingActive = computed(() => {
+  return (
+    projectStore.isWritingAnyChapter ||
+    isCurrentChapterWriting.value ||
+    projectStore.batchWriting ||
+    projectStore.currentWritingSeq !== null ||
+    projectStore.writingProgress !== null ||
+    Object.values(projectStore.chapterStatuses).some((s) => s === "writing")
+  );
+});
+
 const isThinkingStage = computed(() => {
   return (
     isCurrentChapterWriting.value &&
@@ -544,10 +555,18 @@ function copyCurrentChapterMarkdown() {
 }
 
 function prevStep() {
+  if (isWritingActive.value) {
+    showMsg("当前章节正在流式撰写中，请等待撰写完成或点击「停止写作」后再返回上一步", "error");
+    return;
+  }
   projectStore.setStep(2);
 }
 
 function nextStep() {
+  if (isWritingActive.value) {
+    showMsg("当前章节正在流式撰写中，请等待撰写完成或点击「停止写作」后再进入下一步审阅修改", "error");
+    return;
+  }
   if (completedCount.value === 0 && totalWordCount.value === 0) {
     showMsg("请至少生成或撰写一个章节后再进入下一步审阅修改", "error");
     return;
@@ -978,7 +997,7 @@ function nextStep() {
                   <div class="thinking-notice-footer">
                     <span class="notice-icon">💡</span>
                     <span class="notice-text">
-                      工程咨询报告专业性强、篇幅宏大，大模型深度组织论述需数十秒构思时间，请稍候。
+                      项目研究报告专业性强、篇幅宏大，大模型深度组织论述需数十秒构思时间，请稍候。
                     </span>
                   </div>
                 </div>
@@ -1147,13 +1166,19 @@ function nextStep() {
 
     <!-- 底部流转按钮 -->
     <div class="bottom-nav">
-      <button class="btn btn-secondary btn-lg" @click="prevStep">
+      <button
+        class="btn btn-secondary btn-lg"
+        :disabled="isWritingActive"
+        @click="prevStep"
+        :title="isWritingActive ? '正在流式生成中，请等待完成或点击「停止写作」' : ''"
+      >
         &larr; 上一步：模板与大纲
       </button>
       <button
         class="btn btn-primary btn-lg"
-        :disabled="completedCount === 0 && totalWordCount === 0"
+        :disabled="isWritingActive || (completedCount === 0 && totalWordCount === 0)"
         @click="nextStep"
+        :title="isWritingActive ? '正在流式生成中，请等待完成或点击「停止写作」' : ''"
       >
         下一步：审阅修改 &rarr;
       </button>

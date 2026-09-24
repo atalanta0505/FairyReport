@@ -1,7 +1,7 @@
 """
 Markdown -> Word (.docx) 导出 — 移植自根目录 exporter.py（出版级排版升级）。
 
-- 符合公文与工程咨询出版级排版规范
+- 符合公文与出版级排版规范
 - 正文字体：仿宋 / Times New Roman，小四（12pt），1.35 倍行距，严格首行缩进 2 字符（24pt），两端对齐
 - 标题层级：
   * Title（报告总标题 / Level 0）：黑体 22pt（二号），居中加粗，段前/后 12pt，无首行缩进
@@ -99,15 +99,26 @@ def _init_document_styles(doc: Document):
     normal_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
 
+def _format_chinese_date(dt: datetime = None) -> str:
+    """格式化为中文标准公文日期：如 二〇二六年九月。"""
+    if dt is None:
+        dt = datetime.now()
+    digit_map = {'0': '〇', '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六', '7': '七', '8': '八', '9': '九'}
+    month_map = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '七', 8: '八', 9: '九', 10: '十', 11: '十一', 12: '十二'}
+    year_str = "".join(digit_map.get(c, c) for c in str(dt.year))
+    month_str = month_map.get(dt.month, str(dt.month))
+    return f"{year_str}年{month_str}月"
+
+
 def _add_cover_page(
     doc: Document,
     title: str,
-    subtitle: str = "（ 送 审 版 ）",
+    subtitle: str = "（ 初 稿 ）",
     author_org: str = "",
     qualification: str = "",
     date_str: str = "",
 ):
-    """添加符合甲级工程咨询送审规范的标准封面页（Section 1）。"""
+    """添加符合标准规范的初稿封面页（Section 1）。"""
     sec = doc.sections[0]
     _apply_section_margins(sec)
     sec.header.is_linked_to_previous = False
@@ -137,7 +148,7 @@ def _add_cover_page(
         color=RGBColor(0x0F, 0x17, 0x2A),
     )
 
-    # 3. 副标题 / 送审状态
+    # 3. 副标题 / 报告状态
     if subtitle:
         p_sub = doc.add_paragraph()
         p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -163,13 +174,13 @@ def _add_cover_page(
         p_sp.paragraph_format.first_line_indent = Pt(0)
 
     # 5. 编制机构与资质元数据块（段落排版，杜绝表格以确保 len(tables) == 1 既有测试断言）
-    org_text = author_org or "工程咨询设计研究院有限公司"
-    qual_text = qualification or "甲级工程咨询资信证书编号：工咨甲00000000"
-    date_val = date_str or datetime.now().strftime("%Y 年 %m 月")
+    org_text = author_org or "中国联合工程设计研究院有限公司"
+    qual_text = qualification or "资信证书编号：ZX11120240088"
+    date_val = date_str or _format_chinese_date()
 
     meta_items = [
         f"编制单位：{org_text}",
-        f"咨询资质：{qual_text}",
+        f"编制资质：{qual_text}",
         f"编制时间：{date_val}",
     ]
     for item in meta_items:
@@ -264,7 +275,7 @@ def _setup_body_section(doc: Document, header_title: str):
     hp.paragraph_format.space_before = Pt(0)
     hp.paragraph_format.space_after = Pt(0)
     hp.paragraph_format.first_line_indent = Pt(0)
-    hrun = hp.add_run(header_title or "工程咨询报告")
+    hrun = hp.add_run(header_title or "项目研究报告")
     _format_run(
         hrun,
         font_name='Times New Roman',
@@ -300,6 +311,7 @@ def md_to_docx(
     md_content: str,
     output_path: str,
     title: str = "",
+    subtitle: str = "（ 初 稿 ）",
     skeleton: str = "",
     project: str = "",
     author_org: str = "",
@@ -344,21 +356,40 @@ def md_to_docx(
     doc = Document()
     _init_document_styles(doc)
 
+    # 提取正文中所有 1-3 级标题供目录页预置条目使用
+    headings_for_toc = []
+    for line in md_content.split('\n'):
+        line_s = line.strip()
+        m = re.match(r'^(#{1,3})\s+(.+)$', line_s)
+        if m:
+            lvl = len(m.group(1))
+            h_text = m.group(2).strip()
+            if h_text and h_text != title and not h_text.startswith("目"):
+                headings_for_toc.append((lvl, h_text))
+
+    # 规范化报告总标题
+    actual_title = (title or "").strip() or (project or "").strip() or "项目研究报告"
+    if "报告" not in actual_title:
+        if actual_title.endswith("可行性研究") or actual_title.endswith("研究") or actual_title.endswith("规划") or actual_title.endswith("方案") or actual_title.endswith("评估"):
+            actual_title = f"{actual_title}报告"
+        else:
+            actual_title = f"{actual_title}可行性研究报告"
+
     # ── 规范封面、目录与正文分节构建 ──
-    if title and include_cover:
+    if include_cover:
         _add_cover_page(
             doc,
-            title=title,
-            subtitle="（ 送 审 版 ）",
+            title=actual_title,
+            subtitle=subtitle,
             author_org=author_org,
             qualification=qualification,
             date_str=date_str,
         )
         if include_toc:
             _add_toc_page(doc)
-        _setup_body_section(doc, header_title=title or project)
-    elif title:
-        _add_heading(doc, title, level=0)
+        _setup_body_section(doc, header_title=actual_title or project)
+    elif actual_title:
+        _add_heading(doc, actual_title, level=0)
 
     # ── 预处理：提取块级公式（$$...$$），替换为占位防止行分割 ──
     display_formulas = {}
@@ -520,7 +551,7 @@ def md_to_docx(
 
 
 def _add_heading(doc: Document, text: str, level: int):
-    """添加符合工程咨询出版级规范的各级标题：
+    """添加符合出版级规范的各级标题：
 
     - Title（Level 0）：黑体 22pt（二号），居中加粗，段前 12pt / 段后 12pt，无首行缩进
     - Heading 1（Level 1）：黑体 16pt（三号），居左加粗，段前 12pt / 段后 6pt，无首行缩进，keep_with_next
@@ -603,7 +634,7 @@ def _add_heading(doc: Document, text: str, level: int):
 
 
 def _set_three_line_table_borders(table, has_header: bool = True):
-    """为 Word 表格应用中国工程咨询出版级标准三线表边框格式：
+    """为 Word 表格应用出版级标准三线表边框格式：
     - 顶线 (Top): 1.5 pt (w:sz="12", color="334155")
     - 底线 (Bottom): 1.5 pt (w:sz="12", color="334155")
     - 栏目线 (Header bottom): 0.75 pt (w:sz="6", color="475569")
