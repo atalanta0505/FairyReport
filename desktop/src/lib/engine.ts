@@ -77,12 +77,19 @@ export async function defaultSpawn(args: string[], cwd: string): Promise<EngineC
   }
 }
 
+function defaultFetcher(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  if (typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined") {
+    return pluginFetch(input as any, init);
+  }
+  return window.fetch(input as any, init);
+}
+
 /** 轮询 /health 直到 ok 或超时（本地引擎走 Rust 原生 TCP 探针，云端走 plugin-http）。 */
 export async function pollHealth(
   baseUrl: string,
   deps?: Partial<EngineDeps>,
 ): Promise<void> {
-  const fetcher = deps?.fetcher ?? pluginFetch;
+  const fetcher = deps?.fetcher ?? defaultFetcher;
   const sleep = deps?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const maxAttempts = deps?.maxAttempts ?? ENGINE_HEALTH_MAX_ATTEMPTS;
 
@@ -98,7 +105,7 @@ export async function pollHealth(
 
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      if (isLocal && port && !deps?.fetcher) {
+      if (isLocal && port && !deps?.fetcher && typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined") {
         const { invoke } = await import("@tauri-apps/api/core");
         const ok = await invoke<boolean>("check_engine_health", { port });
         if (ok) return;

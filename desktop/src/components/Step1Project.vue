@@ -367,7 +367,7 @@ function nextStep() {
             <strong>{{ projectStore.genericStatus.version || "未知版本" }}</strong>
           </p>
           <p class="text-muted">
-            安装时间：{{ formatDate(projectStore.genericStatus.installed_at || "") }}（含 15 类咨询交付物标准模板与行业规范向量库）
+            安装时间：{{ formatDate(projectStore.genericStatus.installed_at || "") }}（含 15 类专业报告交付物标准模板与行业规范向量库）
           </p>
         </div>
         <div v-else class="generic-info">
@@ -527,7 +527,7 @@ function nextStep() {
               </tbody>
             </table>
             <div v-else-if="!projectStore.loadingMaterials" class="empty-list">
-              当前项目暂无资料文件，请上传工程底稿或勘测数据。
+              当前项目暂无资料文件。（💡 提示：<strong>智库专报</strong>等宏观战略类报告支持资料留空，可直接点击下方「下一步：模板与大纲」，依托权威联网检索与知识规程库高质量起草）
             </div>
           </div>
         </div>

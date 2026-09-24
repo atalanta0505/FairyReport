@@ -36,6 +36,14 @@ export const useEngineStore = defineStore("engine", () => {
     if (handle) return;
     status.value = "starting";
     try {
+      if (typeof (globalThis as any).__TAURI_INTERNALS__ === "undefined") {
+        const localBrowserUrl = "http://127.0.0.1:8001";
+        await pollHealth(localBrowserUrl, { maxAttempts: 6 });
+        baseUrl.value = localBrowserUrl;
+        status.value = "healthy";
+        isRemote.value = false;
+        return;
+      }
       handle = await startEngine();
       baseUrl.value = handle.baseUrl;
       status.value = "healthy";

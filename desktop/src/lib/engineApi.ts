@@ -6,6 +6,13 @@
  */
 import { fetch as pluginFetch } from "@tauri-apps/plugin-http";
 
+function engineFetch(input: string | URL, init?: RequestInit): Promise<Response> {
+  if (typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined") {
+    return pluginFetch(input, init);
+  }
+  return window.fetch(input, init);
+}
+
 export class EngineApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -105,7 +112,7 @@ async function request<T>(
 
   let resp: Response;
   try {
-    resp = await pluginFetch(joinUrl(baseUrl, path), { ...options, headers });
+    resp = await engineFetch(joinUrl(baseUrl, path), { ...options, headers });
   } catch (e) {
     throw new EngineApiError(0, `引擎通信失败：${(e as Error).message}`);
   }
@@ -440,7 +447,7 @@ export function streamChapterWriting(
 
   (async () => {
     try {
-      const resp = await pluginFetch(joinUrl(baseUrl, "/writing/chapter"), {
+      const resp = await engineFetch(joinUrl(baseUrl, "/writing/chapter"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...req, stream: true }),
@@ -623,7 +630,7 @@ export async function streamChapterReview(
   req: ReviewChapterRequest,
   onProgress?: (event: ReviewProgressEvent) => void,
 ): Promise<{ raw: string; review: ExpertReviewResult }> {
-  const resp = await pluginFetch(joinUrl(baseUrl, "/writing/review_stream"), {
+  const resp = await engineFetch(joinUrl(baseUrl, "/writing/review_stream"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
@@ -860,7 +867,7 @@ export async function reviseChapterStream(
   onProgress?: (progress: ReviseStreamProgress) => void,
 ): Promise<{ revised_text: string }> {
   const url = joinUrl(baseUrl, "/writing/revise_stream");
-  const resp = await pluginFetch(url, {
+  const resp = await engineFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1053,7 +1060,7 @@ export async function streamParagraphRevision(
   req: ReviseParagraphRequest,
   onProgress?: (event: ReviseStreamProgress) => void,
 ): Promise<{ revised_paragraph: string }> {
-  const resp = await pluginFetch(joinUrl(baseUrl, "/writing/revise_paragraph_stream"), {
+  const resp = await engineFetch(joinUrl(baseUrl, "/writing/revise_paragraph_stream"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
