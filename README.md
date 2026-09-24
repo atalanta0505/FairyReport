@@ -152,7 +152,7 @@ npm run dev
 ```
 
 #### 方式 C：绿色免安装便携版（解压即用 · 生产分发）
-1. 直接解压发布的 `dist/FairyReport-Local-v1.0.0-Windows-x64.zip` 至任意目录；
+1. 直接解压发布的 `dist/FairyReport-Local-v1.5.0-Windows-x64.zip` 至任意目录；
 2. 双击运行 `FairyReport.exe` 即可启动，系统在后台静默唤起本地独立计算引擎；
 3. **便携数据隔离**：根目录包含 `.portable` 标记文件，所有项目底稿与向量数据均存放在解压目录同级的 `data/` 文件夹中，不写入系统注册表；
 4. **自主打包构建**：
@@ -161,7 +161,7 @@ npm run dev
 cd desktop && npm run build && npm run tauri build
 cd ..
 python scripts/pack_portable.py
-# 产物输出至：dist/FairyReport-Local-v1.0.0-Windows-x64.zip (约 370MB)
+# 产物输出至：dist/FairyReport-Local-v1.5.0-Windows-x64.zip (约 370MB)
 ```
 
 ---
@@ -194,6 +194,13 @@ cd desktop/src-tauri && cargo check
 - **纯本地持久化**：所有上传的工程资料、向量索引和生成报告均存储于本地数据目录，绝不上云；
 - **凭据零泄露**：API 密钥仅保存在本地客户端内存及 `.env` 中，严禁任何形式的日志打印或远端上传；
 - **全异常静默熔断**：外部检索超时或网络抖动时自动降级，绝不阻塞报告编写主流程。
+
+---
+
+## 📖 用户文档与新手指南
+
+- 👶 **[新人极简图文上手指南与宣介底稿 (docs/BEGINNER_GUIDE.md)](docs/BEGINNER_GUIDE.md)**：零技术门槛、真实 UI 截图步骤详解、推介会 8 屏 PPT 逐页设计底稿与宣传短视频分镜脚本。
+- 📘 **[用户操作详细手册 (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**：五步全流程专业操作指南、PDF 扫描件解析机制、多维专家审阅与疑难 FAQ。
 
 ---
 
