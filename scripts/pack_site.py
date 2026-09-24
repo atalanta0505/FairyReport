@@ -53,37 +53,56 @@ def generate_deployment_assets():
     print("[3/4] Generating 101 server deployment scripts...")
 
     # Nginx config
-    nginx_conf = """# FairyReport Official Portal & Download Center Nginx Configuration
+    nginx_conf = """# FairyReport Official Portal & API Gateway Nginx Configuration
 # Target Server: 101.42.9.223
 
-server {
-    listen 80;
-    server_name 101.42.9.223;
+events {
+    worker_connections 1024;
+}
 
-    # Gzip compression
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    client_max_body_size 500m;
+
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
     gzip_min_length 1024;
 
-    # Site Static Files
-    location / {
-        root /var/www/fairyreport-site;
-        index index.html;
-        try_files $uri $uri/ /index.html;
-        expires 1d;
-        add_header Cache-Control "public, no-transform";
-    }
+    server {
+        listen 80;
+        server_name 101.42.9.223;
 
-    # High-Speed Download Route for Portable Packages
-    location /downloads/ {
-        alias /var/www/fairyreport-downloads/;
-        autoindex off;
-        sendfile on;
-        sendfile_max_chunk 1m;
-        tcp_nopush on;
-        tcp_nodelay on;
-        keepalive_timeout 65;
-        add_header Content-Disposition "attachment";
+        # 1. 账号认证与通用规程服务
+        location /api/ {
+            proxy_pass http://api:8010;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_read_timeout 300s;
+            proxy_send_timeout 300s;
+        }
+
+        # 2. 客户端安装包/便携包下载通道
+        location /downloads/ {
+            alias /usr/share/nginx/downloads/;
+            autoindex off;
+            sendfile on;
+            sendfile_max_chunk 1m;
+            tcp_nopush on;
+            tcp_nodelay on;
+            keepalive_timeout 65;
+            add_header Content-Disposition "attachment";
+        }
+
+        # 3. 官方文档宣传网站
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+            try_files $uri $uri/ /index.html;
+            expires 1d;
+            add_header Cache-Control "public, no-transform";
+        }
     }
 }
 """
@@ -98,38 +117,88 @@ server {
 
 set -e
 
-echo "=== [1/4] Preparing directories ==="
-mkdir -p /var/www/fairyreport-site
-mkdir -p /var/www/fairyreport-downloads
+echo "=== [1/4] Checking environment ==="
+FRL_BACKEND="/opt/frl/backend"
 
-echo "=== [2/4] Deploying documentation website ==="
-if [ -f "/tmp/fairyreport-site-v1.5.0.zip" ]; then
-    rm -rf /var/www/fairyreport-site/*
-    unzip -q /tmp/fairyreport-site-v1.5.0.zip -d /var/www/fairyreport-site/
-    chmod -R 755 /var/www/fairyreport-site/
-    echo "Site files unpacked to /var/www/fairyreport-site"
+if [ -d "$FRL_BACKEND" ]; then
+    echo "Detected FairyReport Docker deployment at $FRL_BACKEND"
+    cd "$FRL_BACKEND"
+
+    echo "=== [2/4] Deploying documentation website ==="
+    mkdir -p site downloads
+    if [ -f "/tmp/fairyreport-site-v1.5.0.zip" ]; then
+        rm -rf site/*
+        unzip -q -o /tmp/fairyreport-site-v1.5.0.zip -d site/
+        chmod -R 755 site/
+        echo "Site static assets successfully unpacked into $FRL_BACKEND/site"
+    else
+        echo "Error: /tmp/fairyreport-site-v1.5.0.zip not found!"
+        exit 1
+    fi
+
+    echo "=== [3/4] Checking client download binary ==="
+    if [ -f "/tmp/FairyReport-Local-v1.5.0-Windows-x64.zip" ]; then
+        cp /tmp/FairyReport-Local-v1.5.0-Windows-x64.zip downloads/
+        chmod 644 downloads/*
+        echo "Client portable binary deployed to $FRL_BACKEND/downloads/"
+    else
+        echo "Notice: /tmp/FairyReport-Local-v1.5.0-Windows-x64.zip omitted (skipped client upload)"
+    fi
+
+    echo "=== [4/4] Updating Nginx configuration & Reloading ==="
+    if [ -f "/tmp/fairyreport_101_nginx.conf" ]; then
+        cp /tmp/fairyreport_101_nginx.conf nginx/nginx.conf
+    fi
+
+    # Ensure docker-compose.yml has site & downloads volumes
+    if ! grep -q "./site:/usr/share/nginx/html" docker-compose.yml; then
+        echo "Updating docker-compose.yml volumes for nginx..."
+        sed -i '/nginx.conf:ro/a \\      - ./site:/usr/share/nginx/html:ro\\n      - ./downloads:/usr/share/nginx/downloads:ro' docker-compose.yml
+    fi
+
+    docker compose up -d nginx
+    echo "Docker Nginx reloaded successfully!"
+
 else
-    echo "Warning: /tmp/fairyreport-site-v1.5.0.zip not found"
+    echo "Detected standard host Nginx environment"
+    mkdir -p /var/www/fairyreport-site
+    mkdir -p /var/www/fairyreport-downloads
+
+    echo "=== [2/4] Deploying documentation website ==="
+    if [ -f "/tmp/fairyreport-site-v1.5.0.zip" ]; then
+        rm -rf /var/www/fairyreport-site/*
+        unzip -q -o /tmp/fairyreport-site-v1.5.0.zip -d /var/www/fairyreport-site/
+        chmod -R 755 /var/www/fairyreport-site/
+        echo "Site files unpacked to /var/www/fairyreport-site"
+    else
+        echo "Error: /tmp/fairyreport-site-v1.5.0.zip not found!"
+        exit 1
+    fi
+
+    echo "=== [3/4] Checking client download binary ==="
+    if [ -f "/tmp/FairyReport-Local-v1.5.0-Windows-x64.zip" ]; then
+        cp /tmp/FairyReport-Local-v1.5.0-Windows-x64.zip /var/www/fairyreport-downloads/
+        chmod 644 /var/www/fairyreport-downloads/*
+        echo "Binary deployed to /var/www/fairyreport-downloads/"
+    else
+        echo "Notice: /tmp/FairyReport-Local-v1.5.0-Windows-x64.zip omitted (skipped client upload)"
+    fi
+
+    echo "=== [4/4] Configuring Nginx ==="
+    if [ -f "/tmp/fairyreport_101_nginx.conf" ]; then
+        sed 's#/usr/share/nginx/html#/var/www/fairyreport-site#g; s#/usr/share/nginx/downloads#/var/www/fairyreport-downloads#g' /tmp/fairyreport_101_nginx.conf > /etc/nginx/conf.d/fairyreport.conf
+        nginx -t
+        systemctl reload nginx
+        echo "Host Nginx reloaded successfully!"
+    fi
 fi
 
-echo "=== [3/4] Deploying client download binaries ==="
-if [ -f "/tmp/FairyReport-Local-v1.5.0-Windows-x64.zip" ]; then
-    cp /tmp/FairyReport-Local-v1.5.0-Windows-x64.zip /var/www/fairyreport-downloads/
-    chmod 644 /var/www/fairyreport-downloads/*
-    echo "Binary deployed to /var/www/fairyreport-downloads/"
-fi
-
-echo "=== [4/4] Configuring Nginx ==="
-if [ -f "/tmp/fairyreport_101_nginx.conf" ]; then
-    cp /tmp/fairyreport_101_nginx.conf /etc/nginx/conf.d/fairyreport.conf
-    nginx -t
-    systemctl reload nginx
-    echo "Nginx reloaded successfully!"
-fi
-
+echo "=== Health check ==="
+curl -s -I http://127.0.0.1/ | head -n 3
+curl -s http://127.0.0.1/api/health || true
+echo ""
 echo "=== FairyReport v1.5.0 Deployed Successfully! ==="
 echo "Access: http://101.42.9.223/"
-echo "Download: http://101.42.9.223/downloads/FairyReport-Local-v1.5.0-Windows-x64.zip"
 """
     deploy_path = DIST_DIR / "deploy_101.sh"
     deploy_path.write_text(deploy_sh, encoding="utf-8", newline="\n")
