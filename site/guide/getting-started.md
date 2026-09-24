@@ -129,7 +129,7 @@ FairyReport 内置的「**智库专报**」类型支持**项目资料留空**直
 1. 打开应用右上角 **「设置」**（齿轮图标）。
 2. 在 **API Key** 输入框中，粘贴你的 DeepSeek API Key（从 DeepSeek 开放平台申请）。
 3. 接口地址保持默认 `https://api.deepseek.com/v1`。
-4. 模型选择推荐的 DeepSeek 官方最新模型（如 `deepseek-chat` / `deepseek-reasoner`）。
+4. 模型选择推荐的 DeepSeek 官方最新模型。
 5. 点击 **「保存配置」** 即可。
 
 ::: warning 🔒 数据安全提示
