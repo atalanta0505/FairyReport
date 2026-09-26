@@ -22,7 +22,7 @@
 ### 1. Windows x64 绿色免安装便携版（推荐）
 - **文件包名**：`FairyReport-Local-v1.5.0-Windows-x64.zip`
 - **文件体积**：370 MB (自包含完整后端计算引擎与内嵌模型)
-- **SHA-256 校验码**：`2CAE82874253002C2C3E4AAC336858FFB67D2DDE1BAB524973F034C94D9B6703`
+- **SHA-256 校验码**：`97B214137B32D1A7A4CC191FE34629487CE1E9A95588565ADA372A6D22B52D09`
 - **下载地址**：
   - [⚡ 官方高速直链下载](/downloads/FairyReport-Local-v1.5.0-Windows-x64.zip)
   - [🌐 GitHub Releases 备用镜像](https://github.com/atalanta0505/FairyReport/releases)
@@ -44,7 +44,7 @@
 ```powershell
 Get-FileHash -Path "FairyReport-Local-v1.5.0-Windows-x64.zip" -Algorithm SHA256
 ```
-确认输出的 Hash 字符串与官方给出的 `2CAE82874253002C2C3E4AAC336858FFB67D2DDE1BAB524973F034C94D9B6703` 一致即可。
+确认输出的 Hash 字符串与官方给出的 `97B214137B32D1A7A4CC191FE34629487CE1E9A95588565ADA372A6D22B52D09` 一致即可。
 
 ---
 
