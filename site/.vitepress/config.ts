@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: "FairyReport 🧚‍♂️",
-  description: "下一代投资项目与工程智能报告生成平台 | 纯本地物理隔离 · 三源RAG · 12类标准模板 · 出版级Word导出",
+  description: "下一代投资项目与工程智能报告生成平台 | 纯本地物理隔离 · 三源RAG · 15类标准模板 · 出版级Word导出",
   lang: "zh-CN",
   head: [
     ['link', { rel: 'icon', href: '/logo.svg' }],

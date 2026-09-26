@@ -4,7 +4,7 @@ layout: home
 hero:
   name: "FairyReport"
   text: "下一代投资项目与工程智能报告生成平台"
-  tagline: "纯本地物理隔离 · 三源 RAG 智识矩阵 · 12 类标准规范模板 · 出版级 Word 导出"
+  tagline: "纯本地物理隔离 · 三源 RAG 智识矩阵 · 15 类主流标准规范模板 · 出版级 Word 导出"
   image:
     src: /logo.svg
     alt: FairyReport Logo
@@ -29,8 +29,8 @@ features:
     details: 深度融合「项目私有材料 + 行业标准规程库 + 外部权威联网检索」，多路召回重排，提供角标级真实溯源。
     link: /docs/pipeline
   - icon: 📋
-    title: 12 类合规标准模板
-    details: 严格遵循现行投资项目标准指南与行业规范，涵盖项目可行性研究、资金申请、智库专报、技术方案等 12 类报告体系。
+    title: 15 类主流标准模板
+    details: 严格遵循现行投资项目标准指南与行业规范，涵盖可行性研究、初步可研、项目建议书、资金申请、特许经营、产业与园区规划、智库专报等 15 类主流报告体系。
     link: /guide/getting-started
   - icon: ⚡
     title: 五步端到端流水线
@@ -61,9 +61,9 @@ FairyReport 采用 Tauri 2 原生架构与现代工业设计语言，界面简�
 </div>
 
 <div class="preview-card">
-  <img src="/images/step2_outline.png" alt="步骤二：12类标准报告模板与结构化大纲生成" />
+  <img src="/images/step2_outline.png" alt="步骤二：15 类主流标准报告模板与结构化大纲生成" />
   <div class="preview-caption">
-    <span><b>步骤 2 · 12 类合规大纲生成</b>：基于现行投资项目编制规程，一键生成多级标准目录，章节支持自主增删微调</span>
+    <span><b>步骤 2 · 15 类合规大纲生成</b>：基于现行投资项目编制规程，一键生成多级标准目录，章节支持自主增删微调</span>
     <span class="badge-tag">规程自适应</span>
   </div>
 </div>
@@ -115,7 +115,7 @@ FairyReport 采用 Tauri 2 原生架构与现代工业设计语言，界面简�
     <tr>
       <td><b>专业行业标准规程</b></td>
       <td>自由发挥，结构发散，不符合行业编制标准与现行规程</td>
-      <td><b>内置 12 类行业标准模板库</b>，章节逻辑与专业指标严格合规</td>
+      <td><b>内置 15 类行业标准模板库</b>，章节逻辑与专业指标严格合规</td>
     </tr>
     <tr>
       <td><b>工程数据与表格</b></td>
