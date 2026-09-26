@@ -1,6 +1,6 @@
 # FairyReport 🧚‍♂️
 
-> **下一代投资项目与工程智能报告生成平台**  
+> **FairyReport 智能报告编制应用**  
 > 基于 **Tauri 2 + Vue 3 + FastAPI + LLM + 三源 RAG** 架构，面向 15 类主流专业报告交付物打造的全流程深度撰写与专家级质检系统。
 
 ---
@@ -197,9 +197,9 @@ cd desktop/src-tauri && cargo check
 
 ---
 
-## 📖 用户文档与新手指南
+## 📖 用户文档与操作手册
 
-- 👶 **[新人极简图文上手指南与宣介底稿 (docs/BEGINNER_GUIDE.md)](docs/BEGINNER_GUIDE.md)**：零技术门槛、真实 UI 截图步骤详解、推介会 8 屏 PPT 逐页设计底稿与宣传短视频分镜脚本。
+- 📖 **[快速上手操作指南 (docs/BEGINNER_GUIDE.md)](docs/BEGINNER_GUIDE.md)**：包含系统真实界面步骤演示与核心操作要点。
 - 📘 **[用户操作详细手册 (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**：五步全流程专业操作指南、PDF 扫描件解析机制、多维专家审阅与疑难 FAQ。
 
 ---

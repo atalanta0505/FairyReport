@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: "FairyReport 🧚‍♂️",
-  description: "下一代投资项目与工程智能报告生成平台 | 纯本地物理隔离 · 三源RAG · 15类标准模板 · 出版级Word导出",
+  description: "FairyReport 智能报告编制应用 | 纯本地物理隔离 · 三源RAG · 15类标准模板 · 出版级Word导出",
   lang: "zh-CN",
   head: [
     ['link', { rel: 'icon', href: '/logo.svg' }],
@@ -14,7 +14,7 @@ export default defineConfig({
     
     nav: [
       { text: '首页', link: '/' },
-      { text: '新手上手', link: '/guide/getting-started' },
+      { text: '快速上手', link: '/guide/getting-started' },
       { 
         text: '功能手册',
         items: [
@@ -32,10 +32,10 @@ export default defineConfig({
     sidebar: {
       '/guide/': [
         {
-          text: '新手指南',
+          text: '操作指引',
           items: [
-            { text: '5 分钟极速上手', link: '/guide/getting-started' },
-            { text: '新手常见答疑 (FAQ)', link: '/guide/faq' }
+            { text: '快速上手指引', link: '/guide/getting-started' },
+            { text: '常见问题解答 (FAQ)', link: '/guide/faq' }
           ]
         }
       ],
@@ -84,7 +84,7 @@ export default defineConfig({
 
 
     footer: {
-      message: '投资项目与工程智能报告生成平台 | 遵循行业通用编制指南与现行规程',
+      message: 'FairyReport 智能报告编制应用 | 遵循行业通用编制指南与现行规程',
       copyright: 'Copyright © 2026 FairyReport Team. 保留所有权利。'
     },
 

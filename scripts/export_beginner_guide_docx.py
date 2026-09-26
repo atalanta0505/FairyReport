@@ -1,5 +1,5 @@
 """
-FairyReport 新人极简图文上手指南 — 出版级 Word (.docx) 排版与导出工具
+FairyReport 快速上手操作指南 — 出版级 Word (.docx) 排版与导出工具
 """
 
 import os
@@ -15,8 +15,8 @@ from docx.oxml.ns import nsdecls, qn
 REPO_ROOT = Path(r"D:\Repo\FairyReport_lite")
 DOCS_DIR = REPO_ROOT / "docs"
 IMAGES_DIR = DOCS_DIR / "images"
-OUTPUT_DOCX_DOCS = DOCS_DIR / "FairyReport_新人极简图文上手指南.docx"
-OUTPUT_DOCX_DIST = REPO_ROOT / "dist" / "FairyReport_新人极简图文上手指南.docx"
+OUTPUT_DOCX_DOCS = DOCS_DIR / "FairyReport_快速上手操作指南.docx"
+OUTPUT_DOCX_DIST = REPO_ROOT / "dist" / "FairyReport_快速上手操作指南.docx"
 
 # ── 颜色常量 ──
 COLOR_PRIMARY = RGBColor(0x1E, 0x3A, 0x8A)      # 科技深蓝 #1E3A8A
@@ -102,7 +102,7 @@ def create_cover_page(doc: Document):
     p_title.paragraph_format.space_before = Pt(0)
     p_title.paragraph_format.space_after = Pt(16)
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r_title = p_title.add_run("FairyReport 智能报告写作平台")
+    r_title = p_title.add_run("FairyReport 智能报告编制应用")
     format_run(r_title, font_name="Times New Roman", east_asia="黑体", font_size=Pt(26), bold=True, color=COLOR_TITLE)
 
     # 4. 副标题
@@ -111,7 +111,7 @@ def create_cover_page(doc: Document):
     p_sub.paragraph_format.space_before = Pt(0)
     p_sub.paragraph_format.space_after = Pt(40)
     p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r_sub = p_sub.add_run("新人极简图文上手指南")
+    r_sub = p_sub.add_run("快速上手操作指南")
     format_run(r_sub, font_name="Times New Roman", east_asia="黑体", font_size=Pt(18), bold=True, color=COLOR_PRIMARY)
 
     # 5. 特性亮点卡片 (1行4列表格)
@@ -214,20 +214,20 @@ def create_toc_page(doc: Document):
 
     # 可视化目录项列表
     toc_items = [
-        ("【前言】献给新手：你的 24 小时专业报告起草助理", True, 0),
-        ("【第一篇】零门槛极速上手（3 分钟掌握核心概念）", True, 0),
-        ("1. 软件启动只需一步", False, 1),
-        ("2. 认识核心操作流水线", False, 1),
-        ("【第二篇】五步全流程图文实操指南（附真实界面）", True, 0),
-        ("步骤 1：项目与资料 —— 资料留空，即开即写", False, 1),
-        ("步骤 2：模板与大纲 —— 锁定智库专报标准骨架", False, 1),
-        ("步骤 3：章节写作 —— 边思索、边查证、自动绘表", False, 1),
-        ("步骤 4：审阅修改 —— 专家诊断总台账逐项把关", False, 1),
-        ("步骤 5：成果导出 —— 综合自洽度 100 分一键交付", False, 1),
-        ("【第三篇】新手日常使用常见疑问（FAQ）", True, 0),
-        ("Q1：智库专报真的不需要上传任何项目材料吗？", False, 1),
-        ("Q2：我完全不懂怎么给 AI 写提示词，也能写出这么专业的报告吗？", False, 1),
-        ("Q3：如果导出的 Word 初稿我还想进一步修改怎么办？", False, 1),
+        ("【前言】系统定位与编制效能概述", True, 0),
+        ("【第一篇】快速入门与核心概念", True, 0),
+        ("1. 软件启动与登录", False, 1),
+        ("2. 五步端到端工作流水线", False, 1),
+        ("【第二篇】五步全流程图文操作指引（附真实界面）", True, 0),
+        ("步骤 1：项目与资料 —— 资料留空直接起草", False, 1),
+        ("步骤 2：模板与大纲 —— 锁定标准骨架", False, 1),
+        ("步骤 3：章节写作 —— 智能流式生成与规范排版", False, 1),
+        ("步骤 4：审阅修改 —— 多维专家规程质检", False, 1),
+        ("步骤 5：成果导出 —— 自洽性核验与出版级交付", False, 1),
+        ("【第三篇】日常使用常见问题解答（FAQ）", True, 0),
+        ("Q1：智库专报是否必须上传项目资料文件？", False, 1),
+        ("Q2：使用本系统是否需要编写大模型提示词？", False, 1),
+        ("Q3：导出的 Word 文档是否支持后续二次编辑？", False, 1),
     ]
 
     for title, is_h1, level in toc_items:
@@ -261,7 +261,7 @@ def init_body_section(doc: Document):
     p_hdr = header.paragraphs[0]
     p_hdr.paragraph_format.first_line_indent = Pt(0)
     p_hdr.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    r_hdr = p_hdr.add_run("FairyReport 智能报告写作平台 · 新人极简图文上手指南 (v1.5.0)")
+    r_hdr = p_hdr.add_run("FairyReport 智能报告编制应用 · 快速上手操作指南 (v1.5.0)")
     format_run(r_hdr, font_name="Times New Roman", east_asia="仿宋", font_size=Pt(9), color=COLOR_MUTED)
 
     # 页眉下划线
@@ -561,7 +561,7 @@ def add_pipeline_flowchart_table(doc: Document):
 
 def build_beginner_guide_docx():
     """主构建函数：严格根据 docs/BEGINNER_GUIDE.md 内容生成出版级 Word。"""
-    print("开始构建 FairyReport 新人极简图文上手指南 Word 文档...")
+    print("开始构建 FairyReport 快速上手操作指南 Word 文档...")
     doc = Document()
 
     # 1. 封面 (Section 1)
@@ -574,49 +574,49 @@ def build_beginner_guide_docx():
     init_body_section(doc)
 
     # ──【前言】──
-    add_heading_1(doc, "【前言】献给新手：你的 24 小时专业报告起草助理")
+    add_heading_1(doc, "【前言】系统定位与编制效能概述")
     add_body_paragraph(
         doc,
-        "在投资项目立项、可行性研究、技术方案编制与智库专报撰写过程中，初涉此业务的新人往往面临三大深层痛点：",
+        "在投资项目立项、可行性研究、技术方案编制与智库专报起草过程中，传统报告编制工作往往面临以下常见难点：",
     )
-    add_bullet_item(doc, "资料杂乱无头绪：", "面对几十份行业动态、政策汇编与宏观统计数据，不知如何结构化提炼与切入下笔；")
-    add_bullet_item(doc, "格式规范严苛：", "主管部门指导意见与现行行业规程对目录大纲层级、前后指标自洽性、工程三线表格式有着极严约束，一旦错漏一项往往需要通篇推倒重来；")
-    add_bullet_item(doc, "起草周期漫长：", "纯人工手工编写数万字初稿往往耗费数周时间，且需在后期花费大量精力核对指标冲突与引用出处。")
+    add_bullet_item(doc, "资料繁杂且多源分散：", "各类行业动态、统计数据与技术文档体量庞大，资料整理耗时较长；")
+    add_bullet_item(doc, "规范体例要求严密：", "主管部门指导意见与现行行业规程对目录大纲层级、前后指标自洽性、工程三线表格式有着明确规范，需严格遵循标准体例；")
+    add_bullet_item(doc, "初稿起草周期较长：", "传统人工起草需耗费较长时间，且需反复复核文字口径与数据自洽性。")
 
     add_body_paragraph(
         doc,
-        "FairyReport 就是专为你量身打造的“桌面级智能报告起草助手”，其核心理念与优势体现在四个方面：",
+        "FairyReport 智能报告编制应用专注于辅助工程咨询与投资项目报告编制全流程，其核心功能与特点体现在四个方面：",
     )
-    add_bullet_item(doc, "零门槛免配置：", "不用敲任何命令行代码，不用在本地安装复杂的第三方数据库或容器，像打开日常办公软件一样轻盈运行；")
-    add_bullet_item(doc, "独创支持资料留空：", "对于智库专报等宏观战略类报告，无需上传复杂项目底稿，平台依托权威联网检索与内置行业标准规程库即可高质量快速起草；")
-    add_bullet_item(doc, "全透明可追溯：", "正文每一句关键判断、核心技术指标均清晰标注引用角标，字字有出处、杜绝 AI 幻觉编造；")
-    add_bullet_item(doc, "出版级成果输出：", "一键导出的即为排版精良、字体行距符合现行工程咨询公文规范的 Word 初稿（.docx），可直接向上级或协作团队汇报研讨。")
+    add_bullet_item(doc, "本地集成开箱即用：", "后端计算引擎与本地向量库一体化打包，无需用户安装配置额外运行环境；")
+    add_bullet_item(doc, "支持无前置资料直接起草：", "对于智库专报等宏观战略类报告，无需上传复杂项目底稿，系统依托权威联网检索与内置通用规程库即可直接完成大纲推导与章节撰写；")
+    add_bullet_item(doc, "来源引证全流程可追溯：", "正文关键论断与核心指标均配备权威来源引用角标，支持回溯核验；")
+    add_bullet_item(doc, "成果自动规范排版：", "一键生成符合规范公文排版标准的 Word 初稿（.docx）与 Markdown（.md），便于后续研讨与交付使用。")
 
     # ──【第一篇】──
-    add_heading_1(doc, "【第一篇】零门槛极速上手（3 分钟掌握核心概念）")
-    add_heading_2(doc, "1. 软件启动只需一步")
-    add_bullet_item(doc, "单包绿色运行：", "下载解压 FairyReport-Local-v1.5.0-Windows-x64.zip 至任意磁盘文件夹；")
-    add_bullet_item(doc, "一键双击启动：", "双击运行「启动 FairyReport.bat」，内置智能引擎全自动就绪并弹出优雅的桌面操作界面；")
+    add_heading_1(doc, "【第一篇】快速入门与核心概念")
+    add_heading_2(doc, "1. 软件启动与登录")
+    add_bullet_item(doc, "单包绿色运行：", "下载解压 FairyReport-Local-v1.5.0-Windows-x64.zip 至本地任意磁盘目录；")
+    add_bullet_item(doc, "一键双击启动：", "双击运行「FairyReport.exe」，内置计算引擎在后台自动就绪并展现桌面操作界面；")
     add_bullet_item(doc, "免登录快速体验：", "在登录界面点击下方「🎯 快捷演示体验」按钮，即可免登录直接进入工作台体验全部核心功能。")
 
-    add_heading_2(doc, "2. 认识核心操作流水线")
+    add_heading_2(doc, "2. 五步端到端工作流水线")
     add_body_paragraph(
         doc,
-        "整个软件界面遵循最符合人类工程咨询直觉的“流水线设计”。用户只需沿着顶部的 5 个步骤一步步往下推进即可完成全生命周期编制："
+        "系统界面采用端到端流程向导设计，包含以下 5 个标准化操作阶段："
     )
     add_pipeline_flowchart_table(doc)
 
     # ──【第二篇】──
-    add_heading_1(doc, "【第二篇】五步全流程图文实操指南（附真实界面）")
+    add_heading_1(doc, "【第二篇】五步全流程图文操作指引（附真实界面）")
     add_body_paragraph(
         doc,
-        "以下全流程以撰写一份典型的决策参考交付物——《重点算力基础设施绿色低碳发展与智能算力中心布局智库专报》为例，完整演示 5 步全闭环操作："
+        "以下以编制典型的决策参考交付物——《重点算力基础设施绿色低碳发展与智能算力中心布局智库专报》为例，说明全流程操作："
     )
 
     # 步骤 1
-    add_heading_2(doc, "步骤 1：项目与资料 —— 资料留空，即开即写")
-    add_bullet_item(doc, "用户操作：", "点击「+ 新建项目」，输入报告名称；如果手头有参考文档可以直接拖入上传，若尚无资料也可以完全保持留空；")
-    add_bullet_item(doc, "系统响应：", "后台自动完成项目建档。系统提示通用知识包已就绪（内含 15 类报告交付物现行标准大纲与规程库）。")
+    add_heading_2(doc, "步骤 1：项目与资料 —— 资料留空直接起草")
+    add_bullet_item(doc, "操作步骤：", "点击「+ 新建项目」，输入报告名称；如有参考文档可直接拖拽导入，亦可保持留空直接创建；")
+    add_bullet_item(doc, "系统执行：", "后台自动完成项目初始化。系统提示通用知识包已就绪（内含 15 类报告交付物现行标准大纲与规程库）。")
     add_image_with_caption(
         doc,
         IMAGES_DIR / "step1_materials.png",
@@ -624,17 +624,17 @@ def build_beginner_guide_docx():
     )
     add_callout_box(
         doc,
-        "步骤 1 · 新手实战看点",
+        "步骤 1 · 功能要点",
         [
-            "资料留空特性：界面醒目提示“智库专报等宏观战略类报告支持资料留空，可直接点击下方「下一步：模板与大纲」，依托权威联网检索与知识规程库高质量起草”。",
-            "零准备成本：不用为了凑材料而到处翻找底稿文件，点击右下角蓝色按钮直接推进到大纲规划！",
+            "支持无前置资料模式：界面提示“智库专报等宏观战略类报告支持资料留空，可直接点击下方「下一步：模板与大纲」，依托权威联网检索与知识规程库高质量起草”；",
+            "流程衔接顺畅：对于政策建言与智库分析类报告，无需上传复杂底稿，确认项目名称后即可直接进入大纲规划阶段。",
         ]
     )
 
     # 步骤 2
-    add_heading_2(doc, "步骤 2：模板与大纲 —— 锁定智库专报标准骨架")
-    add_bullet_item(doc, "用户操作：", "在模板网格中点击选中「智库专报」卡片；")
-    add_bullet_item(doc, "系统响应：", "弹出智库专报权威业务定位说明，并在右侧严格加载符合现行编制标准指南的 5 大核心章节大纲。")
+    add_heading_2(doc, "步骤 2：模板与大纲 —— 锁定标准骨架")
+    add_bullet_item(doc, "操作步骤：", "在模板网格中选择「智库专报」卡片；")
+    add_bullet_item(doc, "系统执行：", "呈现智库专报权威业务定位说明，并在右侧严格加载符合现行编制标准指南的 5 大核心章节大纲。")
     add_image_with_caption(
         doc,
         IMAGES_DIR / "step2_outline.png",
@@ -642,18 +642,18 @@ def build_beginner_guide_docx():
     )
     add_callout_box(
         doc,
-        "步骤 2 · 新手实战看点",
+        "步骤 2 · 功能要点",
         [
-            "15 类规整模板：涵盖可行性研究、资金申请、项目建议书、节能评估等 15 类主流咨询交付物，网格规范大方；",
-            "权威业务定位：选中即显示智库专报强调“战略前瞻性研判、行业堵点剖析与对策建言，强调问题导向、底线思维与实操可行性”；",
-            "刚性骨架锁定：右侧清晰列出导语/摘要、总体态势、突出矛盾、对策建议、附表 5 个核心章节，从根源杜绝写偏漏项。",
+            "15 类标准模板库：涵盖可行性研究、资金申请、项目建议书、产业规划等 15 类主流专业报告模板，网格规范大方；",
+            "业务定位说明：选中模板后即时显示业务定位说明与编制重点，辅助用户合理选型；",
+            "结构骨架锁定：右侧加载导语/摘要、总体态势、突出矛盾、对策建议、附件表 5 个核心章节，保障后续撰写要素完备。",
         ]
     )
 
     # 步骤 3
-    add_heading_2(doc, "步骤 3：章节写作 —— 边思索、边查证、自动绘表")
-    add_bullet_item(doc, "用户操作：", "点击「一键开始全书写作」或点击特定章节卡片进行流式起草；")
-    add_bullet_item(doc, "系统响应：", "自动触发权威外部联网检索，边思考边流式打字，遇到技术或经济指标对比自动排版出标准工程三线表，并在正文实时嵌入权威来源引证角标。")
+    add_heading_2(doc, "步骤 3：章节写作 —— 智能流式生成与规范排版")
+    add_bullet_item(doc, "操作步骤：", "点击「一键开始全书写作」，或针对特定章节单独点击起草；")
+    add_bullet_item(doc, "系统执行：", "自动触发权威外部联网检索调取最新公开数据，边思考边流式打字，遇到技术或经济指标对比自动排版出标准工程三线表，并在正文实时嵌入权威来源引证角标。")
     add_image_with_caption(
         doc,
         IMAGES_DIR / "step3_writing.png",
@@ -661,18 +661,18 @@ def build_beginner_guide_docx():
     )
     add_callout_box(
         doc,
-        "步骤 3 · 新手实战看点",
+        "步骤 3 · 功能要点",
         [
-            "推荐写作顺序指引：左上方清晰标注“第 1 章 → 第 2 章 → 第 3 章 → 第 4 章 → 第 5 章”推荐流水线，章节目录全部显示绿色完成徽标；",
+            "推荐写作顺序：界面标明推荐编写路径，已完成撰写的章节在目录树中同步展示完成状态；",
             "规范工程三线表：系统自动将重点算力枢纽集群的 PUE 能效与算力规模排版为“顶线 1.5 磅、底线 1.5 磅、栏目线 0.75 磅”的标准工程三线表；",
-            "精准官方引用角标：正文清晰标注权威信息通信智库与行业主管部门指导意见的出处角标，言必有据、拒绝空泛。",
+            "精准引用角标：正文自动标注权威信息通信智库与行业主管部门指导意见的出处角标，言必有据、拒绝空泛。",
         ]
     )
 
     # 步骤 4
-    add_heading_2(doc, "步骤 4：审阅修改 —— 专家诊断总台账逐项把关")
-    add_bullet_item(doc, "用户操作：", "初稿撰写完毕后进入审阅界面，点击右上角「专家诊断报告」；")
-    add_bullet_item(doc, "系统响应：", "执行完整性、一致性、合规性与充分性四维体检，左侧章节标注红绿黄状态徽章，右侧滑出全高抽屉展示问题台账与修改建议。")
+    add_heading_2(doc, "步骤 4：审阅修改 —— 多维专家规程质检")
+    add_bullet_item(doc, "操作步骤：", "初稿撰写完毕后进入审阅界面，点击右上角「专家诊断报告」；")
+    add_bullet_item(doc, "系统执行：", "执行完整性、一致性、合规性与充分性四维体检，左侧章节标注审查状态徽章，右侧滑出全高抽屉展示问题台账与修改建议。")
     add_image_with_caption(
         doc,
         IMAGES_DIR / "step4_review.png",
@@ -680,17 +680,17 @@ def build_beginner_guide_docx():
     )
     add_callout_box(
         doc,
-        "步骤 4 · 新手实战看点",
+        "步骤 4 · 功能要点",
         [
-            "问题台账一目了然：专家诊断明确指出“建议增加算力集群直供绿电的度电成本测算对照，可补充附表专项比对”；",
-            "定向修复不损上下文：支持“定位正文”瞬间跳转，点击“局部修复”只修改瑕疵段落，绝不破坏报告全篇的逻辑结构与数据上下文。",
+            "问题台账清晰规范：专家诊断明确指出“建议增加算力集群直供绿电的度电成本测算对照，可补充附表专项比对”；",
+            "支持定向局部修订：支持“定位正文”跳转至对应段落，点击“局部修复”只修改瑕疵段落，保持整体篇章结构稳定。",
         ]
     )
 
     # 步骤 5
-    add_heading_2(doc, "步骤 5：成果导出 —— 综合自洽度 100 分一键交付")
-    add_bullet_item(doc, "用户操作：", "进入导出页面，查看自洽度评分，点击「🚀 一键导出 Word 报告 (.docx)」；")
-    add_bullet_item(doc, "系统响应：", "复核全篇核心数据指标、引用出处链条与上下游逻辑脉络，自动生成规范参考文献排序清单，瞬时输出排版精良的出版级 Word 初稿。")
+    add_heading_2(doc, "步骤 5：成果导出 —— 自洽性核验与出版级交付")
+    add_bullet_item(doc, "操作步骤：", "进入导出页面，查看自洽度评分，点击「一键导出 Word 报告 (.docx)」；")
+    add_bullet_item(doc, "系统执行：", "复核全篇核心数据指标、引用出处链条与上下游逻辑脉络，自动生成规范参考文献排序清单，瞬时输出排版标准的出版级 Word 初稿。")
     add_image_with_caption(
         doc,
         IMAGES_DIR / "step5_export.png",
@@ -698,33 +698,33 @@ def build_beginner_guide_docx():
     )
     add_callout_box(
         doc,
-        "步骤 5 · 新手实战看点",
+        "步骤 5 · 功能要点",
         [
-            "绿灯安全放行：自洽性核验明确给出“综合自洽度 100 分，100% 吻合！跨章节核心指标完全吻合、引用链溯源清晰、逻辑闭环”；",
-            "规范参考文献：右上角自动列出全书参考文献清单（权威智库白皮书、现行标准规程、专业研究中心）；",
-            "开箱即用：导出的 Word 文档涵盖规范封面、自动目录、标准仿宋公文字体、1.5 倍行距与标准三线表，拿来即可向领导与团队汇报研讨。",
+            "自洽性跨章节复核：自洽性核验明确给出“综合自洽度 100 分，100% 吻合！跨章节核心指标完全吻合、引用链溯源清晰、逻辑闭环”；",
+            "参考文献自动归并：右上角自动列出全书参考文献清单（权威智库白皮书、现行标准规程、专业研究中心）；",
+            "规范初稿格式：导出的 Word 文档涵盖规范封面、自动目录、标准仿宋公文字体、1.5 倍行距与标准三线表，满足正式交付与评审需求。",
         ]
     )
 
     # ──【第三篇】──
-    add_heading_1(doc, "【第三篇】新手日常使用常见疑问（FAQ）")
+    add_heading_1(doc, "【第三篇】日常使用常见问题解答（FAQ）")
 
-    add_heading_3(doc, "Q1：智库专报真的不需要上传任何项目材料吗？")
+    add_heading_3(doc, "Q1：智库专报是否必须上传项目资料文件？")
     add_body_paragraph(
         doc,
-        "答：是的！投资项目可行性研究通常需要特定的现场勘察或工程图纸，而智库专报聚焦宏观战略前瞻、行业堵点剖析与对策建言。FairyReport 内置了行业通用编制指南，并具备官方权威联网检索能力。在资料留空状态下，系统会自动检索官方发布的最新白皮书与政策文件进行高质量起草。",
+        "答：智库专报聚焦宏观战略前瞻、行业堵点剖析与对策建议。FairyReport 内置行业通用编制指南，并具备权威联网检索能力。在未导入项目资料时，系统可依托内置规程与权威公开发布的研究报告、指导文件独立完成起草。",
     )
 
-    add_heading_3(doc, "Q2：我完全不懂怎么给 AI 写提示词，也能写出这么专业的报告吗？")
+    add_heading_3(doc, "Q2：使用本系统是否需要编写大模型提示词？")
     add_body_paragraph(
         doc,
-        "答：完全不需要写提示词！所有行业标准大纲、公文写作逻辑、三线表规范与格式约束已经全部固化在平台内部。业务人员只需“选类型、看大纲、点开始”，软件全自动完成专业级的提示工程构建与多源 RAG 智识注水。",
+        "答：无需用户编写提示词。系统已将行业标准规程、章节写作逻辑、三线表规范与格式约束固化为提示构建引擎。用户只需选择报告类型并确认大纲，系统即自动完成专业提示构建与 RAG 智识注入。",
     )
 
-    add_heading_3(doc, "Q3：如果导出的 Word 初稿我还想进一步修改怎么办？")
+    add_heading_3(doc, "Q3：导出的 Word 文档是否支持后续二次编辑？")
     add_body_paragraph(
         doc,
-        "答：系统导出的就是标准的 .docx 文件，完美兼容微软 Office Word 与 WPS Office。你可以像编辑日常文档一样，随意修改文字、增删段落、微调数据或更换企业专属字体。",
+        "答：导出的成果为标准 .docx 格式文档，兼容 Microsoft Office Word 与 WPS Office 等主流办公软件。用户可在本地直接进行文字修订、格式调整或数据补充。",
     )
 
     # 保存文档

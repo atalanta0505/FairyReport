@@ -5,7 +5,7 @@
 
 ## 项目概况
 
-- FairyReport：基于 **Tauri 2 + Vue 3 + FastAPI + LLM + 三源 RAG** 架构的工程咨询智能报告生成平台（12 类投前咨询交付物）。
+- FairyReport 智能报告编制应用：基于 **Tauri 2 + Vue 3 + FastAPI + LLM + 三源 RAG** 架构（涵盖 15 类投前咨询交付物）。
 - 技术栈：Rust (Tauri 2)、Vue 3 + TypeScript + Vite + Pinia、Python 3.10+ (FastAPI + Pydantic + fastembed + chromadb)、python-docx、openpyxl。
 - 前端入口：`desktop/`；后端引擎入口：`engine/app/main.py`。
 - 核心模块：`engine/app/materials/`（解析/分块/向量化）、`engine/app/writing/`（大纲/流式撰写/审阅/自洽性核验）、`engine/app/export/`（出版级 Word 与 Markdown 导出）、`generic_knowledge/`（只读行业规程与模板 JSON 库）。

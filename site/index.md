@@ -3,14 +3,14 @@ layout: home
 
 hero:
   name: "FairyReport"
-  text: "下一代投资项目与工程智能报告生成平台"
+  text: "FairyReport 智能报告编制应用"
   tagline: "纯本地物理隔离 · 三源 RAG 智识矩阵 · 15 类主流标准规范模板 · 出版级 Word 导出"
   image:
     src: /logo.svg
     alt: FairyReport Logo
   actions:
     - theme: brand
-      text: 🚀 5 分钟新手上手
+      text: 🚀 快速上手指引
       link: /guide/getting-started
     - theme: alt
       text: 📥 下载 v1.5.0 客户端
