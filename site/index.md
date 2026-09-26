@@ -48,7 +48,7 @@ features:
 
 <div class="content-container" style="max-width: 1152px; margin: 40px auto; padding: 0 24px;">
 
-## 🖥️ 现代化沉浸式工作台全景（1080P 实景预览）
+## 🖥️ 现代化沉浸式工作台实景全景
 
 FairyReport 采用 Tauri 2 原生架构与现代工业设计语言，界面简洁克制、交互行云流水。以下为真实运行截屏：
 
