@@ -23,17 +23,27 @@
 - **文件包名**：`FairyReport-Local-v1.5.0-Windows-x64.zip`
 - **文件体积**：370 MB (自包含完整后端计算引擎与内嵌模型)
 - **SHA-256 校验码**：`97B214137B32D1A7A4CC191FE34629487CE1E9A95588565ADA372A6D22B52D09`
-- **下载地址**：
-  - [⚡ 官方高速直链下载](/downloads/FairyReport-Local-v1.5.0-Windows-x64.zip)
-  - [🌐 GitHub Releases 备用镜像](https://github.com/atalanta0505/FairyReport/releases)
+- **下载通道**：
+  - [⚡ 官方直链下载](/downloads/FairyReport-Local-v1.5.0-Windows-x64.zip)
+  - 更多国内高速网盘分流镜像（百度网盘、坚果云、夸克网盘、阿里云盘，见下方）
 
 ---
 
-### 2. Windows x64 标准安装包
+### 2. 国内主流云盘高速分流（推荐网络较慢用户使用）
+
+| 网盘通道 | 下载链接 | 提取码 / 访问说明 |
+| :--- | :--- | :--- |
+| **百度网盘** | *(正在配置链接)* | 提取码：`待更新` |
+| **坚果云** | *(正在配置链接)* | 不限速直链 |
+| **夸克网盘** | *(正在配置链接)* | 极速转存与下载 |
+| **阿里云盘** | *(正在配置链接)* | 不限速高速下载 |
+
+---
+
+### 3. Windows x64 标准安装包
 - **文件包名**：`FairyReport_1.5.0_x64-setup.exe`
-- **下载地址**：
-  - [⚡ 官方高速直链下载](/downloads/FairyReport_1.5.0_x64-setup.exe)
-  - [🌐 GitHub Releases 备用镜像](https://github.com/atalanta0505/FairyReport/releases)
+- **下载通道**：
+  - [⚡ 官方直链下载](/downloads/FairyReport_1.5.0_x64-setup.exe)
 
 ---
 

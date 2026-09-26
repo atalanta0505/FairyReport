@@ -82,9 +82,6 @@ export default defineConfig({
       }
     },
 
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/atalanta0505/FairyReport' }
-    ],
 
     footer: {
       message: '投资项目与工程智能报告生成平台 | 遵循行业通用编制指南与现行规程',
