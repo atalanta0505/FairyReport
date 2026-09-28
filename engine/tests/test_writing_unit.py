@@ -579,3 +579,36 @@ def test_ndrc_financial_table_prompt_full_elements():
     assert "债务清偿能力指标" in sys_prompt
 
 
+def test_normalize_chapter_markdown_glued_zhiku_headings():
+    """验证智库专报中出现的长段粘连小节、正文引导词粘连及超长段落精准解耦。"""
+    from engine.app.writing.writer import normalize_chapter_markdown
+
+    # 1. 引导词与政策年份粘连拆分
+    raw1 = "### 1. 构建多元组合的投融资工具体系在中央超长期特别国债2026年安排\n\n1600亿元专项支持的基础上，应加快形成多元组合工具箱。"
+    res1 = normalize_chapter_markdown(raw1)
+    assert "### 1. 构建多元组合的投融资工具体系\n\n" in res1
+    assert "在中央超长期特别国债2026年安排" in res1
+
+    # 2. 200+字超长正文直接粘连在 ### 2. 后的熔断解耦
+    raw2 = "### 2. 推进非开挖与智能感知关键技术攻关超大特大城市核心城区普遍面临“无路可挖”的空间约束，应大力推广非开挖修复技术、微型隧道掘进技术、原位固化修复工艺，最大限度减少路面开挖与交通干扰。同时加快智能感知装备攻关，重点突破高精度管网泄漏监测传感器、管道内检测机器人、分布式光纤测温与声波定位系统等关键设备，提升管网运行状态的实时感知与预警能力。"
+    res2 = normalize_chapter_markdown(raw2)
+    assert "### 2. 推进非开挖与智能感知关键技术攻关\n\n" in res2
+    assert "超大特大城市核心城区普遍面临“无路可挖”的空间约束" in res2
+    # 确保没有整段标题
+    assert not any(len(line) > 35 and line.startswith("### ") for line in res2.split("\n"))
+
+    # 3. 顿号列举句子直接粘连在底座小节后拆分
+    raw3 = "### 3. 建立统一管网数据标准与数字孪生底座数据分散、标准不一、共享不畅是制约智慧管网建设的基础性障碍\n\n建议由城市政府牵头制定统一标准。"
+    res3 = normalize_chapter_markdown(raw3)
+    assert "### 3. 建立统一管网数据标准与数字孪生底座\n\n" in res3
+    assert "数据分散、标准不一、共享不畅是制约智慧管网建设的基础性障碍" in res3
+
+    # 4. 正常纯净标题绝不拆分
+    clean_h = "# 三、对策建议与政策举措\n\n## （二）强化关键要素保障与核心技术攻坚\n\n### 4. 强化专业运维人才与应急演练保障"
+    res_clean = normalize_chapter_markdown(clean_h)
+    assert "# 三、对策建议与政策举措" in res_clean
+    assert "## （二）强化关键要素保障与核心技术攻坚" in res_clean
+    assert "### 4. 强化专业运维人才与应急演练保障" in res_clean
+
+
+

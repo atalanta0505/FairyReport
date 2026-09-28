@@ -359,8 +359,16 @@ _REPORT_TITLE_KEYWORDS = (
     "设计", "施工", "运营", "管理", "定员", "招标", "效果", "影响",
     "举措", "抓手", "制度", "政策", "行动", "平台", "生态", "协同", "试点", "示范",
     "支撑", "导向", "闭环", "转型", "赋能", "供给", "攻坚", "防护", "风控", "治理",
-    "路径", "指引", "防线", "预警", "清单",
-    "规范", "指南", "任务", "策略"
+    "路径", "指引", "防线", "预警", "清单", "框架", "结构", "配置", "总成", "终端",
+    "规范", "指南", "任务", "策略", "攻关", "底座", "底线", "红线", "矩阵", "枢纽",
+    "集群", "载体", "支点", "网络", "系统", "蓝图", "底图", "样板", "标杆", "工具箱"
+)
+
+_SENTENCE_STARTERS = (
+    "在", "为", "从", "对", "按", "按照", "根据", "通过", "依托", "围绕", "结合",
+    "随着", "面对", "针对", "鉴于", "据", "由", "建议", "应", "需要", "必须", "要",
+    "拟", "将", "该", "本", "其", "此", "当前", "目前", "近年来", "未来", "总体",
+    "调研表明", "实践表明", "实践证明", "数据显示", "统计显示"
 )
 
 
@@ -454,9 +462,9 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
 
         # 6.1 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导 num_part 时生效
         sep_pattern = (
-            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$'
+            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{2,})$'
             if num_part else
-            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$'
+            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{2,})$'
         )
         m_sep = re.match(sep_pattern, rest)
         if m_sep:
@@ -464,40 +472,67 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
             body_text = m_sep.group(2).strip()
             return f"{lead}{num_lead}{h_text}\n\n{body_text}"
 
-        # 6.2 无标点无空格粘连（扫描标题关键词，严格限制在首个中文标点前，防止跨越正文）
-        first_punct = re.search(r'[，。；！？]', rest)
-        # 若整行没有任何标点且长度在常规标题范围内（<= 30字），说明是纯净标题，绝不拆分
-        if not first_punct and len(rest) <= 30:
+        # 6.2 纯净短标题保护：无任何中文标点（顿号逗号句号等）且长度 <= 30 字，说明是正常独立标题，绝不拆分
+        all_punct = re.search(r'[，。；！？、]', rest)
+        sentence_punct = re.search(r'[，。；！？]', rest)
+        if not all_punct and len(rest) <= 30:
             return None
-        search_limit = first_punct.start() if first_punct else len(rest)
-        search_limit = min(search_limit, 35)
 
-        max_end = -1
-        start_idx_match = -1
+        # 标题上限控制：标题内部不包含顿号及句子标点
+        first_break = all_punct.start() if all_punct else len(rest)
+        search_limit = min(first_break, 30)
+
+        # 6.3 扫描标题结尾词 + (正文引导词 或 较长正文)
+        best_split = None
+        start_zero_matched = False
         for kw in _REPORT_TITLE_KEYWORDS:
-            kw_idx = rest.find(kw)
-            if 0 <= kw_idx:
-                end_pos = kw_idx + len(kw)
-                # 兼容标题后带有（如适用）或 (如适用) 等限定括号
+            idx = 0
+            while True:
+                pos = rest.find(kw, idx)
+                if pos < 0 or pos > search_limit:
+                    break
+                end_pos = pos + len(kw)
                 paren_m = re.match(r'^(?:（[^）]+）|\([^)]+\))', rest[end_pos:])
                 if paren_m:
                     end_pos += paren_m.end()
-                if end_pos <= search_limit:
-                    if kw_idx == 0:
-                        if end_pos > max_end:
-                            max_end = end_pos
-                            start_idx_match = 0
-                    elif start_idx_match != 0 and end_pos > max_end:
-                        max_end = end_pos
 
-        if max_end > 0 and max_end < len(rest):
-            h_text = rest[:max_end].strip()
-            body_text = rest[max_end:].lstrip(':：。—-\u2014\u2013，, \t').strip()
-            # 若拆分出的后续正文以连词（与、及、和）开头，说明属于复合标题（如投资估算与资金筹措方案），不予拆分
-            if re.match(r'^[与及和]', body_text):
-                return None
-            if len(body_text) >= 4:
-                return f"{lead}{num_lead}{h_text}\n\n{body_text}"
+                if 4 <= end_pos <= search_limit and end_pos < len(rest):
+                    remainder = rest[end_pos:].lstrip(':：。—-\u2014\u2013，,、 \t')
+                    if not re.match(r'^[与及和或]', remainder) and len(remainder) >= 4:
+                        is_starter = any(remainder.startswith(s) for s in _SENTENCE_STARTERS)
+                        has_punct = bool(re.search(r'[，。；！？、]', remainder))
+                        score = (3 if is_starter else 1) + (2 if has_punct else 0)
+
+                        if start_zero_matched and pos >= best_split[1]:
+                            pass
+                        elif pos == 0:
+                            start_zero_matched = True
+                            if best_split is None or not (best_split[4] == 0 and best_split[1] >= end_pos):
+                                best_split = (score, end_pos, rest[:end_pos].strip(), remainder.strip(), pos)
+                        elif not start_zero_matched:
+                            if best_split is None or score > best_split[0] or (score == best_split[0] and end_pos > best_split[1]):
+                                best_split = (score, end_pos, rest[:end_pos].strip(), remainder.strip(), pos)
+                idx = pos + 1
+
+        if best_split and best_split[0] >= 1:
+            return f"{lead}{num_lead}{best_split[2]}\n\n{best_split[3]}"
+
+        # 6.4 检查正文引导词直接切分 (例如：...体系在中央超长期特别国债...)
+        for st in _SENTENCE_STARTERS:
+            pos = rest.find(st)
+            if 6 <= pos <= 28:
+                h_cand = rest[:pos].strip()
+                b_cand = rest[pos:].strip()
+                if len(b_cand) >= 4 and not re.search(r'[，。；！？、]', h_cand):
+                    return f"{lead}{num_lead}{h_cand}\n\n{b_cand}"
+
+        # 6.5 超长行熔断 (整行 > 35 字且包含标点，防止整段正文被渲染为粗体 H3 标题)
+        if len(rest) > 35 and sentence_punct and 8 <= sentence_punct.start() <= 28:
+            p_idx = sentence_punct.start()
+            h_cand = rest[:p_idx].strip()
+            b_cand = rest[p_idx+1:].strip()
+            return f"{lead}{num_lead}{h_cand}\n\n{b_cand}"
+
         return None
 
     # 分别匹配两类形态：
@@ -749,10 +784,10 @@ class ChapterWriter:
             f"## 写作要求（骨架靶向填充模式）\n"
             f"- **骨架锁定（最高优先级）：必须严格保留上方【待填充的本章结构骨架】中的所有标题行（#、##、###、####）及其完整文字与层级，严禁增删、修改或调换任何标题顺序！**\n"
             f"- **12 项规定动作标准三线表格强制规范（最高优先级）：在涉及主要技术经济指标（1.1.6）、建设规模方案比选（3.2.1）、场址方案比选（4.1.2）、技术路线比选（5.1.1）、关键设备比选（5.2.1）、主要设备清单（5.2.2）、工程方案比选（5.3.1）、投资估算构成与资金计划（7.1.2/7.1.5）、财务评价指标（7.2.3）、融资方案比选（7.3.1）、债务清偿能力（7.4.3）、风险评价管控矩阵（9.1.8）等小节，必须强制输出标准的 Markdown 三线表格（表头 + 对齐分隔线如 `| :--- | :---: | ---: |` + 完整数据行、工程量纲单位及推荐结论），严禁全篇纯文字堆砌！**\n"
-            f"- **末级小节精准填充与段落连贯（极重要）：在每一个最低级别标题（### / ####）下方强制空一行（\\n\\n），直接展开深入填充详实、专业、严谨且带完整句号标点的正文段落，严禁在标题下单独输出 1 行无句号概括短句后再另起一行！**\n"
-            f"- **非末级标题禁止堆砌正文：一级章（#）和二级节（##）作为分类与结构导引，正文必须具体归属到对应的末级小节下方！**\n"
+            f"- **标题层级精准适配（极重要）：若当前骨架最低层级为二级节（##），正文直接在该二级节下方空一行展开撰写（若需分点论述，请使用普通的序号段落如'1. xxx'，严禁擅自升级为'### 1. xxx'）；若骨架包含三级或四级小节（### / ####），正文具体归属到对应小节下方。**\n"
+            f"- **严禁标题行内跟写正文（铁律）：所有各级标题（#、##、###、####）及其序号后必须仅保留纯净、简短的标题短语（严禁在标题后无空格无标点直接连写正文陈述句，严禁在标题后同一行输出长句）；标题行下方必须强制输出两个换行符（\\n\\n）另起一行展开正文！**\n"
             f"- **内容深度与充实展开（极重要）：全面展开实质性工程分析、技术论证、详实参数核算、政策背景契合度推演与合规论证，每小节论述充分详尽，杜绝空洞简略与短句敷衍！**\n"
-            f"- **格式规范（极重要）：每个标题（#、##、###、####）必须独占一行且强制空一行（\\n\\n）后再写正文，严禁标题与正文连在同一行，严禁标题与正文首句同名同句同排连写（例如严禁输出'### 1.1.1 建设地点：本项目位于...'，正确格式为'### 1.1.1 建设地点\\n\\n本项目位于...'）；表格每行末尾必须输出标准换行符 \\n，表格前后强制空一行，严禁使用 || 连写在同一行！**\n"
+            f"- **格式规范（极重要）：每个标题必须独占一行且强制空一行（\\n\\n）后再写正文，严禁标题与正文连在同一行；表格每行末尾必须输出标准换行符 \\n，表格前后强制空一行，严禁使用 || 连写在同一行！**\n"
             f"- **引用标记行内紧随：【源:文件名】、【标:规程标准】或【网:标题】只能使用「参考资料」中实际出现的标签，且必须作为行内修饰紧随在事实陈述句末尾（如`...合规【标:标准】。`），严禁单独另起一行，严禁作为段首单独起段，严禁输出孤立的 [Z] 标记！**\n"
             f"- 请输出完整的章节正文（Markdown 格式），直接从标题和正文开始，禁止任何开场白或字数统计元数据标注\n\n"
             f"{REASONING_CHINESE_DEFENSE_PROMPT}\n"

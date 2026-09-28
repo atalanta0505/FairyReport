@@ -223,8 +223,16 @@ const REPORT_TITLE_KEYWORDS = [
   "设计", "施工", "运营", "管理", "定员", "招标", "效果", "影响",
   "举措", "抓手", "制度", "政策", "行动", "平台", "生态", "协同", "试点", "示范",
   "支撑", "导向", "闭环", "转型", "赋能", "供给", "攻坚", "防护", "风控", "治理",
-  "路径", "指引", "防线", "预警", "清单",
-  "规范", "指南", "任务", "策略"
+  "路径", "指引", "防线", "预警", "清单", "框架", "结构", "配置", "总成", "终端",
+  "规范", "指南", "任务", "策略", "攻关", "底座", "底线", "红线", "矩阵", "枢纽",
+  "集群", "载体", "支点", "网络", "系统", "蓝图", "底图", "样板", "标杆", "工具箱"
+];
+
+const SENTENCE_STARTERS = [
+  "在", "为", "从", "对", "按", "按照", "根据", "通过", "依托", "围绕", "结合",
+  "随着", "面对", "针对", "鉴于", "据", "由", "建议", "应", "需要", "必须", "要",
+  "拟", "将", "该", "本", "其", "此", "当前", "目前", "近年来", "未来", "总体",
+  "调研表明", "实践表明", "实践证明", "数据显示", "统计显示"
 ];
 
 export function normalizeMarkdown(md: string, knownHeadings?: string[]): string {
@@ -295,10 +303,10 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
       return null;
     }
 
-    // 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导 num 时生效
+    // 6.1 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导 num 时生效
     const sepPattern = num
-      ? /^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$/
-      : /^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$/;
+      ? /^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{2,})$/
+      : /^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{2,})$/;
     const mSep = cleanRest.match(sepPattern);
     if (mSep) {
       const hText = mSep[1].trim();
@@ -306,48 +314,80 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
       return `${lead}${numLead}${hText}\n\n${bodyText}`;
     }
 
-    // 无标点无空格粘连（扫描标题关键词，严格限制在首个中文标点前，防止跨越正文）
-    const punctMatch = cleanRest.match(/[，。；！？]/);
-    // 若整行没有任何标点且长度在常规标题范围内（<= 30字），说明是纯净标题，绝不拆分
-    if (!punctMatch && cleanRest.length <= 30) {
+    // 6.2 纯净短标题保护：无任何中文标点（含顿号逗号句号）且长度 <= 30 字，说明是正常独立标题，绝不拆分
+    const allPunct = cleanRest.match(/[，。；！？、]/);
+    const sentencePunct = cleanRest.match(/[，。；！？]/);
+    if (!allPunct && cleanRest.length <= 30) {
       return null;
     }
-    let searchLimit = punctMatch && punctMatch.index !== undefined ? punctMatch.index : cleanRest.length;
-    searchLimit = Math.min(searchLimit, 35);
 
-    let maxEnd = -1;
-    let startIdxMatch = -1;
+    // 标题上限控制：标题内部不应包含顿号及句子标点
+    const firstBreak = allPunct && allPunct.index !== undefined ? allPunct.index : cleanRest.length;
+    const searchLimit = Math.min(firstBreak, 30);
+
+    // 6.3 扫描标题结尾词 + (正文引导词 或 较长正文)
+    let bestSplit: [number, number, string, string, number] | null = null;
+    let startZeroMatched = false;
     for (const kw of REPORT_TITLE_KEYWORDS) {
-      const kwIdx = cleanRest.indexOf(kw);
-      if (kwIdx >= 0) {
-        let endPos = kwIdx + kw.length;
+      let idx = 0;
+      while (true) {
+        const pos = cleanRest.indexOf(kw, idx);
+        if (pos < 0 || pos > searchLimit) break;
+        let endPos = pos + kw.length;
         const parenMatch = cleanRest.slice(endPos).match(/^(?:（[^）]+）|\([^)]+\))/);
         if (parenMatch) {
           endPos += parenMatch[0].length;
         }
-        if (endPos <= searchLimit) {
-          if (kwIdx === 0) {
-            if (endPos > maxEnd) {
-              maxEnd = endPos;
-              startIdxMatch = 0;
+
+        if (endPos >= 4 && endPos <= searchLimit && endPos < cleanRest.length) {
+          const remainder = cleanRest.slice(endPos).replace(/^[:：。—\-\u2014\u2013，,、\s\t]+/, "").trim();
+          if (!/^[与及和或]/.test(remainder) && remainder.length >= 4) {
+            const isStarter = SENTENCE_STARTERS.some((s) => remainder.startsWith(s));
+            const hasPunct = /[，。；！？、]/.test(remainder);
+            const score = (isStarter ? 3 : 1) + (hasPunct ? 2 : 0);
+
+            if (startZeroMatched && pos >= (bestSplit ? bestSplit[1] : 0)) {
+              // 忽略起始匹配之后的词
+            } else if (pos === 0) {
+              startZeroMatched = true;
+              if (!bestSplit || !(bestSplit[4] === 0 && bestSplit[1] >= endPos)) {
+                bestSplit = [score, endPos, cleanRest.slice(0, endPos).trim(), remainder, pos];
+              }
+            } else if (!startZeroMatched) {
+              if (!bestSplit || score > bestSplit[0] || (score === bestSplit[0] && endPos > bestSplit[1])) {
+                bestSplit = [score, endPos, cleanRest.slice(0, endPos).trim(), remainder, pos];
+              }
             }
-          } else if (startIdxMatch !== 0 && endPos > maxEnd) {
-            maxEnd = endPos;
           }
+        }
+        idx = pos + 1;
+      }
+    }
+
+    if (bestSplit && bestSplit[0] >= 1) {
+      return `${lead}${numLead}${bestSplit[2]}\n\n${bestSplit[3]}`;
+    }
+
+    // 6.4 检查正文引导词直接切分 (例如：...体系在中央超长期特别国债...)
+    for (const st of SENTENCE_STARTERS) {
+      const pos = cleanRest.indexOf(st);
+      if (pos >= 6 && pos <= 28) {
+        const hCand = cleanRest.slice(0, pos).trim();
+        const bCand = cleanRest.slice(pos).trim();
+        if (bCand.length >= 4 && !/[，。；！？、]/.test(hCand)) {
+          return `${lead}${numLead}${hCand}\n\n${bCand}`;
         }
       }
     }
 
-    if (maxEnd > 0 && maxEnd < cleanRest.length) {
-      const hText = cleanRest.slice(0, maxEnd).trim();
-      const bodyText = cleanRest.slice(maxEnd).replace(/^[:：。—\-\u2014\u2013，,\s\t]+/, "").trim();
-      if (/^[与及和]/.test(bodyText)) {
-        return null;
-      }
-      if (bodyText.length >= 4) {
-        return `${lead}${numLead}${hText}\n\n${bodyText}`;
-      }
+    // 6.5 超长行熔断 (整行 > 35 字且包含标点，防止整段正文被渲染为粗体 H3 标题)
+    if (cleanRest.length > 35 && sentencePunct && sentencePunct.index !== undefined && sentencePunct.index >= 8 && sentencePunct.index <= 28) {
+      const pIdx = sentencePunct.index;
+      const hCand = cleanRest.slice(0, pIdx).trim();
+      const bCand = cleanRest.slice(pIdx + 1).trim();
+      return `${lead}${numLead}${hCand}\n\n${bCand}`;
     }
+
     return null;
   }
 

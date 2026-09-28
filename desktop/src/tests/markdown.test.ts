@@ -1025,6 +1025,17 @@ describe("Markdown 解析与排版工具", () => {
       const layoutGlued = "### 3.2.2 总体布局项目总体布局按照“生产流程顺畅、功能分区明确”的原则进行设计。";
       const normLayout = normalizeMarkdown(layoutGlued);
       expect(normLayout).toContain("### 3.2.2 总体布局\n\n项目总体布局按照");
+
+      // 智库专报长小节标题、引导词与超长段落粘连
+      const zhiku1 = "### 1. 构建多元组合的投融资工具体系在中央超长期特别国债2026年安排\n\n1600亿元专项支持的基础上";
+      expect(normalizeMarkdown(zhiku1)).toContain("### 1. 构建多元组合的投融资工具体系\n\n在中央超长期特别国债2026年安排");
+
+      const zhiku2 = "### 2. 推进非开挖与智能感知关键技术攻关超大特大城市核心城区普遍面临“无路可挖”的空间约束，应大力推广非开挖修复技术、微型隧道掘进技术、原位固化修复工艺，最大限度减少路面开挖与交通干扰。同时加快智能感知装备攻关，重点突破高精度管网泄漏监测传感器、管道内检测机器人、分布式光纤测温与声波定位系统等关键设备，提升管网运行状态的实时感知与预警能力。";
+      const normZhiku2 = normalizeMarkdown(zhiku2);
+      expect(normZhiku2).toContain("### 2. 推进非开挖与智能感知关键技术攻关\n\n超大特大城市核心城区普遍面临“无路可挖”的空间约束");
+
+      const zhiku3 = "### 3. 建立统一管网数据标准与数字孪生底座数据分散、标准不一、共享不畅是制约智慧管网建设的基础性障碍\n\n建议由城市政府牵头制定统一标准。";
+      expect(normalizeMarkdown(zhiku3)).toContain("### 3. 建立统一管网数据标准与数字孪生底座\n\n数据分散、标准不一、共享不畅是制约智慧管网建设的基础性障碍");
     });
 
     it("markdownToHtml 普通段落内换行不插入 <br />，引用标签自然行内流式", () => {
