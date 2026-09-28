@@ -356,7 +356,11 @@ _REPORT_TITLE_KEYWORDS = (
     "内容", "概况", "要求", "依据", "原则", "构想", "说明", "安排", "计划", "总结", "表",
     "体系", "定位", "布局", "工艺", "设备", "工程", "效益", "风险", "基础", "现状", "需求",
     "标准", "能力", "潜力", "水平", "时机", "特征", "参数", "比选", "模式", "机制",
-    "设计", "施工", "运营", "管理", "定员", "招标", "效果", "影响"
+    "设计", "施工", "运营", "管理", "定员", "招标", "效果", "影响",
+    "举措", "抓手", "制度", "政策", "行动", "平台", "生态", "协同", "试点", "示范",
+    "支撑", "导向", "闭环", "转型", "赋能", "供给", "攻坚", "防护", "风控", "治理",
+    "路径", "指引", "防线", "预警", "清单",
+    "规范", "指南", "任务", "策略"
 )
 
 
@@ -368,7 +372,7 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
     4. 标题与加粗/引用/表格粘连拆解
     5. 若传入骨架，提取骨架中的各级标题，无条件在已知标题边界处截断并插入双换行
     6. 通用单行标题紧连中文/标点断行保护
-    7. 彻底拆解多级数字节标题与正文粘连（无空格、有标点、无标点紧连正文等各种形态）
+    7. 彻底拆解多级数字与单级编号/公文序号小节标题与正文粘连（无空格、有标点、无标点紧连正文等各种形态）
     8. 确保每个标题行下方强制空一行（若紧跟非空正文行且未空行，补空行）
     9. 引用标记行内紧随与双标点去重消除
     """
@@ -430,49 +434,87 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         return f"{title_part}\n\n{clean_rest}" if clean_rest else title_part
     cleaned = re.sub(pattern_punct, _repl_punct, cleaned, flags=re.MULTILINE)
 
-    # 6. 多级数字节标题与正文粘连拆分（例如：2.3.1 宏观层面必要性从宏观层面看...）
-    # 6.1 有空格或标点连接：2.3.1 宏观层面必要性 从宏观层面看... / 2.3.1 宏观层面必要性：从宏观层面看...
-    pattern_num_punct = r'^(#{1,6}\s*)?(\d+(?:\.\d+)+)\s+([^\n.:：。—\-\u2014\u2013\s]{2,25}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$'
-    def _repl_num_punct(m):
-        prefix = m.group(1) or "### "
-        num_part = m.group(2).strip()
-        h_text = m.group(3).strip()
-        body_text = m.group(4).strip()
-        return f"{prefix.strip()} {num_part} {h_text}\n\n{body_text}"
-    cleaned = re.sub(pattern_num_punct, _repl_num_punct, cleaned, flags=re.MULTILINE)
+    # 6. 标题（Markdown标题或带数字/公文编号条目）与正文粘连精准拆分（全面覆盖多级工程数字 2.3.1、单级编号 2.、1、以及公文序号 （一）、一、）
+    def _split_heading_body(prefix: str, num_part: str, rest: str) -> str | None:
+        prefix = (prefix or "").strip()
+        num_part = (num_part or "").strip()
+        rest = (rest or "").strip()
+        if not rest:
+            return None
 
-    # 6.2 无空格无标点粘连：2.3.1 宏观层面必要性从宏观层面看，本项目...
-    pattern_num_dense = r'^(#{1,6}\s*)?(\d+(?:\.\d+)+)\s*([^\n]+)$'
-    def _repl_num_dense(m):
-        prefix = m.group(1) or "### "
-        num_part = m.group(2).strip()
-        rest = m.group(3).strip()
+        if not prefix and re.match(r'^\d+(?:\.\d+)+$', num_part):
+            prefix = "###"
+
+        lead = f"{prefix} " if prefix else ""
+        num_lead = f"{num_part} " if num_part else ""
+
+        # 若以 "第X章" 开头（如 "第二章 工程建设方案"），或附表/附件（如 "附表1 核心指标..."），绝不可拆分为标题与正文
+        if re.match(r'^(?:第[一二三四五六七八九十百零\d]+[章节]|附[表录图件]\d+)', rest):
+            return None
+
+        # 6.1 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导 num_part 时生效
+        sep_pattern = (
+            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$'
+            if num_part else
+            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$'
+        )
+        m_sep = re.match(sep_pattern, rest)
+        if m_sep:
+            h_text = m_sep.group(1).strip()
+            body_text = m_sep.group(2).strip()
+            return f"{lead}{num_lead}{h_text}\n\n{body_text}"
+
+        # 6.2 无标点无空格粘连（扫描标题关键词，严格限制在首个中文标点前，防止跨越正文）
+        first_punct = re.search(r'[，。；！？]', rest)
+        search_limit = first_punct.start() if first_punct else len(rest)
+        search_limit = min(search_limit, 35)
+
         max_end = -1
         start_idx_match = -1
         for kw in _REPORT_TITLE_KEYWORDS:
             kw_idx = rest.find(kw)
-            if 0 <= kw_idx <= 25:
+            if 0 <= kw_idx:
                 end_pos = kw_idx + len(kw)
                 # 兼容标题后带有（如适用）或 (如适用) 等限定括号
                 paren_m = re.match(r'^(?:（[^）]+）|\([^)]+\))', rest[end_pos:])
                 if paren_m:
                     end_pos += paren_m.end()
-                if kw_idx == 0:
-                    if end_pos > max_end:
+                if end_pos <= search_limit:
+                    if kw_idx == 0:
+                        if end_pos > max_end:
+                            max_end = end_pos
+                            start_idx_match = 0
+                    elif start_idx_match != 0 and end_pos > max_end:
                         max_end = end_pos
-                        start_idx_match = 0
-                elif start_idx_match != 0 and end_pos > max_end:
-                    max_end = end_pos
+
         if max_end > 0 and max_end < len(rest):
             h_text = rest[:max_end].strip()
             body_text = rest[max_end:].lstrip(':：。—-\u2014\u2013，, \t').strip()
             # 若拆分出的后续正文以连词（与、及、和）开头，说明属于复合标题（如投资估算与资金筹措方案），不予拆分
             if re.match(r'^[与及和]', body_text):
-                return m.group(0)
+                return None
             if len(body_text) >= 4:
-                return f"{prefix.strip()} {num_part} {h_text}\n\n{body_text}"
-        return m.group(0)
-    cleaned = re.sub(pattern_num_dense, _repl_num_dense, cleaned, flags=re.MULTILINE)
+                return f"{lead}{num_lead}{h_text}\n\n{body_text}"
+        return None
+
+    # 分别匹配两类形态：
+    # A) 以 Markdown # 开头（后跟可选数字/公文编号）
+    pattern_md_heading = (
+        r'^(#{1,6})\s+((?:\d+(?:\.\d+)+|\d+[\.、]|\d+\s+|（[一二三四五六七八九十\d]+）|[一二三四五六七八九十]+[、\.\s])\s*)?([^\n]+)$'
+    )
+    def _repl_md_heading(m):
+        res = _split_heading_body(m.group(1), m.group(2), m.group(3))
+        return res if res else m.group(0)
+    cleaned = re.sub(pattern_md_heading, _repl_md_heading, cleaned, flags=re.MULTILINE)
+
+    # B) 无 Markdown #，以数字序号或公文序号开头（如 2. xxx、3. xxx、1、xxx、（一）xxx）
+    pattern_num_heading = (
+        r'^((?:\d+(?:\.\d+)+|\d+[\.、]|\d+\s+|（[一二三四五六七八九十\d]+）|[一二三四五六七八九十]+[、\.\s]))\s*([^\n]+)$'
+    )
+    def _repl_num_heading(m):
+        res = _split_heading_body("", m.group(1), m.group(2))
+        return res if res else m.group(0)
+    cleaned = re.sub(pattern_num_heading, _repl_num_heading, cleaned, flags=re.MULTILINE)
 
     # 7. 确保标题与正文之间有空行（如 ### 1.1 标题\n正文 -> ### 1.1 标题\n\n正文）
     cleaned = re.sub(r'^(#{1,6}\s+[^\n]+)\n(?!\n|#{1,6}\s)', r'\1\n\n', cleaned, flags=re.MULTILINE)

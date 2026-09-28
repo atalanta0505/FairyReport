@@ -32,13 +32,15 @@ export function parseChaptersFromOutline(outlineMd: string): ChapterInfo[] {
     ) {
       continue;
     }
+    // 仅支持：1) 显式 第X章（容错允许 # 或 ##）；2) 严格的一级标题 # 格式（公文序号、导语/附件/概述等）
+    // 严禁将二级标题（## 附表1、## 1.1 等）误识别为独立章
     const match =
       trimmed.match(/^#{1,2}\s+(第[一二三四五六七八九十百零\d]+章[\s：:].+)/) ||
       trimmed.match(/^#{1,2}\s+(第[一二三四五六七八九十百零\d]+章.+)/) ||
       trimmed.match(/^(第[一二三四五六七八九十百零\d]+章[\s：:].+)/) ||
-      trimmed.match(/^#{1,2}\s+([一二三四五六七八九十]+[、\.\s].+)/) ||
-      trimmed.match(/^#{1,2}\s+(\d+[、\.\s].+)/) ||
-      trimmed.match(/^#{1,2}\s+(【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?.*)/) ||
+      trimmed.match(/^#\s+([一二三四五六七八九十]+[、\.\s].+)/) ||
+      trimmed.match(/^#\s+(\d+[、\.\s].+)/) ||
+      trimmed.match(/^#\s+(【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?.*)/) ||
       trimmed.match(/^#\s+([^#\n]+)/);
     if (match) {
       const title = match[1].trim();
@@ -815,12 +817,22 @@ export const useProjectStore = defineStore("project", () => {
         llm_config: llmConfig,
       });
       outlineMd.value = res.outline_md;
-      outlineChapters.value = res.chapters;
-      if (res.writing_order && res.writing_order.length > 0) {
-        writingOrder.value = res.writing_order;
+      const parsed = parseChaptersFromOutline(res.outline_md || "");
+      outlineChapters.value =
+        parsed.length > 0
+          ? parsed
+          : (res.chapters && res.chapters.length > 0 ? res.chapters : []);
+      const ro = res.writing_order;
+      const isWOValid =
+        ro &&
+        ro.length > 0 &&
+        ro.length === outlineChapters.value.length &&
+        outlineChapters.value.every((c) => ro.includes(c.seq));
+      if (isWOValid && ro) {
+        writingOrder.value = ro;
         writingOrderReason.value = res.writing_order_reason || "";
       } else {
-        writingOrder.value = deriveDefaultWritingOrder(res.chapters, targetType);
+        writingOrder.value = deriveDefaultWritingOrder(outlineChapters.value, targetType);
         writingOrderReason.value =
           writingOrder.value[0] !== 1
             ? "先完成背景、需求、选址、工程方案及投资等主体论证章节，再汇总提炼第一章概述与综合结论，确保全书数据逻辑自洽与高效推演。"
@@ -863,19 +875,32 @@ export const useProjectStore = defineStore("project", () => {
           (res.outline_md || res.report_type || (res.chapters && res.chapters.length > 0))
         ) {
           outlineMd.value = res.outline_md || "";
+          const parsed = parseChaptersFromOutline(res.outline_md || "");
           outlineChapters.value =
-            res.chapters && res.chapters.length > 0
-              ? res.chapters
-              : parseChaptersFromOutline(res.outline_md || "");
+            parsed.length > 0
+              ? parsed
+              : (res.chapters && res.chapters.length > 0 ? res.chapters : []);
           if (res.report_type) {
             reportType.value = res.report_type === "智库决策专报与建言报告" ? "智库专报" : res.report_type;
           }
-          if (res.writing_order && res.writing_order.length > 0) {
-            writingOrder.value = res.writing_order;
+          const ro = res.writing_order;
+          const isWritingOrderValid =
+            ro &&
+            ro.length > 0 &&
+            ro.length === outlineChapters.value.length &&
+            outlineChapters.value.every((c) => ro.includes(c.seq));
+
+          if (isWritingOrderValid && ro) {
+            writingOrder.value = ro;
             writingOrderReason.value = res.writing_order_reason || "";
           } else {
             const localWO = loadWritingOrderFromLocal(targetName);
-            if (localWO && localWO.order && localWO.order.length > 0) {
+            const isLocalWOValid =
+              localWO &&
+              localWO.order &&
+              localWO.order.length === outlineChapters.value.length &&
+              outlineChapters.value.every((c) => localWO.order.includes(c.seq));
+            if (isLocalWOValid) {
               writingOrder.value = localWO.order;
               writingOrderReason.value = localWO.reason || "";
             } else {
@@ -915,16 +940,28 @@ export const useProjectStore = defineStore("project", () => {
           reportType.value = local.report_type === "智库决策专报与建言报告" ? "智库专报" : local.report_type;
         }
         outlineMd.value = local.outline_md || "";
+        const parsedLocal = parseChaptersFromOutline(local.outline_md || "");
         outlineChapters.value =
-          local.chapters && local.chapters.length > 0
-            ? local.chapters
-            : parseChaptersFromOutline(local.outline_md || "");
-        if (local.writing_order && local.writing_order.length > 0) {
-          writingOrder.value = local.writing_order;
+          parsedLocal.length > 0
+            ? parsedLocal
+            : (local.chapters && local.chapters.length > 0 ? local.chapters : []);
+        const lo = local.writing_order;
+        const isLocalOrderValid =
+          lo &&
+          lo.length > 0 &&
+          lo.length === outlineChapters.value.length &&
+          outlineChapters.value.every((c) => lo.includes(c.seq));
+        if (isLocalOrderValid && lo) {
+          writingOrder.value = lo;
           writingOrderReason.value = local.writing_order_reason || "";
         } else {
           const localWO = loadWritingOrderFromLocal(targetName);
-          if (localWO && localWO.order && localWO.order.length > 0) {
+          const isLocalWOValid =
+            localWO &&
+            localWO.order &&
+            localWO.order.length === outlineChapters.value.length &&
+            outlineChapters.value.every((c) => localWO.order.includes(c.seq));
+          if (isLocalWOValid) {
             writingOrder.value = localWO.order;
             writingOrderReason.value = localWO.reason || "";
           } else {
@@ -1004,6 +1041,13 @@ export const useProjectStore = defineStore("project", () => {
   function setOutlineMd(md: string, baseUrl?: string) {
     outlineMd.value = md;
     outlineChapters.value = parseChaptersFromOutline(md);
+    const isWOValid =
+      writingOrder.value &&
+      writingOrder.value.length === outlineChapters.value.length &&
+      outlineChapters.value.every((c) => writingOrder.value.includes(c.seq));
+    if (!isWOValid) {
+      writingOrder.value = deriveDefaultWritingOrder(outlineChapters.value, reportType.value);
+    }
     triggerAutoSaveOutline(baseUrl);
   }
 

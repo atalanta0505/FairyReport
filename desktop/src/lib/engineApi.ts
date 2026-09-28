@@ -7,10 +7,16 @@
 import { fetch as pluginFetch } from "@tauri-apps/plugin-http";
 
 function engineFetch(input: string | URL, init?: RequestInit): Promise<Response> {
-  if (typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined") {
+  if (
+    typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined" ||
+    (pluginFetch && typeof (pluginFetch as any).mock !== "undefined")
+  ) {
     return pluginFetch(input, init);
   }
-  return window.fetch(input, init);
+  if (typeof window !== "undefined" && window.fetch) {
+    return window.fetch(input, init);
+  }
+  return pluginFetch(input, init);
 }
 
 export class EngineApiError extends Error {

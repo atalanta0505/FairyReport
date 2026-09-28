@@ -220,7 +220,11 @@ const REPORT_TITLE_KEYWORDS = [
   "内容", "概况", "要求", "依据", "原则", "构想", "说明", "安排", "计划", "总结", "表",
   "体系", "定位", "布局", "工艺", "设备", "工程", "效益", "风险", "基础", "现状", "需求",
   "标准", "能力", "潜力", "水平", "时机", "特征", "参数", "比选", "模式", "机制",
-  "设计", "施工", "运营", "管理", "定员", "招标", "效果", "影响"
+  "设计", "施工", "运营", "管理", "定员", "招标", "效果", "影响",
+  "举措", "抓手", "制度", "政策", "行动", "平台", "生态", "协同", "试点", "示范",
+  "支撑", "导向", "闭环", "转型", "赋能", "供给", "攻坚", "防护", "风控", "治理",
+  "路径", "指引", "防线", "预警", "清单",
+  "规范", "指南", "任务", "策略"
 ];
 
 export function normalizeMarkdown(md: string, knownHeadings?: string[]): string {
@@ -275,30 +279,49 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
     }
   );
 
-  // 6.1 多级数字节标题与正文粘连拆分（有空格或标点连接）
-  text = text.replace(
-    /^(#{1,6}\s*)?(\d+(?:\.\d+)+)\s+([^\n.:：。—\-\u2014\u2013\s]{2,25}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$/gm,
-    (_match, prefix, numPart, hText, bodyText) => {
-      const p = prefix || "### ";
-      return `${p.trim()} ${numPart} ${hText}\n\n${bodyText}`;
-    }
-  );
+  // 6.1 & 6.2 标题（Markdown标题或带数字/公文编号条目）与正文粘连精准拆分（全面覆盖多级工程数字 2.3.1、单级编号 2.、1、以及公文序号 （一）、一、）
+  function splitHeadingBody(prefix: string, numPart: string, rest: string): string | null {
+    const p = (prefix || "").trim();
+    const num = (numPart || "").trim();
+    const cleanRest = (rest || "").trim();
+    if (!cleanRest) return null;
 
-  // 6.2 多级数字节标题与正文粘连拆分（无空格无标点直接粘连）
-  text = text.replace(
-    /^(#{1,6}\s*)?(\d+(?:\.\d+)+)\s*([^\n]+)$/gm,
-    (match, prefix, numPart, restPart) => {
-      const rest = (restPart || "").trim();
-      let maxEnd = -1;
-      let startIdxMatch = -1;
-      for (const kw of REPORT_TITLE_KEYWORDS) {
-        const kwIdx = rest.indexOf(kw);
-        if (kwIdx >= 0 && kwIdx <= 25) {
-          let endPos = kwIdx + kw.length;
-          const parenMatch = rest.slice(endPos).match(/^(?:（[^）]+）|\([^)]+\))/);
-          if (parenMatch) {
-            endPos += parenMatch[0].length;
-          }
+    const prefixFinal = !p && /^\d+(?:\.\d+)+$/.test(num) ? "###" : p;
+    const lead = prefixFinal ? `${prefixFinal} ` : "";
+    const numLead = num ? `${num} ` : "";
+
+    // 若以 "第X章" 开头（如 "第二章 工程建设方案"），或附表/附件（如 "附表1 核心指标..."），绝不可拆分为标题与正文
+    if (/^(?:第[一二三四五六七八九十百零\d]+[章节]|附[表录图件]\d+)/.test(cleanRest)) {
+      return null;
+    }
+
+    // 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导 num 时生效
+    const sepPattern = num
+      ? /^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$/
+      : /^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{4,})$/;
+    const mSep = cleanRest.match(sepPattern);
+    if (mSep) {
+      const hText = mSep[1].trim();
+      const bodyText = mSep[2].trim();
+      return `${lead}${numLead}${hText}\n\n${bodyText}`;
+    }
+
+    // 无标点无空格粘连（扫描标题关键词，严格限制在首个中文标点前，防止跨越正文）
+    const punctMatch = cleanRest.match(/[，。；！？]/);
+    let searchLimit = punctMatch && punctMatch.index !== undefined ? punctMatch.index : cleanRest.length;
+    searchLimit = Math.min(searchLimit, 35);
+
+    let maxEnd = -1;
+    let startIdxMatch = -1;
+    for (const kw of REPORT_TITLE_KEYWORDS) {
+      const kwIdx = cleanRest.indexOf(kw);
+      if (kwIdx >= 0) {
+        let endPos = kwIdx + kw.length;
+        const parenMatch = cleanRest.slice(endPos).match(/^(?:（[^）]+）|\([^)]+\))/);
+        if (parenMatch) {
+          endPos += parenMatch[0].length;
+        }
+        if (endPos <= searchLimit) {
           if (kwIdx === 0) {
             if (endPos > maxEnd) {
               maxEnd = endPos;
@@ -309,19 +332,36 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
           }
         }
       }
-      if (maxEnd > 0 && maxEnd < rest.length) {
-        const hText = rest.slice(0, maxEnd).trim();
-        const bodyText = rest.slice(maxEnd).replace(/^[:：。—\-\u2014\u2013，,\s\t]+/, "").trim();
-        // 若拆分出的后续正文以连词（与、及、和）开头，说明属于复合标题（如投资估算与资金筹措方案），不予拆分
-        if (/^[与及和]/.test(bodyText)) {
-          return match;
-        }
-        if (bodyText.length >= 4) {
-          const p = prefix || "### ";
-          return `${p.trim()} ${numPart} ${hText}\n\n${bodyText}`;
-        }
+    }
+
+    if (maxEnd > 0 && maxEnd < cleanRest.length) {
+      const hText = cleanRest.slice(0, maxEnd).trim();
+      const bodyText = cleanRest.slice(maxEnd).replace(/^[:：。—\-\u2014\u2013，,\s\t]+/, "").trim();
+      if (/^[与及和]/.test(bodyText)) {
+        return null;
       }
-      return match;
+      if (bodyText.length >= 4) {
+        return `${lead}${numLead}${hText}\n\n${bodyText}`;
+      }
+    }
+    return null;
+  }
+
+  // A) 以 Markdown # 开头（后跟可选数字/公文编号）
+  text = text.replace(
+    /^(#{1,6})\s+((?:\d+(?:\.\d+)+|\d+[\.、]|\d+\s+|（[一二三四五六七八九十\d]+）|[一二三四五六七八九十]+[、\.\s])\s*)?([^\n]+)$/gm,
+    (m, prefix, num, rest) => {
+      const res = splitHeadingBody(prefix, num, rest);
+      return res ? res : m;
+    }
+  );
+
+  // B) 无 Markdown #，以数字序号或公文序号开头
+  text = text.replace(
+    /^((?:\d+(?:\.\d+)+|\d+[\.、]|\d+\s+|（[一二三四五六七八九十\d]+）|[一二三四五六七八九十]+[、\.\s]))\s*([^\n]+)$/gm,
+    (m, num, rest) => {
+      const res = splitHeadingBody("", num, rest);
+      return res ? res : m;
     }
   );
 

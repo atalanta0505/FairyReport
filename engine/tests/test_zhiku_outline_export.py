@@ -4,7 +4,7 @@ import pytest
 from docx import Document
 
 from engine.app.writing.outline import OutlineGenerator, _extract_chapter_titles, parse_chapter_seq
-from engine.app.writing.writer import _extract_chapter_skeleton
+from engine.app.writing.writer import _extract_chapter_skeleton, normalize_chapter_markdown
 from engine.app.export.docx_builder import md_to_docx
 
 
@@ -135,3 +135,76 @@ def test_export_auto_toc_renders_visible_entries_for_all_reports(tmp_path):
     # 验证段落中配置了带点导线的制表位
     all_xml = "".join(p._p.xml for p in doc.paragraphs)
     assert 'w:leader="dot"' in all_xml, "目录条目应具备 dot leader 点导线制表位"
+
+
+def test_zhiku_single_number_heading_separation():
+    """验证智库专报中单级数字序号或无标点标题与正文粘连能够被精准拆分。"""
+    raw = (
+        "## （二）建议维度二（要素保障与技术攻坚）\n\n"
+        "2. 建立智算中心全生命周期投资风险防控体系针对智算中心投资强度大、技术迭代快、市场波动剧烈的特点，建议构建覆盖“论证—建设—运营—退出”全生命周期的风险防控体系。\n\n"
+        "3. 创新绿色金融工具与投融资期限匹配机制破解智算中心融资期限与项目回报周期错配问题，需要系统性创新绿色金融工具。"
+    )
+    cleaned = normalize_chapter_markdown(raw)
+
+    assert "2. 建立智算中心全生命周期投资风险防控体系\n\n针对智算中心投资强度大" in cleaned
+    assert "3. 创新绿色金融工具与投融资期限匹配机制\n\n破解智算中心融资期限" in cleaned
+
+
+def test_zhiku_template_word_limits_and_chapters():
+    """验证智库专报全篇目标字数预算为 5000 字，各章节配置合理预算，且写作顺序为 5 章。"""
+    import json
+    import shutil
+    from pathlib import Path
+    from engine.app.config import settings
+    from engine.app.writing import templates_loader as tmpl
+    from engine.app.writing.prompts import REPORT_WORD_LIMITS, MAX_WORDS_PER_CHAPTER
+
+    assert REPORT_WORD_LIMITS.get("智库专报") == 5000
+    assert REPORT_WORD_LIMITS.get("智库决策专报与建言报告") == 5000
+    assert MAX_WORDS_PER_CHAPTER.get("智库专报") == 1500
+
+    # 准备测试环境通用包
+    vdir = Path(settings.engine_data_dir) / "generic" / "versions" / "v-test" / "templates"
+    vdir.mkdir(parents=True, exist_ok=True)
+    src_json = Path(__file__).resolve().parents[2] / "generic_knowledge" / "templates" / "zhiku_juece_zhuanbao.json"
+    shutil.copy2(src_json, vdir / "zhiku_juece_zhuanbao.json")
+
+    state_path = Path(settings.engine_data_dir) / "generic" / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({"version": "v-test"}), encoding="utf-8")
+
+    # 验证模板预算配置
+    word_limit = tmpl.get_word_limit("智库专报")
+    assert word_limit == 5000, f"智库专报全篇预算应为 5000 字，实际为 {word_limit}"
+
+    assert tmpl.get_chapter_word_budget("智库专报", 1) == 500
+    assert tmpl.get_chapter_word_budget("智库专报", 2) == 1000
+    assert tmpl.get_chapter_word_budget("智库专报", 3) == 1500
+    assert tmpl.get_chapter_word_budget("智库专报", 4) == 1500
+    assert tmpl.get_chapter_word_budget("智库专报", 5) == 500
+
+    # 验证写作顺序严格为 5 章（[2, 3, 4, 5, 1]）
+    order = tmpl.get_writing_order("智库专报")
+    assert order == [2, 3, 4, 5, 1]
+    assert len(order) == 5
+
+
+def test_zhiku_appendix_tables_not_parsed_as_chapters():
+    """验证大纲中的二级附表（## 附表1、## 附表2）绝不被提取为第6、第7独立章。"""
+    outline_md = (
+        "# 导语 / 内容摘要\n\n"
+        "# 一、总体态势与基本认识\n\n"
+        "## （一）发展现状与阶段性特征（数据量化）\n\n"
+        "# 二、面临的突出矛盾与风险研判\n\n"
+        "## （一）矛盾一\n\n"
+        "# 三、对策建议与政策举措\n\n"
+        "## （一）建议一\n\n"
+        "# 附件/附表\n\n"
+        "## 附表1 核心指标与政策对比表\n\n"
+        "## 附表2 调研数据与测算支撑表\n"
+    )
+    titles = _extract_chapter_titles(outline_md)
+    assert len(titles) == 5, f"期望提取 5 章，实际提取 {len(titles)}: {titles}"
+    assert 6 not in titles
+    assert 7 not in titles
+

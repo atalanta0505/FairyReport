@@ -125,6 +125,31 @@ async function handleGenerateOutline() {
   }
 }
 
+import { parseChaptersFromOutline } from "../stores/project";
+
+const displayedChapters = computed(() => {
+  if (projectStore.outlineChapters && projectStore.outlineChapters.length > 0) {
+    return projectStore.outlineChapters;
+  }
+  if (projectStore.outlineMd && projectStore.outlineMd.trim()) {
+    return parseChaptersFromOutline(projectStore.outlineMd);
+  }
+  return [];
+});
+
+watch(
+  () => projectStore.outlineMd,
+  (md) => {
+    if (md && (!projectStore.outlineChapters || projectStore.outlineChapters.length === 0)) {
+      const parsed = parseChaptersFromOutline(md);
+      if (parsed.length > 0) {
+        projectStore.outlineChapters = parsed;
+      }
+    }
+  },
+  { immediate: true },
+);
+
 function onOutlineInput(e: Event) {
   const target = e.target as HTMLTextAreaElement;
   projectStore.setOutlineMd(target.value, engine.baseUrl);
@@ -138,6 +163,17 @@ function nextStep() {
   if (!projectStore.outlineMd.trim()) {
     showMsg("请先生成或输入大纲内容后再进入下一步", "error");
     return;
+  }
+  const parsed = parseChaptersFromOutline(projectStore.outlineMd);
+  if (parsed.length > 0) {
+    projectStore.outlineChapters = parsed;
+    const isWOValid =
+      projectStore.writingOrder &&
+      projectStore.writingOrder.length === parsed.length &&
+      parsed.every((c) => projectStore.writingOrder.includes(c.seq));
+    if (!isWOValid) {
+      projectStore.writingOrder = projectStore.deriveDefaultWritingOrder(parsed, projectStore.reportType);
+    }
   }
   projectStore.setStep(3);
 }
@@ -197,8 +233,8 @@ function nextStep() {
       <div class="card-header">
         <div class="title-with-badge">
           <h3>报告大纲（Markdown 编辑与结构树）</h3>
-          <span class="count-badge" v-if="projectStore.outlineChapters.length > 0">
-            已识别 {{ projectStore.outlineChapters.length }} 个核心章节
+          <span class="count-badge" v-if="displayedChapters.length > 0">
+            已识别 {{ displayedChapters.length }} 个核心章节
           </span>
         </div>
         <div class="header-actions">
@@ -247,18 +283,18 @@ function nextStep() {
           <div class="preview-pane">
             <div class="pane-header">
               <span class="pane-title">📑 章节目录预览</span>
-              <span class="pane-stats">共 {{ projectStore.outlineChapters.length }} 章</span>
+              <span class="pane-stats">共 {{ displayedChapters.length }} 章</span>
             </div>
             <div class="chapter-tree-list">
               <div
-                v-for="ch in projectStore.outlineChapters"
+                v-for="ch in displayedChapters"
                 :key="ch.seq"
                 class="chapter-tree-item"
               >
                 <span class="chapter-seq-badge">{{ ch.seq }}</span>
                 <span class="chapter-title-text" :title="ch.title">{{ ch.title }}</span>
               </div>
-              <div v-if="projectStore.outlineChapters.length === 0" class="empty-chapters">
+              <div v-if="displayedChapters.length === 0" class="empty-chapters">
                 暂无章节，请点击上方「AI 智能生成大纲」或在左侧输入标准章标题（如 <code># 第一章 xxx</code>）。
               </div>
             </div>
