@@ -1371,6 +1371,7 @@ export interface ExportDocxRequest {
   project: string;
   title: string;
   subtitle?: string;
+  report_type?: string;
   chapters: Record<string | number, string>;
   include_refs?: boolean;
   author_org?: string;

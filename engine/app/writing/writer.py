@@ -448,8 +448,8 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         lead = f"{prefix} " if prefix else ""
         num_lead = f"{num_part} " if num_part else ""
 
-        # 若以 "第X章" 开头（如 "第二章 工程建设方案"），或附表/附件（如 "附表1 核心指标..."），绝不可拆分为标题与正文
-        if re.match(r'^(?:第[一二三四五六七八九十百零\d]+[章节]|附[表录图件]\d+)', rest):
+        # 若以 "第X章" 开头（如 "第二章 工程建设方案"），公文序号（如 "三、对策建议"），或附表/附件（如 "附表1 核心指标..."），绝不可拆分为标题与正文
+        if re.match(r'^(?:第[一二三四五六七八九十百零\d]+[章节]|附[表录图件]\d+|[一二三四五六七八九十]+[、\.\s])', rest):
             return None
 
         # 6.1 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导 num_part 时生效
@@ -466,6 +466,9 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
 
         # 6.2 无标点无空格粘连（扫描标题关键词，严格限制在首个中文标点前，防止跨越正文）
         first_punct = re.search(r'[，。；！？]', rest)
+        # 若整行没有任何标点且长度在常规标题范围内（<= 30字），说明是纯净标题，绝不拆分
+        if not first_punct and len(rest) <= 30:
+            return None
         search_limit = first_punct.start() if first_punct else len(rest)
         search_limit = min(search_limit, 35)
 

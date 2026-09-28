@@ -212,12 +212,14 @@ async function executeExportDocx() {
       project: projectStore.currentProject.name,
       title: projectStore.currentProject.name,
       subtitle: "（ 初 稿 ）",
+      report_type: projectStore.reportType,
       chapters: projectStore.chapters,
       include_refs: true,
       include_cover: true,
       include_toc: true,
-      author_org: "现代工程设计咨询研究院",
-      qualification: "资信证书编号：ZX11120240088",
+      author_org: "",
+      qualification: "",
+      date_str: "",
     });
 
     exportDocxResultPath.value = res.path;

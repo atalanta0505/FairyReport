@@ -535,9 +535,9 @@ def test_export_standard_cover_toc_and_sections(client):
     assert sec_cover.header.paragraphs[0].text.strip() == ""
     assert sec_cover.footer.paragraphs[0].text.strip() == ""
 
-    # 3. 目录节验证：居中“目    录”标题，包含 TOC 域代码，Word 设置启用 updateFields
+    # 3. 目录节验证：居中“目    录”标题，包含 TOC 域代码，禁用 updateFields 避免 Word 弹窗警告
     assert any("目    录" in t for t in paras_text)
-    assert "updateFields" in doc.settings.element.xml
+    assert "updateFields" not in doc.settings.element.xml
     all_paras_xml = "".join(p._p.xml for p in doc.paragraphs)
     assert 'TOC \\o "1-3"' in all_paras_xml
 
@@ -589,4 +589,62 @@ def test_export_custom_metadata_cover_and_sections(tmp_path):
     assert "w:pBdr" in sec_body.header.paragraphs[0]._p.pPr.xml
     assert "PAGE" in sec_body.footer.paragraphs[0]._p.xml
     assert 'w:start="1"' in sec_body._sectPr.xml
+
+
+def test_export_default_blank_metadata(tmp_path):
+    """验证未指定编制机构与资质证书等元数据时，封面上的编制单位、编制资质、编制时间全部留空，绝无硬编码。"""
+    from engine.app.export.docx_builder import md_to_docx as core_md_to_docx
+
+    out_file = str(tmp_path / "blank_meta_test.docx")
+    core_md_to_docx(
+        "# 第一章 概述\n\n正文内容...",
+        out_file,
+        title="重点算力基础设施绿色低碳发展与智能算力中心布局智库专报",
+        report_type="智库专报",
+        include_cover=True,
+        include_toc=True,
+    )
+    assert os.path.exists(out_file)
+
+    doc = Document(out_file)
+    paras = [p.text for p in doc.paragraphs]
+
+    # 1. 验证标题保真，绝无“可行性研究报告”
+    assert any("重点算力基础设施绿色低碳发展与智能算力中心布局智库专报" in t for t in paras)
+    assert not any("可行性研究报告" in t for t in paras)
+
+    # 2. 验证编制单位、编制资质、编制时间全部留空
+    assert "编制单位：" in paras
+    assert "编制资质：" in paras
+    assert "编制时间：" in paras
+    assert not any("中国联合工程设计研究院" in t for t in paras)
+    assert not any("现代工程设计咨询研究院" in t for t in paras)
+    assert not any("ZX11120240088" in t for t in paras)
+
+    # 3. 验证无 updateFields 弹窗警告
+    assert "updateFields" not in doc.settings.element.xml
+
+
+def test_export_15_pattern_templates_exist():
+    """验证根目录下 pattern/ 文件夹中完备提供全部 15 种报告类型的标准 Word 模板。"""
+    from pathlib import Path
+    from engine.app.writing.prompts import REPORT_TYPES
+
+    root_dir = Path(__file__).resolve().parents[2]
+    pattern_dir = root_dir / "pattern"
+    assert pattern_dir.is_dir(), "根目录必须包含 pattern 文件夹"
+
+    for rt in REPORT_TYPES:
+        safe_name = rt.replace("/", "_")
+        tpl_path = pattern_dir / f"{safe_name}.docx"
+        assert tpl_path.is_file(), f"缺少报告类型模板: {tpl_path.name}"
+        # 验证模板包含必要结构
+        doc = Document(str(tpl_path))
+        assert len(doc.sections) == 3, f"模板 {tpl_path.name} 需包含封面、目录、正文 3 个节"
+        paras = [p.text for p in doc.paragraphs]
+        assert "编制单位：" in paras
+        assert "编制资质：" in paras
+        assert "编制时间：" in paras
+        assert "updateFields" not in doc.settings.element.xml
+
 

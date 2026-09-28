@@ -290,8 +290,8 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
     const lead = prefixFinal ? `${prefixFinal} ` : "";
     const numLead = num ? `${num} ` : "";
 
-    // 若以 "第X章" 开头（如 "第二章 工程建设方案"），或附表/附件（如 "附表1 核心指标..."），绝不可拆分为标题与正文
-    if (/^(?:第[一二三四五六七八九十百零\d]+[章节]|附[表录图件]\d+)/.test(cleanRest)) {
+    // 若以 "第X章" 开头（如 "第二章 工程建设方案"），公文序号（如 "三、对策建议"），或附表/附件（如 "附表1 核心指标..."），绝不可拆分为标题与正文
+    if (/^(?:第[一二三四五六七八九十百零\d]+[章节]|附[表录图件]\d+|[一二三四五六七八九十]+[、\.\s])/.test(cleanRest)) {
       return null;
     }
 
@@ -308,6 +308,10 @@ export function normalizeMarkdown(md: string, knownHeadings?: string[]): string 
 
     // 无标点无空格粘连（扫描标题关键词，严格限制在首个中文标点前，防止跨越正文）
     const punctMatch = cleanRest.match(/[，。；！？]/);
+    // 若整行没有任何标点且长度在常规标题范围内（<= 30字），说明是纯净标题，绝不拆分
+    if (!punctMatch && cleanRest.length <= 30) {
+      return null;
+    }
     let searchLimit = punctMatch && punctMatch.index !== undefined ? punctMatch.index : cleanRest.length;
     searchLimit = Math.min(searchLimit, 35);
 

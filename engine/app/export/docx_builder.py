@@ -173,10 +173,10 @@ def _add_cover_page(
         p_sp.paragraph_format.space_after = Pt(0)
         p_sp.paragraph_format.first_line_indent = Pt(0)
 
-    # 5. 编制机构与资质元数据块（段落排版，杜绝表格以确保 len(tables) == 1 既有测试断言）
-    org_text = author_org or "现代工程设计咨询研究院"
-    qual_text = qualification or "资信证书编号：ZX11120240088"
-    date_val = date_str or _format_chinese_date()
+    # 5. 编制机构与资质元数据块（默认留空，杜绝任何硬编码单位或资质）
+    org_text = (author_org or "").strip()
+    qual_text = (qualification or "").strip()
+    date_val = (date_str or "").strip()
 
     meta_items = [
         f"编制单位：{org_text}",
@@ -335,7 +335,7 @@ def _add_toc_page(doc: Document, headings_for_toc: list = None):
     p_tip.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_tip.paragraph_format.first_line_indent = Pt(0)
     p_tip.paragraph_format.space_before = Pt(12)
-    run_tip = p_tip.add_run("（在 Word 中打开可按 F9 或右键“更新域”同步最新物理页码）")
+    run_tip = p_tip.add_run("（在 Word 中可按 F9 或右键“更新域”同步最新物理页码）")
     _format_run(
         run_tip,
         font_name='Times New Roman',
@@ -344,13 +344,6 @@ def _add_toc_page(doc: Document, headings_for_toc: list = None):
         italic=True,
         color=RGBColor(0x94, 0xA3, 0xB8),
     )
-
-    # 设置 Word 打开时自动更新域代码（Microsoft Word 专属）
-    try:
-        update_flds = parse_xml(r'<w:updateFields %s w:val="true"/>' % nsdecls('w'))
-        doc.settings.element.append(update_flds)
-    except Exception:
-        pass
 
 
 def _setup_body_section(doc: Document, header_title: str):
@@ -398,6 +391,24 @@ def _setup_body_section(doc: Document, header_title: str):
     body_sec._sectPr.append(pgNumType)
 
 
+def _find_pattern_template(report_type: str = "") -> Path | None:
+    """在项目根目录 pattern/ 下查找对应报告类型的 Word 模板文件。"""
+    if not report_type:
+        return None
+    root_dir = Path(__file__).resolve().parents[3]
+    pattern_dir = root_dir / "pattern"
+    if not pattern_dir.is_dir():
+        return None
+    safe_name = report_type.replace("/", "_").strip()
+    candidate = pattern_dir / f"{safe_name}.docx"
+    if candidate.is_file():
+        return candidate
+    candidate_raw = pattern_dir / f"{report_type.strip()}.docx"
+    if candidate_raw.is_file():
+        return candidate_raw
+    return None
+
+
 def md_to_docx(
     md_content: str,
     output_path: str,
@@ -405,6 +416,7 @@ def md_to_docx(
     subtitle: str = "（ 初 稿 ）",
     skeleton: str = "",
     project: str = "",
+    report_type: str = "",
     author_org: str = "",
     qualification: str = "",
     date_str: str = "",
@@ -415,8 +427,9 @@ def md_to_docx(
 
     title 非空时在开头插入规范标准封面页（Level 0 / Title 样式），支持自动生成目录域及独立正文分节。
     支持 skeleton 大纲骨架或 project 加载大纲，彻底消除节标题与正文粘连。
+    支持通过 report_type 匹配根目录 pattern/ 下的 15 种专用 Word 模板。
     """
-    if not skeleton and project:
+    if project and (not skeleton or not report_type):
         try:
             from ..config import settings
             p = settings.project_dir(project) / "outline.json"
@@ -424,7 +437,10 @@ def md_to_docx(
                 import json
                 with open(p, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    skeleton = data.get("outline_md", "")
+                    if not skeleton:
+                        skeleton = data.get("outline_md", "")
+                    if not report_type:
+                        report_type = data.get("report_type", "")
         except Exception:
             pass
 
@@ -487,7 +503,7 @@ def md_to_docx(
                     headings_for_toc.append((lvl, h_text, 1))
 
     # 规范化报告总标题（严格保持原始命名，绝不硬编码强加类型后缀）
-    actual_title = (title or "").strip() or (project or "").strip() or "报告初稿"
+    actual_title = (title or "").strip() or (project or "").strip() or (report_type or "").strip() or "报告初稿"
 
     # ── 规范封面、目录与正文分节构建 ──
     if include_cover:
@@ -501,7 +517,7 @@ def md_to_docx(
         )
         if include_toc:
             _add_toc_page(doc, headings_for_toc=headings_for_toc)
-        _setup_body_section(doc, header_title=actual_title or project)
+        _setup_body_section(doc, header_title=actual_title or report_type or project)
     elif actual_title:
         _add_heading(doc, actual_title, level=0)
         if include_toc:
