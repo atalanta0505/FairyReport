@@ -31,6 +31,13 @@ fn kill_engine_process() {
 }
 
 fn find_engine_binary() -> Option<PathBuf> {
+    // 在开发调试环境（tauri dev，启用 debug_assertions）中，严禁加载任何预打包的静态旧二进制，
+    // 防止覆盖当前工作区实时修改的 Python 源代码！
+    if cfg!(debug_assertions) {
+        log_debug("[find_engine_binary] debug mode active: skipping static engine binaries to use live Python source code");
+        return None;
+    }
+
     let binary_name = if cfg!(windows) {
         "fairyreport-engine.exe"
     } else {

@@ -36,13 +36,27 @@ export const useEngineStore = defineStore("engine", () => {
     if (handle) return;
     status.value = "starting";
     try {
+      // 优先探测本地 8001 / 8000 是否已有开发服务在运行（支持 uvicorn --reload 外部启动）
+      const devPorts = [8001, 8000];
+      for (const p of devPorts) {
+        const testUrl = `http://127.0.0.1:${p}`;
+        try {
+          await pollHealth(testUrl, { maxAttempts: 1, sleep: () => Promise.resolve() });
+          baseUrl.value = testUrl;
+          status.value = "healthy";
+          isRemote.value = false;
+          if (typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined") {
+            const { invoke } = await import("@tauri-apps/api/core");
+            await invoke("log_from_js", { msg: `[Engine] 检测到本地运行中的服务，已成功直连: ${testUrl}` });
+          }
+          return;
+        } catch {
+          // 当前端口未启动，继续检查下一个
+        }
+      }
+
       if (typeof (globalThis as any).__TAURI_INTERNALS__ === "undefined") {
-        const localBrowserUrl = "http://127.0.0.1:8001";
-        await pollHealth(localBrowserUrl, { maxAttempts: 6 });
-        baseUrl.value = localBrowserUrl;
-        status.value = "healthy";
-        isRemote.value = false;
-        return;
+        throw new Error("开发环境未在 8001/8000 端口检测到引擎服务，请先在终端启动 uvicorn。");
       }
       handle = await startEngine();
       baseUrl.value = handle.baseUrl;
