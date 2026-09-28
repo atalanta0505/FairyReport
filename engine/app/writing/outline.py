@@ -213,7 +213,13 @@ class OutlineGenerator:
 
 
 def _extract_chapter_titles(outline_md: str) -> dict:
-    """从大纲 Markdown 提取章标题，返回 {num: title}。"""
+    """从大纲 Markdown 提取章标题，返回 {num: title}。
+    兼容标准'第X章'、公文序号（'一、'）、前言/导语/附件，以及大纲中所有一级标题（# ）。
+    """
+    if not outline_md or not outline_md.strip():
+        return {}
+
+    # 1. 尝试匹配显式的 第X章 格式
     titles = re.findall(
         r'^#{1,2}\s+(第[一二三四五六七八九十百零\d]+章[\s：:].+)$',
         outline_md, re.MULTILINE
@@ -228,32 +234,84 @@ def _extract_chapter_titles(outline_md: str) -> dict:
             r'^(第[一二三四五六七八九十百零\d]+章[\s：:].+)$',
             outline_md, re.MULTILINE
         )
+
+    # 2. 如果未匹配到“第X章”，尝试从所有一级标题（# ）中提取章节（支持智库专报、政策建言等）
+    if not titles:
+        h1_matches = re.findall(r'^#\s+([^#\n]+)$', outline_md, re.MULTILINE)
+        candidate_h1 = []
+        for h in h1_matches:
+            h_clean = h.strip()
+            # 过滤全书总标题占位符（如 # 标题...）
+            if h_clean.startswith("标题（") or h_clean == "标题" or "（体现核心研判" in h_clean:
+                continue
+            candidate_h1.append(h_clean)
+        if candidate_h1:
+            titles = candidate_h1
+
+    # 3. 如果依然未匹配到，尝试匹配二级标题中的公文编号（如 ## 一、总体态势... 或 ## 【导语...】）
+    if not titles:
+        h2_matches = re.findall(
+            r'^##\s+((?:[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$',
+            outline_md, re.MULTILINE
+        )
+        if h2_matches:
+            titles = [h.strip() for h in h2_matches]
+
     return {i + 1: t.strip() for i, t in enumerate(titles)}
 
 
 def parse_chapter_seq(chapter_title: str) -> int:
-    """从 '第X章 xxx' 标题提取章序号（阿拉伯数字）。"""
+    """从标题提取章序号（阿拉伯数字），支持 '第X章'、'一、'、'1.'、导语(1)等。"""
+    if not chapter_title:
+        return 0
+    t = chapter_title.strip()
     cn_num_map = {
         '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
         '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
         '零': 0,
     }
-    m = re.match(r'第([一二三四五六七八九十百零\d]+)章', chapter_title)
-    if not m:
-        return 0
-    num_str = m.group(1)
-    if num_str.isdigit():
-        return int(num_str)
-    result = 0
-    if '十' in num_str:
-        parts = num_str.split('十')
-        if num_str.startswith('十'):
-            result = 10 + (cn_num_map.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0)
+    # 模式 1: 第X章
+    m = re.match(r'第([一二三四五六七八九十百零\d]+)章', t)
+    if m:
+        num_str = m.group(1)
+        if num_str.isdigit():
+            return int(num_str)
+        result = 0
+        if '十' in num_str:
+            parts = num_str.split('十')
+            if num_str.startswith('十'):
+                result = 10 + (cn_num_map.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0)
+            else:
+                result = cn_num_map.get(parts[0], 0) * 10
+                if len(parts) > 1 and parts[1]:
+                    result += cn_num_map.get(parts[1], 0)
         else:
-            result = cn_num_map.get(parts[0], 0) * 10
+            for ch in num_str:
+                result += cn_num_map.get(ch, 0)
+        return result if result > 0 else 0
+
+    # 模式 2: 公文汉字序号 一、 二、
+    m_cn = re.match(r'^([一二三四五六七八九十]+)[、\.\s]', t)
+    if m_cn:
+        cn_str = m_cn.group(1)
+        if cn_str in cn_num_map:
+            return cn_num_map[cn_str]
+        if '十' in cn_str:
+            parts = cn_str.split('十')
+            if cn_str.startswith('十'):
+                return 10 + (cn_num_map.get(parts[1], 0) if len(parts) > 1 and parts[1] else 0)
+            res = cn_num_map.get(parts[0], 0) * 10
             if len(parts) > 1 and parts[1]:
-                result += cn_num_map.get(parts[1], 0)
-    else:
-        for ch in num_str:
-            result += cn_num_map.get(ch, 0)
-    return result if result > 0 else 0
+                res += cn_num_map.get(parts[1], 0)
+            return res
+
+    # 模式 3: 阿拉伯数字 1. 1、 1
+    m_ar = re.match(r'^(\d+)[、\.\s]', t)
+    if m_ar:
+        return int(m_ar.group(1))
+
+    # 模式 4: 常见特定起始章
+    if any(k in t for k in ["导语", "内容摘要", "前言", "概述", "引言"]):
+        return 1
+
+    return 0

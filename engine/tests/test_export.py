@@ -112,7 +112,7 @@ def test_export_publication_typography_and_margins(client):
     assert title_p.runs[0].font.size.pt == 22.0  # 二号 22pt
     assert title_p.runs[0]._r.get_or_add_rPr().rFonts.get(qn("w:eastAsia")) == "黑体"
 
-    h1_p = [p for p in doc.paragraphs if "第一章" in p.text][0]
+    h1_p = [p for p in doc.paragraphs if "第一章" in p.text][-1]
     assert h1_p.paragraph_format.first_line_indent.pt == 0
     assert h1_p.paragraph_format.space_before.pt == 12.0
     assert h1_p.paragraph_format.space_after.pt == 6.0
@@ -120,7 +120,7 @@ def test_export_publication_typography_and_margins(client):
     assert h1_p.runs[0].font.size.pt == 16.0  # 三号 16pt
     assert h1_p.runs[0]._r.get_or_add_rPr().rFonts.get(qn("w:eastAsia")) == "黑体"
 
-    h2_p = [p for p in doc.paragraphs if "1.1 项目概况" in p.text][0]
+    h2_p = [p for p in doc.paragraphs if "1.1 项目概况" in p.text][-1]
     assert h2_p.paragraph_format.first_line_indent.pt == 0
     assert h2_p.paragraph_format.space_before.pt == 6.0
     assert h2_p.paragraph_format.space_after.pt == 3.0

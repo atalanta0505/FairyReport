@@ -25,13 +25,26 @@ export function parseChaptersFromOutline(outlineMd: string): ChapterInfo[] {
   let seq = 1;
   for (const line of lines) {
     const trimmed = line.trim();
+    if (
+      trimmed.startsWith("# 标题（") ||
+      trimmed === "# 标题" ||
+      trimmed.includes("（体现核心研判")
+    ) {
+      continue;
+    }
     const match =
       trimmed.match(/^#{1,2}\s+(第[一二三四五六七八九十百零\d]+章[\s：:].+)/) ||
       trimmed.match(/^#{1,2}\s+(第[一二三四五六七八九十百零\d]+章.+)/) ||
       trimmed.match(/^(第[一二三四五六七八九十百零\d]+章[\s：:].+)/) ||
-      trimmed.match(/^#\s+(.+)/);
+      trimmed.match(/^#{1,2}\s+([一二三四五六七八九十]+[、\.\s].+)/) ||
+      trimmed.match(/^#{1,2}\s+(\d+[、\.\s].+)/) ||
+      trimmed.match(/^#{1,2}\s+(【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?.*)/) ||
+      trimmed.match(/^#\s+([^#\n]+)/);
     if (match) {
-      chapters.push({ seq: seq++, title: match[1].trim() });
+      const title = match[1].trim();
+      if (title && !title.startsWith("标题（") && title !== "标题") {
+        chapters.push({ seq: seq++, title });
+      }
     }
   }
   return chapters;

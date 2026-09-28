@@ -122,7 +122,13 @@ def _build_writing_system_prompt(report_type: str = "",
 def _count_chapters(outline_md: str) -> int:
     """统计大纲中章标题数。"""
     matches = re.findall(r'^#\s+第.+章', outline_md, re.MULTILINE)
-    return len(matches) or 1
+    if matches:
+        return len(matches)
+    h1_matches = [
+        l for l in re.findall(r'^#\s+([^#\n]+)$', outline_md, re.MULTILINE)
+        if not (l.strip().startswith("标题（") or l.strip() == "标题" or "（体现核心研判" in l)
+    ]
+    return len(h1_matches) or 1
 
 
 def _trim_outline_to_position(outline_md: str, allowed_seqs: list) -> str:
@@ -130,28 +136,16 @@ def _trim_outline_to_position(outline_md: str, allowed_seqs: list) -> str:
     lines = outline_md.split('\n')
     result = []
     in_chapter = True
-    current_seq = 0
-    ch_pattern = re.compile(r'^#\s+(?:第\s*([一二三四五六七八九十百零\d]+)\s*章|(\d+)[\.\s])')
-
-    chinese_to_int = {
-        '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-        '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
-        '十一': 11, '十二': 12, '十三': 13, '十四': 14, '十五': 15,
-    }
     allowed_set = set(allowed_seqs)
+    h1_count = 0
 
     for line in lines:
-        m = ch_pattern.match(line)
-        if m:
-            cn_num = m.group(1)
-            ar_num = m.group(2)
-            if cn_num:
-                if cn_num.isdigit():
-                    current_seq = int(cn_num)
-                else:
-                    current_seq = chinese_to_int.get(cn_num, 0)
-            elif ar_num:
-                current_seq = int(ar_num)
+        s = line.strip()
+        if re.match(r'^#\s+[^#\n]+$', s):
+            if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
+                continue
+            h1_count += 1
+            current_seq = h1_count
             in_chapter = (current_seq in allowed_set)
 
         if in_chapter:
@@ -190,29 +184,25 @@ def _extract_chapter_skeleton(outline_md: str, chapter_seq: int) -> str:
         return ""
 
     lines = outline_md.split('\n')
-    _cn_nums = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
-                '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
-                '二十一', '二十二', '二十三', '二十四', '二十五', '二十六', '二十七', '二十八', '二十九', '三十']
-    cn_num = _cn_nums[chapter_seq] if chapter_seq < len(_cn_nums) else str(chapter_seq)
+    h1_indices = []
+    for idx, line in enumerate(lines):
+        s = line.strip()
+        if re.match(r'^#\s+[^#\n]+$', s):
+            if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
+                continue
+            h1_indices.append(idx)
 
-    ch_pattern = re.compile(
-        r'^#\s+(?:第\s*(?:' + str(chapter_seq) + r'|' + cn_num + r')\s*章|' + str(chapter_seq) + r'[\.\s])'
-    )
-    in_chapter = False
+    if not (1 <= chapter_seq <= len(h1_indices)):
+        return ""
+
+    target_start_idx = h1_indices[chapter_seq - 1]
+    target_end_idx = h1_indices[chapter_seq] if chapter_seq < len(h1_indices) else len(lines)
+
     skeleton_lines = []
-
-    for line in lines:
-        stripped = line.strip()
-        if ch_pattern.match(stripped):
-            in_chapter = True
-            skeleton_lines.append(stripped)
-            continue
-
-        if in_chapter:
-            if re.match(r'^#\s+', stripped) and not stripped.startswith('##'):
-                break
-            if stripped.startswith('#'):
-                skeleton_lines.append(stripped)
+    for i in range(target_start_idx, target_end_idx):
+        s = lines[i].strip()
+        if s.startswith('#'):
+            skeleton_lines.append(s)
 
     return '\n'.join(skeleton_lines)
 
@@ -221,29 +211,28 @@ def _parse_outline_hierarchy(outline_md: str, chapter_seq: int) -> dict:
     """解析给定章的 H2/H3 层级。"""
     lines = outline_md.split('\n')
     result = {"chapter_title": "", "h2_sections": []}
+    if not outline_md or chapter_seq <= 0:
+        return result
 
-    _cn_nums = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
-                '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
-                '二十一', '二十二', '二十三', '二十四', '二十五', '二十六', '二十七', '二十八', '二十九', '三十']
-    cn_num = _cn_nums[chapter_seq] if chapter_seq < len(_cn_nums) else str(chapter_seq)
+    h1_indices = []
+    for idx, line in enumerate(lines):
+        s = line.strip()
+        if re.match(r'^#\s+[^#\n]+$', s):
+            if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
+                continue
+            h1_indices.append(idx)
 
-    ch_pattern = re.compile(
-        r'^#\s+(?:第\s*(?:' + str(chapter_seq) + r'|' + cn_num + r')\s*章|' + str(chapter_seq) + r'[\.\s])'
-    )
-    in_chapter = False
+    if not (1 <= chapter_seq <= len(h1_indices)):
+        return result
+
+    target_start_idx = h1_indices[chapter_seq - 1]
+    target_end_idx = h1_indices[chapter_seq] if chapter_seq < len(h1_indices) else len(lines)
+
+    result["chapter_title"] = re.sub(r'^#\s+', '', lines[target_start_idx]).strip()
     current_h2 = None
 
-    for line in lines:
-        if ch_pattern.match(line):
-            in_chapter = True
-            result["chapter_title"] = re.sub(r'^#\s+', '', line).strip()
-            continue
-        if in_chapter and re.match(r'^#\s+', line) and not line.startswith('##'):
-            break
-
-        if not in_chapter:
-            continue
-
+    for i in range(target_start_idx + 1, target_end_idx):
+        line = lines[i]
         if re.match(r'^##\s+', line):
             title = re.sub(r'^##\s+', '', line).strip()
             current_h2 = {"title": title, "level": 2, "h3_subsections": []}

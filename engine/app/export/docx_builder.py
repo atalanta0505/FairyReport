@@ -201,8 +201,77 @@ def _add_cover_page(
         )
 
 
-def _add_toc_page(doc: Document):
-    """添加标准自动化目录页（Section 2），包含原生 Word TOC 域及打开自动更新开关。"""
+def _add_toc_entry_paragraph(doc: Document, title: str, level: int, page_num: int):
+    """向文档添加一条带点导线制表位和页码的目录条目段落。"""
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p.paragraph_format.first_line_indent = Pt(0)
+    p.paragraph_format.line_spacing = 1.25
+
+    # 制表位：右对齐，点导线，右边距 9072 dxa（对应标准 A4 页面版心右边界）
+    pPr = p._p.get_or_add_pPr()
+    tabs_xml = (
+        r'<w:tabs %s><w:tab w:val="right" w:leader="dot" w:pos="9072"/></w:tabs>'
+        % nsdecls('w')
+    )
+    pPr.append(parse_xml(tabs_xml))
+
+    if level == 1:
+        p.paragraph_format.left_indent = Pt(0)
+        p.paragraph_format.space_before = Pt(3)
+        p.paragraph_format.space_after = Pt(3)
+        font_name = '黑体'
+        font_size = Pt(10.5)
+        bold = True
+        color = RGBColor(0x0F, 0x17, 0x2A)
+    elif level == 2:
+        p.paragraph_format.left_indent = Pt(14)
+        p.paragraph_format.space_before = Pt(1.5)
+        p.paragraph_format.space_after = Pt(1.5)
+        font_name = '仿宋'
+        font_size = Pt(10)
+        bold = False
+        color = RGBColor(0x33, 0x41, 0x55)
+    else:
+        p.paragraph_format.left_indent = Pt(28)
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(1)
+        font_name = '仿宋'
+        font_size = Pt(9.5)
+        bold = False
+        color = RGBColor(0x47, 0x55, 0x69)
+
+    # 1. 标题文字
+    r_title = p.add_run(title)
+    _format_run(
+        r_title,
+        font_name='Times New Roman',
+        east_asia=font_name,
+        font_size=font_size,
+        bold=bold,
+        color=color,
+    )
+
+    # 2. 制表符（自动触发点导线到行末）
+    r_tab = p.add_run()
+    tab_elem = parse_xml(r'<w:tab %s/>' % nsdecls('w'))
+    r_tab._r.append(tab_elem)
+
+    # 3. 页码
+    r_page = p.add_run(str(page_num))
+    _format_run(
+        r_page,
+        font_name='Times New Roman',
+        east_asia=font_name,
+        font_size=font_size,
+        bold=bold,
+        color=color,
+    )
+    return p
+
+
+def _add_toc_page(doc: Document, headings_for_toc: list = None):
+    """添加标准自动化目录页（Section 2），包含原生 Word TOC 域、预渲染点导线条目及自动更新配置。"""
     toc_sec = doc.add_section(WD_SECTION.NEW_PAGE)
     _apply_section_margins(toc_sec)
     toc_sec.header.is_linked_to_previous = False
@@ -225,26 +294,48 @@ def _add_toc_page(doc: Document):
         color=RGBColor(0x0F, 0x17, 0x2A),
     )
 
-    # 插入标准 Word TOC 域（1-3 级标题大纲）
-    p_toc = doc.add_paragraph()
-    p_toc.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    p_toc.paragraph_format.first_line_indent = Pt(0)
-    run_toc = p_toc.add_run()
+    # 插入标准 Word TOC 域（1-3 级标题大纲）起始与分隔符
+    p_toc_begin = doc.add_paragraph()
+    p_toc_begin.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p_toc_begin.paragraph_format.first_line_indent = Pt(0)
+    p_toc_begin.paragraph_format.space_before = Pt(0)
+    p_toc_begin.paragraph_format.space_after = Pt(0)
+    p_toc_begin.paragraph_format.line_spacing = Pt(1)
+    run_toc_b = p_toc_begin.add_run()
     fld1 = parse_xml(r'<w:fldChar %s w:fldCharType="begin"/>' % nsdecls('w'))
     instr = parse_xml(r'<w:instrText %s xml:space="preserve"> TOC \o "1-3" \h \z \u </w:instrText>' % nsdecls('w'))
     fld2 = parse_xml(r'<w:fldChar %s w:fldCharType="separate"/>' % nsdecls('w'))
+    run_toc_b._r.append(fld1)
+    run_toc_b._r.append(instr)
+    run_toc_b._r.append(fld2)
+
+    # 预渲染目录条目段落（在 separate 与 end 之间，确保 WPS、阅读器及无域刷新环境下即开即见完整目录）
+    if headings_for_toc:
+        for item in headings_for_toc:
+            if len(item) == 3:
+                lvl, h_text, p_num = item
+            else:
+                lvl, h_text = item[0], item[1]
+                p_num = 1
+            _add_toc_entry_paragraph(doc, title=h_text, level=lvl, page_num=p_num)
+
+    # 闭合 Word TOC 域
+    p_toc_end = doc.add_paragraph()
+    p_toc_end.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    p_toc_end.paragraph_format.first_line_indent = Pt(0)
+    p_toc_end.paragraph_format.space_before = Pt(0)
+    p_toc_end.paragraph_format.space_after = Pt(0)
+    p_toc_end.paragraph_format.line_spacing = Pt(1)
+    run_toc_e = p_toc_end.add_run()
     fld3 = parse_xml(r'<w:fldChar %s w:fldCharType="end"/>' % nsdecls('w'))
-    run_toc._r.append(fld1)
-    run_toc._r.append(instr)
-    run_toc._r.append(fld2)
-    run_toc._r.append(fld3)
+    run_toc_e._r.append(fld3)
 
     # 提示引导段落
     p_tip = doc.add_paragraph()
     p_tip.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_tip.paragraph_format.first_line_indent = Pt(0)
     p_tip.paragraph_format.space_before = Pt(12)
-    run_tip = p_tip.add_run("（在 Word 中打开时将自动加载目录；如未显示可右键选择“更新域”生成全书目录）")
+    run_tip = p_tip.add_run("（在 Word 中打开可按 F9 或右键“更新域”同步最新物理页码）")
     _format_run(
         run_tip,
         font_name='Times New Roman',
@@ -356,24 +447,47 @@ def md_to_docx(
     doc = Document()
     _init_document_styles(doc)
 
-    # 提取正文中所有 1-3 级标题供目录页预置条目使用
+    # 提取正文中所有 1-2 级标题供目录页预置条目使用（同时估算页码）
     headings_for_toc = []
+    acc_chars = 0
     for line in md_content.split('\n'):
         line_s = line.strip()
-        m = re.match(r'^(#{1,3})\s+(.+)$', line_s)
+        m = re.match(r'^(#{1,2})\s+(.+)$', line_s)
         if m:
             lvl = len(m.group(1))
             h_text = m.group(2).strip()
-            if h_text and h_text != title and not h_text.startswith("目"):
-                headings_for_toc.append((lvl, h_text))
-
-    # 规范化报告总标题
-    actual_title = (title or "").strip() or (project or "").strip() or "项目研究报告"
-    if "报告" not in actual_title:
-        if actual_title.endswith("可行性研究") or actual_title.endswith("研究") or actual_title.endswith("规划") or actual_title.endswith("方案") or actual_title.endswith("评估"):
-            actual_title = f"{actual_title}报告"
+            if (
+                h_text
+                and h_text != title
+                and not h_text.startswith("目")
+                and not h_text.startswith("标题（")
+                and h_text != "标题"
+            ):
+                est_page = max(1, (acc_chars // 800) + 1)
+                headings_for_toc.append((lvl, h_text, est_page))
         else:
-            actual_title = f"{actual_title}可行性研究报告"
+            if line_s:
+                acc_chars += len(line_s)
+
+    # 如果正文中提取到的标题为空或过少，尝试从 skeleton 骨架中补充构建目录
+    if not headings_for_toc and skeleton:
+        for s_line in skeleton.split('\n'):
+            s_clean = s_line.strip()
+            m = re.match(r'^(#{1,2})\s+(.+)$', s_clean)
+            if m:
+                lvl = len(m.group(1))
+                h_text = m.group(2).strip()
+                if (
+                    h_text
+                    and h_text != title
+                    and not h_text.startswith("目")
+                    and not h_text.startswith("标题（")
+                    and h_text != "标题"
+                ):
+                    headings_for_toc.append((lvl, h_text, 1))
+
+    # 规范化报告总标题（严格保持原始命名，绝不硬编码强加类型后缀）
+    actual_title = (title or "").strip() or (project or "").strip() or "报告初稿"
 
     # ── 规范封面、目录与正文分节构建 ──
     if include_cover:
@@ -386,10 +500,12 @@ def md_to_docx(
             date_str=date_str,
         )
         if include_toc:
-            _add_toc_page(doc)
+            _add_toc_page(doc, headings_for_toc=headings_for_toc)
         _setup_body_section(doc, header_title=actual_title or project)
     elif actual_title:
         _add_heading(doc, actual_title, level=0)
+        if include_toc:
+            _add_toc_page(doc, headings_for_toc=headings_for_toc)
 
     # ── 预处理：提取块级公式（$$...$$），替换为占位防止行分割 ──
     display_formulas = {}

@@ -424,6 +424,13 @@ def outline(req: OutlineRequest):
 
     titles = _extract_chapter_titles(outline_md)
     chapters = [{"seq": seq, "title": t} for seq, t in sorted(titles.items())]
+    if not chapters and req.report_type:
+        tmpl_data = tmpl.load_template(req.report_type)
+        if tmpl_data and "chapters" in tmpl_data and tmpl_data["chapters"]:
+            chapters = [
+                {"seq": ch.get("seq", i + 1), "title": ch.get("title", "")}
+                for i, ch in enumerate(tmpl_data["chapters"])
+            ]
     writing_order = tmpl.get_writing_order(req.report_type, total_chapters=len(chapters))
     writing_order_reason = tmpl.get_writing_order_reason(req.report_type)
 
