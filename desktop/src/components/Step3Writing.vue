@@ -478,8 +478,8 @@ function getLLMConfig() {
   }
   return {
     api_key: settings.llmKey,
-    base_url: settings.llmBaseUrl || "https://api.deepseek.com/v1",
-    model: settings.llmModel || "deepseek-v4-flash",
+    base_url: settings.llmBaseUrl || "https://api.deepseek.com",
+    model: settings.llmModel || "deepseek-flash",
   };
 }
 

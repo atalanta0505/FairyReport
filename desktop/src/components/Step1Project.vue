@@ -206,7 +206,7 @@ async function handleDrop(e: DragEvent) {
   }
 
   if (paths.length === 0) {
-    showMsg("无法获取拖拽文件的绝对路径，请点击「选择文件」按钮上传", "error");
+    showMsg("无法获取拖拽文件的绝对路径，请点击「选择文件」按钮导入", "error");
     return;
   }
 
@@ -389,7 +389,7 @@ function nextStep() {
       </div>
     </div>
 
-    <!-- 3. 资料上传与管理卡片 -->
+    <!-- 3. 资料导入与管理卡片 -->
     <div class="card materials-card">
       <div class="card-header">
         <div class="title-with-badge">
@@ -423,7 +423,7 @@ function nextStep() {
         </div>
 
         <div v-else>
-          <!-- 拖拽上传与按钮区 -->
+          <!-- 拖拽导入与按钮区 -->
           <div
             class="upload-dropzone"
             :class="{ dragover: isDragOver }"

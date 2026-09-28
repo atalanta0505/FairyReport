@@ -93,8 +93,23 @@ function buildFullReportNumberedMarkdown(): string {
   const sections: string[] = [];
 
   for (const seq of orderedSeqs.value) {
-    const rawText = projectStore.chapters[seq] || "";
+    let rawText = projectStore.chapters[seq] || "";
     if (rawText.trim()) {
+      // 确保包含本章一级标题
+      const targetCh = projectStore.outlineChapters.find((c) => c.seq === seq);
+      if (targetCh && targetCh.title) {
+        const trimmed = rawText.trimStart();
+        const firstLine = trimmed.split("\n")[0] || "";
+        if (!firstLine.startsWith("# ") && !firstLine.startsWith("#\t")) {
+          const cleanFirst = firstLine.replace(/^#+\s*/, "").trim();
+          const cleanTarget = targetCh.title.replace(/^#+\s*/, "").trim();
+          if (cleanFirst === cleanTarget) {
+            rawText = `# ${cleanTarget}\n\n` + trimmed.slice(firstLine.length).trimStart();
+          } else {
+            rawText = `# ${cleanTarget}\n\n` + trimmed;
+          }
+        }
+      }
       const numberedText = convertRefsToNumberedCitations(rawText, labelToNumber);
       sections.push(numberedText.trim());
     }

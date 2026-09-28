@@ -9,6 +9,7 @@ import json
 import re
 
 from . import templates_loader as tmpl
+from .outline import _extract_chapter_titles, parse_chapter_seq
 from .prompts import (
     COMPLIANCE_REVIEW_SYSTEM_PROMPT,
     FAST_REVIEW_SYSTEM_PROMPT,
@@ -720,12 +721,14 @@ class ChapterWriter:
                       topic: str, writing_hint: str = "",
                       report_name: str = "",
                       chapter_budget: int = 0,
-                      is_summary: bool = False) -> str:
+                      is_summary: bool = False,
+                      chapter_seq: int = 0) -> str:
         prompt, system = self._build_chapter_write_args(
             chapter_title, outline_md, predecessor_chapters, rag_context, topic, writing_hint,
             report_name=report_name, chapter_budget=chapter_budget, is_summary=is_summary,
+            chapter_seq=chapter_seq,
         )
-        ch_seq = self._parse_chapter_seq(chapter_title)
+        ch_seq = chapter_seq if chapter_seq > 0 else self._resolve_chapter_seq(chapter_title, outline_md)
         skeleton = _extract_chapter_skeleton(outline_md, ch_seq) if ch_seq > 0 else ""
         raw_res = self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_WRITING,
                                 frequency_penalty=FREQUENCY_PENALTY,
@@ -739,10 +742,12 @@ class ChapterWriter:
                               topic: str, callback=None, writing_hint: str = "",
                               report_name: str = "",
                               chapter_budget: int = 0,
-                              is_summary: bool = False) -> str:
+                              is_summary: bool = False,
+                              chapter_seq: int = 0) -> str:
         prompt, system = self._build_chapter_write_args(
             chapter_title, outline_md, predecessor_chapters, rag_context, topic, writing_hint,
             report_name=report_name, chapter_budget=chapter_budget, is_summary=is_summary,
+            chapter_seq=chapter_seq,
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
         return self.llm.chat_stream(messages, temperature=TEMPERATURE_WRITING,
@@ -757,10 +762,11 @@ class ChapterWriter:
                                    topic: str, writing_hint: str = "",
                                    report_name: str = "",
                                    chapter_budget: int = 0,
-                                   is_summary: bool = False) -> tuple:
+                                   is_summary: bool = False,
+                                   chapter_seq: int = 0) -> tuple:
         """返回 (prompt, system)。含 RAG、字数预算、适用时技术分析框架。"""
         prev_context = self._build_prev_context(predecessor_chapters)
-        ch_seq = self._parse_chapter_seq(chapter_title)
+        ch_seq = chapter_seq if chapter_seq > 0 else self._resolve_chapter_seq(chapter_title, outline_md)
         skeleton = _extract_chapter_skeleton(outline_md, ch_seq) if ch_seq > 0 else ""
 
         report_label = f"## 项目名称\n{report_name}\n\n## 产业方向\n{topic}" if report_name else f"## 项目主题\n{topic}"
@@ -769,6 +775,7 @@ class ChapterWriter:
             f"{report_label}\n\n"
             f"## 完整大纲 [{self.report_type}]\n{outline_md}\n\n"
             f"## 当前章节\n请编写「{chapter_title}」的正文内容\n\n"
+            f"【最高格式红线】：你生成的内容第一行必须以本章一级标题「# {chapter_title}」开头！随后空一行再编写各二级小节（## ）与正文，严禁遗漏本章一级标题！\n\n"
         )
 
         if skeleton:
@@ -943,15 +950,42 @@ class ChapterWriter:
         return raw, parsed
 
     # ── 辅助方法 ──
+    @classmethod
+    def _resolve_chapter_seq(cls, chapter_title: str, outline_md: str = "") -> int:
+        """从章节标题和可选大纲中精确解析章序号（1-indexed）。
+        优先从大纲中的各章标题反向匹配，其次采用公文/数字/第X章通用序号提取器。
+        """
+        if outline_md:
+            titles = _extract_chapter_titles(outline_md)
+            clean_target = (chapter_title or "").strip()
+            # 1. 精确匹配
+            for seq, t in titles.items():
+                if t.strip() == clean_target:
+                    return seq
+            # 2. 包含匹配（忽略 # 符号与前后空格）
+            clean_no_hash = clean_target.replace("#", "").strip()
+            for seq, t in titles.items():
+                t_clean = t.replace("#", "").strip()
+                if t_clean and (clean_no_hash == t_clean or clean_no_hash in t_clean or t_clean in clean_no_hash):
+                    return seq
+        # 3. outline.py 的通用解析（支持 第X章、一、二、1.、导语 等）
+        seq = parse_chapter_seq(chapter_title)
+        if seq > 0:
+            return seq
+        return cls._parse_chapter_seq(chapter_title)
+
     @staticmethod
     def _parse_chapter_seq(chapter_title: str) -> int:
-        """从 '第X章 xxx' 提取章序号。"""
+        """从 '第X章 xxx'、公文序号等提取章序号。"""
+        seq = parse_chapter_seq(chapter_title)
+        if seq > 0:
+            return seq
         cn_num_map = {
             '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
             '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
             '零': 0,
         }
-        m = re.match(r'第([一二三四五六七八九十百零\d]+)章', chapter_title)
+        m = re.match(r'第([一二三四五六七八九十百零\d]+)章', chapter_title or "")
         if not m:
             return 0
         num_str = m.group(1)
@@ -988,23 +1022,17 @@ class ChapterWriter:
             return ""
 
         lines = outline_md.split('\n')
-        ch_pattern = re.compile(r'^#\s+第([一二三四五六七八九十百零\d]+)章')
-
-        def _extract_ch_seq(line: str) -> int:
-            m = ch_pattern.match(line)
-            if not m:
-                return 0
-            return self._parse_chapter_seq(f"第{m.group(1)}章")
-
         comparison_points = {}
         seen_subtitles = set()
         current_ch = 0
         current_section = ""
 
         for i, line in enumerate(lines):
-            ch_m = ch_pattern.match(line)
-            if ch_m:
-                current_ch = _extract_ch_seq(line)
+            s = line.strip()
+            if re.match(r'^#\s+[^#\n]+$', s):
+                if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
+                    continue
+                current_ch += 1
                 continue
 
             if current_ch not in predecessor_chapters and str(current_ch) not in predecessor_chapters:

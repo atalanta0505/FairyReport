@@ -18,7 +18,7 @@ from .writing.router import router as writing_router
 
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="FairyReport Engine", version="1.6.0")
+app = FastAPI(title="FairyReport Engine", version="1.6.1")
 
 app.add_middleware(
     CORSMiddleware,

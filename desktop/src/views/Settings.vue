@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useSettingsStore, DEFAULT_SERVER_URL, DEFAULT_ENGINE_URL } from "../stores/settings";
+import { useSettingsStore, DEFAULT_SERVER_URL, DEFAULT_ENGINE_URL, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from "../stores/settings";
 import { useEngineStore } from "../stores/engine";
 
 const settings = useSettingsStore();
@@ -9,6 +9,8 @@ const engine = useEngineStore();
 const saved = ref(false);
 const testingEngine = ref(false);
 const engineTestResult = ref<string>("");
+const fetchingModels = ref(false);
+const modelFetchMsg = ref<string>("");
 
 async function onSave() {
   await settings.save();
@@ -22,6 +24,27 @@ function onResetServer() {
 
 function onResetEngine() {
   settings.engineUrl = DEFAULT_ENGINE_URL;
+}
+
+function onResetLlmBase() {
+  settings.llmBaseUrl = DEFAULT_LLM_BASE_URL;
+}
+
+function onResetLlmModel() {
+  settings.llmModel = DEFAULT_LLM_MODEL;
+}
+
+async function onFetchModels() {
+  modelFetchMsg.value = "";
+  fetchingModels.value = true;
+  try {
+    const list = await settings.fetchRemoteModels();
+    modelFetchMsg.value = `✅ 已成功获取 ${list.length} 个官方模型`;
+  } catch (err: any) {
+    modelFetchMsg.value = `❌ ${err?.message || "获取模型失败"}`;
+  } finally {
+    fetchingModels.value = false;
+  }
 }
 
 async function onTestEngine() {
@@ -96,18 +119,45 @@ async function onTestEngine() {
     </section>
 
     <section class="group">
-      <h3>LLM 配置（用户自带 Key，仅本地保存，不上传云端）</h3>
+      <h3>LLM 配置（用户自带 Key，仅本地保存，零上传云端）</h3>
       <div class="field">
         <label>API Key</label>
         <input v-model="settings.llmKey" type="password" placeholder="sk-..." />
       </div>
       <div class="field">
-        <label>Base URL</label>
-        <input v-model="settings.llmBaseUrl" type="text" placeholder="https://api.deepseek.com/v1" />
+        <label>Base URL (OpenAI 兼容)</label>
+        <div class="row">
+          <input v-model="settings.llmBaseUrl" type="text" placeholder="https://api.deepseek.com" />
+          <button class="ghost" @click="onResetLlmBase">默认</button>
+        </div>
       </div>
       <div class="field">
-        <label>模型</label>
-        <input v-model="settings.llmModel" type="text" placeholder="deepseek-v4-flash" />
+        <label>模型选择（可直接点选下拉项，或点击右侧拉取官方最新列表）</label>
+        <div class="row">
+          <input
+            v-model="settings.llmModel"
+            type="text"
+            list="model-options"
+            placeholder="deepseek-flash"
+          />
+          <datalist id="model-options">
+            <option v-for="m in settings.availableModels" :key="m" :value="m" />
+          </datalist>
+          <button class="ghost" @click="onResetLlmModel">默认</button>
+          <button class="ghost" :disabled="fetchingModels" @click="onFetchModels">
+            {{ fetchingModels ? "拉取中…" : "🔄 获取最新模型" }}
+          </button>
+        </div>
+        <p
+          v-if="modelFetchMsg"
+          class="field-hint"
+          :class="{
+            ok: modelFetchMsg.includes('成功'),
+            err: modelFetchMsg.includes('失败') || modelFetchMsg.includes('请先输入'),
+          }"
+        >
+          {{ modelFetchMsg }}
+        </p>
       </div>
     </section>
 

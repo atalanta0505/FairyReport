@@ -116,8 +116,8 @@ async function handleGenerateOutline() {
   try {
     await projectStore.generateOutline(engine.baseUrl, {
       api_key: settings.llmKey,
-      base_url: settings.llmBaseUrl || "https://api.deepseek.com/v1",
-      model: settings.llmModel || "deepseek-v4-flash",
+      base_url: settings.llmBaseUrl || "https://api.deepseek.com",
+      model: settings.llmModel || "deepseek-flash",
     });
     showMsg("大纲智能生成成功！您可以在下方进行自由编辑与调整。");
   } catch (err) {

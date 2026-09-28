@@ -468,10 +468,8 @@ def md_to_docx(
     acc_chars = 0
     for line in md_content.split('\n'):
         line_s = line.strip()
-        m = re.match(r'^(#{1,2})\s+(.+)$', line_s)
-        if m:
-            lvl = len(m.group(1))
-            h_text = m.group(2).strip()
+        lvl, h_text, is_h = _parse_md_line(line_s)
+        if is_h and (1 <= lvl <= 2):
             if (
                 h_text
                 and h_text != title
@@ -1387,6 +1385,10 @@ def _parse_md_line(line: str):
     ch_match = re.match(r'^(第[一二三四五六七八九十百零\d]+章)\s+([^\n:：。]{2,30})$', stripped)
     if ch_match:
         return 1, stripped, True
+    # 兼容公文序号无 # 前缀的章标题（如 一、总体态势与基本认识、二、面临的突出矛盾与风险研判）
+    cn_ch_match = re.match(r'^([一二三四五六七八九十]+[、\.\s][^\n:：。]{2,40})$', stripped)
+    if cn_ch_match:
+        return 1, stripped, True
     return 0, line, False
 
 
@@ -1471,15 +1473,8 @@ def build_merged_md(chapters: dict, include_refs: bool = True, project: str = ""
 
     ordered = sorted(chapters.keys(), key=_sort_key)
 
-    # 各章正文（剥离 📎 段）
-    body_parts = []
-    for ch_key in ordered:
-        content = chapters.get(ch_key, "")
-        if content:
-            body_parts.append(_strip_ref_section(content))
-    full_body = "\n\n".join(body_parts)
-
     skeleton = ""
+    outline_titles = {}
     if project:
         try:
             from ..config import settings
@@ -1489,9 +1484,49 @@ def build_merged_md(chapters: dict, include_refs: bool = True, project: str = ""
                 with open(p, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     skeleton = data.get("outline_md", "")
+                    if skeleton:
+                        from ..writing.outline import _extract_chapter_titles
+                        outline_titles = _extract_chapter_titles(skeleton)
         except Exception:
             pass
 
+    # 各章正文（剥离 📎 段，并严格保障每章一级标题存在）
+    body_parts = []
+    for ch_key in ordered:
+        content = chapters.get(ch_key, "")
+        if not content or not str(content).strip():
+            continue
+        stripped_content = _strip_ref_section(str(content)).strip()
+        if not stripped_content:
+            continue
+
+        try:
+            seq_num = int(ch_key)
+        except (TypeError, ValueError):
+            seq_num = 0
+
+        expected_title = outline_titles.get(seq_num, "") if seq_num > 0 else ""
+
+        # 检查 stripped_content 是否以一级标题 (# ) 开头
+        first_line = stripped_content.split("\n")[0].strip()
+        if not re.match(r'^#\s+[^#\n]+$', first_line):
+            # 未包含规范的一级标题
+            if expected_title:
+                clean_exp = expected_title.replace("#", "").strip()
+                clean_first = first_line.replace("#", "").strip()
+                if clean_first == clean_exp:
+                    rest_lines = stripped_content.split("\n", 1)[1].lstrip() if "\n" in stripped_content else ""
+                    stripped_content = f"# {clean_exp}\n\n{rest_lines}" if rest_lines else f"# {clean_exp}"
+                else:
+                    stripped_content = f"# {clean_exp}\n\n{stripped_content}"
+            elif re.match(r'^(第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s])[^\n:：。]{2,40}$', first_line):
+                # 首行本身是公文或章标题，只是缺 #
+                rest_lines = stripped_content.split("\n", 1)[1].lstrip() if "\n" in stripped_content else ""
+                stripped_content = f"# {first_line}\n\n{rest_lines}" if rest_lines else f"# {first_line}"
+
+        body_parts.append(stripped_content)
+
+    full_body = "\n\n".join(body_parts)
     full_body = normalize_chapter_markdown(full_body, skeleton=skeleton)
 
     if not include_refs:

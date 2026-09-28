@@ -4,8 +4,8 @@ import pytest
 from docx import Document
 
 from engine.app.writing.outline import OutlineGenerator, _extract_chapter_titles, parse_chapter_seq
-from engine.app.writing.writer import _extract_chapter_skeleton, normalize_chapter_markdown
-from engine.app.export.docx_builder import md_to_docx
+from engine.app.writing.writer import ChapterWriter, _extract_chapter_skeleton, normalize_chapter_markdown
+from engine.app.export.docx_builder import build_merged_md, md_to_docx
 
 
 def test_zhiku_extract_chapter_titles():
@@ -207,4 +207,114 @@ def test_zhiku_appendix_tables_not_parsed_as_chapters():
     assert len(titles) == 5, f"期望提取 5 章，实际提取 {len(titles)}: {titles}"
     assert 6 not in titles
     assert 7 not in titles
+
+
+def test_zhiku_resolve_chapter_seq_and_skeleton_injection():
+    """验证 ChapterWriter._resolve_chapter_seq 能正确将公文序号章标题解析为对应大纲 seq，
+    并成功将本章骨架和最高格式红线注入 prompt。"""
+    zhiku_md = (
+        "# 导语 / 内容摘要\n\n"
+        "（一段话提纲挈领）\n\n"
+        "# 一、总体态势与基本认识\n\n"
+        "## （一）发展现状与阶段性特征\n\n"
+        "## （二）重大战略意义与前瞻定位\n\n"
+        "# 二、面临的突出矛盾与风险研判\n\n"
+        "## （一）关键要素供给与核心瓶颈制约\n\n"
+        "## （二）结构性矛盾凸显与协同机制短板\n\n"
+        "## （三）潜在安全风险隐患与合规红线挑战\n\n"
+        "# 三、对策建议与政策举措\n\n"
+        "## （一）完善顶层制度设计\n\n"
+        "# 附件/附表\n\n"
+        "## 附表1 核心指标与政策对比表\n"
+    )
+
+    # 1. 验证各章节标题反向解析序号
+    assert ChapterWriter._resolve_chapter_seq("导语 / 内容摘要", zhiku_md) == 1
+    assert ChapterWriter._resolve_chapter_seq("一、总体态势与基本认识", zhiku_md) == 2
+    assert ChapterWriter._resolve_chapter_seq("二、面临的突出矛盾与风险研判", zhiku_md) == 3
+    assert ChapterWriter._resolve_chapter_seq("三、对策建议与政策举措", zhiku_md) == 4
+    assert ChapterWriter._resolve_chapter_seq("附件/附表", zhiku_md) == 5
+
+    # 2. 验证生成 prompt 时骨架被正确注入
+    writer = ChapterWriter(llm=None, report_type="智库专报")
+    prompt, system = writer._build_chapter_write_args(
+        chapter_title="二、面临的突出矛盾与风险研判",
+        outline_md=zhiku_md,
+        predecessor_chapters={},
+        rag_context="",
+        topic="专项债券项目",
+    )
+
+    assert "## 待填充的本章结构骨架（已锁定）" in prompt
+    assert "# 二、面临的突出矛盾与风险研判" in prompt
+    assert "## （一）关键要素供给与核心瓶颈制约" in prompt
+    assert "【最高格式红线】" in prompt
+    assert "本章一级标题「# 二、面临的突出矛盾与风险研判」开头" in prompt
+
+
+def test_zhiku_merged_export_recovers_missing_h1_and_renders_in_docx(tmp_path):
+    """验证当大模型生成的第二章（二、...）与附表章缺失 # 一级标题时，
+    build_merged_md 与 md_to_docx 仍能从 outline.json 自动补齐并在 Word 目录及导航大纲中恢复。"""
+    import json
+    from engine.app.config import settings
+
+    proj_name = "test_zhiku_heal_export"
+    pdir = settings.project_dir(proj_name)
+    pdir.mkdir(parents=True, exist_ok=True)
+
+    outline_content = (
+        "# 导语 / 内容摘要\n\n"
+        "# 一、总体态势与基本认识\n\n"
+        "## （一）发展现状\n\n"
+        "# 二、面临的突出矛盾与风险研判\n\n"
+        "## （一）关键要素供给制约\n\n"
+        "## （二）结构性矛盾凸显\n\n"
+        "# 三、对策建议与政策举措\n\n"
+        "## （一）完善顶层设计\n\n"
+        "# 附件/附表\n\n"
+        "## 附表1 核心指标表\n"
+    )
+    (pdir / "outline.json").write_text(
+        json.dumps({"outline_md": outline_content, "report_type": "智库专报"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    # 模拟大模型输出：第3章（二、...）和第5章（附件/附表）均丢失了 # 一级标题，直接以二级标题开头
+    chapters = {
+        "1": "# 导语 / 内容摘要\n\n导语内容正文分析。",
+        "2": "# 一、总体态势与基本认识\n\n## （一）发展现状\n\n发展现状正文。",
+        "3": "## （一）关键要素供给制约\n\n要素供给正文。\n\n## （二）结构性矛盾凸显\n\n矛盾正文。",
+        "4": "# 三、对策建议与政策举措\n\n## （一）完善顶层设计\n\n建议正文。",
+        "5": "## 附表1 核心指标表\n\n表格数据内容。",
+    }
+
+    final_md = build_merged_md(chapters, include_refs=False, project=proj_name)
+
+    # 验证合并后的 markdown 必须完整包含所有 5 个一级标题
+    assert "# 导语 / 内容摘要" in final_md
+    assert "# 一、总体态势与基本认识" in final_md
+    assert "# 二、面临的突出矛盾与风险研判" in final_md, "第3章（二、...）一级标题应被自动补齐！"
+    assert "# 三、对策建议与政策举措" in final_md
+    assert "# 附件/附表" in final_md, "第5章（附件/附表）一级标题应被自动补齐！"
+
+    # 生成 docx 并验证 Word 标题大纲与目录条目
+    docx_path = str(tmp_path / "zhiku_healed.docx")
+    md_to_docx(
+        final_md,
+        docx_path,
+        title="专项债券专报",
+        project=proj_name,
+        include_cover=True,
+        include_toc=True,
+    )
+
+    doc = Document(docx_path)
+    h1_paras = [p.text for p in doc.paragraphs if p.style.name == "Heading 1"]
+
+    assert any("导语" in t for t in h1_paras)
+    assert any("一、总体态势与基本认识" in t for t in h1_paras)
+    assert any("二、面临的突出矛盾与风险研判" in t for t in h1_paras), "Word Heading 1 必须包含二、面临的突出矛盾与风险研判！"
+    assert any("三、对策建议与政策举措" in t for t in h1_paras)
+    assert any("附件/附表" in t for t in h1_paras), "Word Heading 1 必须包含附件/附表！"
+
 

@@ -32,6 +32,7 @@ from .templates_loader import TemplatesNotInstalled
 from .writer import (
     ChapterWriter,
     normalize_chapter_markdown,
+    _extract_chapter_skeleton,
     parse_expert_review_result,
     parse_tech_review_result,
     _build_writing_system_prompt,
@@ -247,7 +248,18 @@ def get_project_chapters(name: str):
 @router.post("/writing/projects/{name}/chapters/{seq}", response_model=ChaptersData)
 def save_project_chapter(name: str, seq: int, req: ChapterSaveRequest):
     """保存单章 markdown 内容到 chapters.json 并落盘 chapters/chapter_{seq}.md。"""
-    cleaned_text = normalize_chapter_markdown(req.text)
+    chapter_title = ""
+    skeleton = ""
+    try:
+        outline_data = _read_outline_file(name)
+        if outline_data.outline_md:
+            titles = _extract_chapter_titles(outline_data.outline_md)
+            chapter_title = titles.get(seq, "")
+            skeleton = _extract_chapter_skeleton(outline_data.outline_md, seq)
+    except Exception:
+        pass
+
+    cleaned_text = normalize_chapter_markdown(req.text, skeleton=skeleton)
     data = _read_chapters_file(name)
     data.chapters[str(seq)] = cleaned_text
     data.updated_at = datetime.now(timezone.utc).isoformat()
@@ -498,7 +510,7 @@ def chapter(req: ChapterRequest):
             chapter_title, req.outline_md, req.predecessor_chapters,
             rag_context, topic, writing_hint=req.writing_hint,
             report_name=rep_name, chapter_budget=chapter_budget,
-            is_summary=is_summary,
+            is_summary=is_summary, chapter_seq=req.chapter_seq,
         )
         if content and "## 📎 本章参考资料" not in content:
             refs = extract_chapter_refs(content, rag_context=rag_context, project_name=req.project)
@@ -543,7 +555,7 @@ def _stream_chapter(writer, llm, req, chapter_title,
             chapter_title, req.outline_md, req.predecessor_chapters,
             rag_context, topic, writing_hint=req.writing_hint,
             report_name=req.project, chapter_budget=chapter_budget,
-            is_summary=is_summary,
+            is_summary=is_summary, chapter_seq=req.chapter_seq,
         )
 
         # 3. 深度推理构思阶段
