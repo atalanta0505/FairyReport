@@ -1,5 +1,5 @@
 """
-打包绿色便携版 FairyReport-Local-v1.6.1-Windows-x64.zip
+打包绿色便携版 FairyReport-Local-v1.6.2-Windows-x64.zip
 """
 import os
 import shutil
@@ -12,7 +12,7 @@ def main():
     dist_dir = os.path.join(repo_root, "dist")
     target_release = os.path.join(repo_root, "desktop", "src-tauri", "target", "release")
     
-    stage_dir = os.path.join(dist_dir, "FairyReport-Local-v1.6.1-Windows-x64")
+    stage_dir = os.path.join(dist_dir, "FairyReport-Local-v1.6.2-Windows-x64")
     if os.path.exists(stage_dir):
         shutil.rmtree(stage_dir, ignore_errors=True)
     
@@ -38,7 +38,7 @@ def main():
     if os.path.exists(pattern_src):
         shutil.copytree(pattern_src, os.path.join(stage_dir, "pattern"), dirs_exist_ok=True)
 
-    readme_text = """FairyReport 智能报告编制应用 (v1.6.1 本地安全专业版)
+    readme_text = """FairyReport 智能报告编制应用 (v1.6.2 本地安全专业版)
 ==================================================
 
 【快速启动】
@@ -63,7 +63,7 @@ def main():
     with open(os.path.join(stage_dir, "使用说明.txt"), "w", encoding="utf-8") as f:
         f.write(readme_text)
 
-    zip_path = os.path.join(dist_dir, "FairyReport-Local-v1.6.1-Windows-x64.zip")
+    zip_path = os.path.join(dist_dir, "FairyReport-Local-v1.6.2-Windows-x64.zip")
     if os.path.exists(zip_path):
         os.remove(zip_path)
         

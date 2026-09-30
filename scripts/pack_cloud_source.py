@@ -1,6 +1,6 @@
 """
 FairyReport 云端 Web 部署纯净源码包打包脚本
-生成目标：dist/FairyReport-Cloud-Deploy-v1.6.1.zip
+生成目标：dist/FairyReport-Cloud-Deploy-v1.6.2.zip
 特性：
 1. 包含完整 Python 后端、离线向量模型、15类出版级 Word 模板包；
 2. 包含已编译好的前端静态网页 desktop/dist/ 及前端源码；
@@ -21,7 +21,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = REPO_ROOT / "dist"
-PACKAGE_NAME = "FairyReport-Cloud-Deploy-v1.6.1"
+PACKAGE_NAME = "FairyReport-Cloud-Deploy-v1.6.2"
 STAGE_DIR = DIST_DIR / "stage_cloud_deploy" / PACKAGE_NAME
 OUTPUT_ZIP = DIST_DIR / f"{PACKAGE_NAME}.zip"
 

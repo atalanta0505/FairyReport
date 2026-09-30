@@ -152,7 +152,7 @@ npm run dev
 ```
 
 #### 方式 C：绿色免安装便携版（解压即用 · 生产分发）
-1. 直接解压发布的 `dist/FairyReport-Local-v1.6.1-Windows-x64.zip` 至任意目录；
+1. 直接解压发布的 `dist/FairyReport-Local-v1.6.2-Windows-x64.zip` 至任意目录；
 2. 双击运行 `FairyReport.exe` 即可启动，系统在后台静默唤起本地独立计算引擎；
 3. **便携数据隔离**：根目录包含 `.portable` 标记文件，所有项目底稿与向量数据均存放在解压目录同级的 `data/` 文件夹中，不写入系统注册表；
 4. **自主打包构建**：
@@ -161,7 +161,7 @@ npm run dev
 cd desktop && npm run build && npm run tauri build
 cd ..
 python scripts/pack_portable.py
-# 产物输出至：dist/FairyReport-Local-v1.6.1-Windows-x64.zip (约 370MB)
+# 产物输出至：dist/FairyReport-Local-v1.6.2-Windows-x64.zip (约 370MB)
 ```
 
 ---

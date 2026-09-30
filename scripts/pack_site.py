@@ -1,6 +1,6 @@
 """
 FairyReport Documentation Website Packaging & 101 Deployment Generator
-Version: v1.6.1
+Version: v1.6.2
 """
 
 import os
@@ -15,8 +15,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SITE_DIR = REPO_ROOT / "site"
 DIST_DIR = REPO_ROOT / "dist"
 SITE_DIST_DIR = SITE_DIR / ".vitepress" / "dist"
-OUTPUT_ZIP = DIST_DIR / "fairyreport-site-v1.6.1.zip"
-PORTABLE_ZIP = DIST_DIR / "FairyReport-Local-v1.6.1-Windows-x64.zip"
+OUTPUT_ZIP = DIST_DIR / "fairyreport-site-v1.6.2.zip"
+PORTABLE_ZIP = DIST_DIR / "FairyReport-Local-v1.6.2-Windows-x64.zip"
 
 
 def calculate_sha256(filepath: Path) -> str:
