@@ -17,7 +17,7 @@ from ..config import settings
 from ..embedding import get_embedder
 from . import templates_loader as tmpl
 from .llm_client import LLMClient, LLMError
-from .outline import OutlineGenerator, _extract_chapter_titles, parse_chapter_seq
+from .outline import DYNAMIC_OPINION_REPORT_TYPES, OutlineGenerator, _extract_chapter_titles, parse_chapter_seq
 from .prompts import (
     FREQUENCY_PENALTY,
     PRESENCE_PENALTY,
@@ -429,8 +429,25 @@ def outline(req: OutlineRequest):
     _require_pack()
     llm = _make_llm(req.llm_config)
     gen = OutlineGenerator(llm, req.report_type, tmpl.get_word_limit(req.report_type))
+    context = ""
+    if req.project and req.report_type in DYNAMIC_OPINION_REPORT_TYPES:
+        try:
+            rag_res = query_rag(
+                req.project,
+                "发展现状与主要矛盾 对策建议",
+                include_generic=False,
+                include_web=False,
+                topic=req.project,
+                report_name=req.project,
+                report_type=req.report_type,
+            )
+            if rag_res and "无相关参考资料" not in rag_res:
+                context = rag_res
+        except Exception:
+            context = ""
+
     try:
-        outline_md = gen.generate(report_name=req.project, context="")
+        outline_md = gen.generate(report_name=req.project, context=context)
     except LLMError as e:
         raise _map_llm_error(e)
 

@@ -32,7 +32,52 @@ def _suggest_chapter_count(total_words: int) -> int:
         return 5
 
 
+# 动态观点型报告类型：必须结合项目选题与材料动态推演实质性观点标题，严禁纯静态返回占位模板
+DYNAMIC_OPINION_REPORT_TYPES = {
+    "智库专报",
+    "智库决策专报与建言报告",
+}
+
+
+def _build_zhiku_outline_prompt(report_type: str, total_words: int = 5000) -> str:
+    return f"""你是一位专注于宏观政策与产业发展的高端智库资深专家。请为当前的智库专报生成一份结构严密、观点鲜明、针对性极强的决策咨询报告大纲。
+
+【大纲一级章结构（最高红线：必须且只能包含以下 5 个一级章，严禁增删、改动章名或调换顺序）】：
+# 导语 / 内容摘要
+# 一、总体态势与基本认识
+# 二、面临的突出矛盾与风险研判
+# 三、对策建议与政策举措
+# 附件/附表
+
+【各章二级节标题（## ）与附表生成铁律（结合具体项目选题深度推演确定观点）】：
+1. **纯中文字符短语铁律（专报专有·最高红线）**：
+   - **绝对禁止包含任何标点符号与特殊字符**：小节标题除公文序号 `（一）` 外，必须是连续的纯中文字符！严禁包含引号“”、加号+、逗号，、句号。、顿号、冒号、分号、破折号、括号等任何标点与特殊符号！
+   - **绝对禁止写成长句子**：小节标题必须是简明凝练的动宾短语或主题偏正短语，严禁写成多分句复合长句或包含谓语宾语的完整长句！
+   - **字数严格控制**：每个二级节标题（不含序号）字数严格控制在 8~22 个纯汉字以内，醒目精炼、观点明确。
+   - **反面典型警示（绝对杜绝）**：
+     × `## （一）推进管网确权登记与特许经营改革，打通存量资产证券化与滚动再投资通道`（错误：含有逗号，属于多分句长句）
+     × `## （二）创新“平时商业运营+急时政府购买”组合付费机制，健全平急两用项目收益平衡方案。`（错误：含有引号、加号、逗号、句号，属于复合长句）
+   - **正面示范（纯中文字符短语）**：
+     √ `## （一）推进管网确权登记与特许经营机制改革`
+     √ `## （二）创新平急两用商业运营与政府购买机制`
+     √ `## （三）构建长期资本专项工具与全周期监管体系`
+2. **实质性观点要求**：所有二级小节标题必须直接反映针对当前选题的核心研判、实质性观点或明确举措，必须结合项目名称与行业背景深度展开！
+   - 严禁在标题中使用“矛盾一”、“矛盾二”、“建议一”、“建议二”、“维度一”、“方案一”、“问题一”等任何泛化抽象占位词！
+   - 严禁在标题后添加括号说明（如“（如体制机制/政策引导）”）。
+3. **各章二级小节设置规范**：
+   - **# 导语 / 内容摘要**：不设二级小节，下方仅保留“（一段话提纲挈领：选题背景/政策契机 + 核心判断/突出矛盾 + 主要建议方向，300-500字）”。
+   - **# 一、总体态势与基本认识**：设置 2 个二级节，结合选题阐述该领域的“发展现状与阶段性特征（数据量化方向）”与“重大战略意义与前瞻定位”。
+   - **# 二、面临的突出矛盾与风险研判**：必须紧密针对该选题当前的实际堵点痛点，从要素制约、协同短板、安全合规等维度，提炼 2~3 个纯中文短语论断小节（例如传统产业园区数字化选题应输出：`## （一）中小企业数字化改造成本高企顾虑突出`、`## （二）园区工业互联网标准割裂信息孤岛严重`）。
+   - **# 三、对策建议与政策举措**：必须针锋相对地呼应第二章的突出矛盾，提炼 2~3 个具体落地的纯中文短语举措小节（例如：`## （一）完善财税金融协同激励与效益分成机制`、`## （二）加快园区级统一数据底座建设破除数据壁垒`）。
+   - **# 附件/附表**：设置 2 个与该专报选题直接相关的支撑附表名称（例如：`## 附表1 传统制造业数字化改造核心指标政策对比表`、`## 附表2 园区数字化转型投入产出效益与风险测算支撑表`）。
+4. **格式规范**：直接输出 Markdown 纯文本大纲，标题独占一行，禁止代码块包裹，禁止输出任何开场白或解释性文字。
+"""
+
+
 def _build_outline_system_prompt(report_type: str = "", total_words: int = 0) -> str:
+    if report_type in DYNAMIC_OPINION_REPORT_TYPES:
+        return _build_zhiku_outline_prompt(report_type, total_words)
+
     base = _OUTLINE_BASE_PROMPT
     if report_type:
         base += f"\n\n当前报告类型：**{report_type}**，请严格按照该类型的标准结构和章节规范生成大纲。"
@@ -75,11 +120,51 @@ class OutlineGenerator:
         self.report_type = report_type
         self.total_words = total_words
 
+    def _stream_text(self, text: str, callback=None) -> str:
+        import time
+        for i in range(0, len(text), 10):
+            chunk = text[i:i + 10]
+            if callback:
+                callback(chunk)
+            time.sleep(0.005)
+        return text
+
     def generate(self, report_name: str = "", context: str = "") -> str:
-        # 模板即大纲：优先用模板预定义 outline_md，跳过 LLM
-        template_outline = tmpl.get_template_outline_md(self.report_type)
-        if template_outline:
-            return template_outline
+        # 法定规程类报告（如可研、建议书等）：优先用模板预定义 outline_md，跳过 LLM 保证法定结构 100% 严谨
+        if self.report_type not in DYNAMIC_OPINION_REPORT_TYPES:
+            template_outline = tmpl.get_template_outline_md(self.report_type)
+            if template_outline:
+                return template_outline
+
+        # 智库决策类专报：必须调用大模型推演具体实质论点，兼顾优雅兜底
+        if self.report_type in DYNAMIC_OPINION_REPORT_TYPES:
+            if not self.llm:
+                return tmpl.get_template_outline_md(self.report_type) or ""
+
+            system = _build_outline_system_prompt(self.report_type, self.total_words)
+            prompt = (
+                f"请为以下智库专报项目生成详细的大纲：\n\n"
+                f"**项目名称**：{report_name}\n\n"
+            )
+            if context and "无相关参考资料" not in context:
+                prompt += f"**参考资料摘要**：\n{context}\n\n"
+            prompt += (
+                f"请严格按照 5 章标准框架输出 Markdown 大纲（一级标题使用 #，二级小节使用 ##）：\n\n"
+                f"{REASONING_CHINESE_DEFENSE_PROMPT}"
+            )
+            try:
+                res = self.llm.chat(prompt, system_prompt=system, temperature=TEMPERATURE_OUTLINE).strip()
+                titles = _extract_chapter_titles(res)
+                if len(titles) == 5:
+                    return res
+                # 若生成的章节数不符合 5 章规范，安全降级回退至预设优质模板
+                template_outline = tmpl.get_template_outline_md(self.report_type)
+                return template_outline or res
+            except Exception:
+                template_outline = tmpl.get_template_outline_md(self.report_type)
+                if template_outline:
+                    return template_outline
+                raise
 
         system = _build_outline_system_prompt(self.report_type, self.total_words)
         report_label = f" [{self.report_type}]" if self.report_type else ""
@@ -94,16 +179,33 @@ class OutlineGenerator:
 
     def generate_stream(self, report_name: str = "", context: str = "", callback=None) -> str:
         """流式大纲生成。callback(chunk_text) 每块回调。"""
-        template_outline = tmpl.get_template_outline_md(self.report_type)
-        if template_outline:
-            import time
-            text = template_outline
-            for i in range(0, len(text), 10):
-                chunk = text[i:i + 10]
-                if callback:
-                    callback(chunk)
-                time.sleep(0.005)
-            return text
+        if self.report_type not in DYNAMIC_OPINION_REPORT_TYPES:
+            template_outline = tmpl.get_template_outline_md(self.report_type)
+            if template_outline:
+                return self._stream_text(template_outline, callback)
+
+        if self.report_type in DYNAMIC_OPINION_REPORT_TYPES:
+            if not self.llm:
+                fallback_text = tmpl.get_template_outline_md(self.report_type) or ""
+                return self._stream_text(fallback_text, callback)
+
+            system = _build_outline_system_prompt(self.report_type, self.total_words)
+            prompt = (
+                f"请为以下智库专报项目生成详细的大纲：\n\n"
+                f"**项目名称**：{report_name}\n\n"
+            )
+            if context and "无相关参考资料" not in context:
+                prompt += f"**参考资料摘要**：\n{context}\n\n"
+            prompt += (
+                f"请严格按照 5 章标准框架输出 Markdown 大纲（一级标题使用 #，二级小节使用 ##）：\n\n"
+                f"{REASONING_CHINESE_DEFENSE_PROMPT}"
+            )
+            try:
+                messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+                return self.llm.chat_stream(messages, temperature=TEMPERATURE_OUTLINE, callback=callback)
+            except Exception:
+                fallback_text = tmpl.get_template_outline_md(self.report_type) or ""
+                return self._stream_text(fallback_text, callback)
 
         system = _build_outline_system_prompt(self.report_type, self.total_words)
         report_label = f" [{self.report_type}]" if self.report_type else ""

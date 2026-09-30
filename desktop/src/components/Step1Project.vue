@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { open } from "@tauri-apps/plugin-dialog";
 import { useAuthStore } from "../stores/auth";
 import { useEngineStore } from "../stores/engine";
 import { useSettingsStore } from "../stores/settings";
@@ -15,6 +14,11 @@ const showNewProjectInput = ref(false);
 const newProjectName = ref("");
 const actionMessage = ref<{ type: "success" | "error" | "info"; text: string } | null>(null);
 const isDragOver = ref(false);
+const browserFileInputRef = ref<HTMLInputElement | null>(null);
+
+function isTauriEnv(): boolean {
+  return typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined";
+}
 
 interface IngestFailure {
   filename: string;
@@ -158,12 +162,74 @@ async function handleSyncGeneric() {
   }
 }
 
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = reader.result as string;
+      const base64 = res.includes(",") ? res.split(",")[1] : res;
+      resolve(base64);
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
+function handleIngestResults(results: any[]) {
+  const failed = results.filter((r) => r.status === "error");
+  if (failed.length > 0) {
+    ingestFailures.value = failed.map((f) => ({
+      filename: f.filename,
+      error: f.error || (f.ext === ".pdf" ? "未检测到可提取文字（纯图片扫描件，需先经 OCR 识别转文字）" : "解析失败或内容为空"),
+      isPdfScan: f.ext === ".pdf" || (f.error?.includes("扫描件") ?? false),
+    }));
+    showMsg(`摄取完成，${failed.length} 份文件无法解析入库，请查看下方排查卡片`, "error");
+  } else {
+    ingestFailures.value = [];
+    showMsg(`成功摄取 ${results.length} 份文件并完成向量化！`);
+  }
+}
+
+async function doUploadBrowserFiles(fileList: FileList | File[]) {
+  if (!projectStore.currentProject) return;
+  const items: { filename: string; content_base64: string }[] = [];
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i];
+    try {
+      const base64 = await readFileAsBase64(file);
+      items.push({ filename: file.name, content_base64: base64 });
+    } catch (e) {
+      showMsg(`读取文件 ${file.name} 失败: ${(e as Error).message}`, "error");
+    }
+  }
+  if (items.length === 0) return;
+
+  try {
+    const results = await projectStore.uploadFiles(engine.baseUrl, items);
+    handleIngestResults(results);
+  } catch (err) {
+    showMsg(`上传解析资料失败: ${(err as Error).message}`, "error");
+  }
+}
+
+async function handleBrowserFileInput(e: Event) {
+  const target = e.target as HTMLInputElement;
+  if (!target.files || target.files.length === 0) return;
+  await doUploadBrowserFiles(target.files);
+  target.value = "";
+}
+
 async function handlePickFiles() {
   if (!projectStore.currentProject) {
     showMsg("请先创建或选择项目", "error");
     return;
   }
+  if (!isTauriEnv()) {
+    browserFileInputRef.value?.click();
+    return;
+  }
   try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({
       multiple: true,
       filters: [
@@ -195,39 +261,29 @@ async function handleDrop(e: DragEvent) {
   const files = e.dataTransfer?.files;
   if (!files || files.length === 0) return;
 
-  const paths: string[] = [];
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    // 在 Tauri 桌面环境下，File 对象上含有 path 属性
-    const fullPath = (f as any).path;
-    if (fullPath) {
-      paths.push(fullPath);
+  if (isTauriEnv()) {
+    const paths: string[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const fullPath = (f as any).path;
+      if (fullPath) {
+        paths.push(fullPath);
+      }
+    }
+    if (paths.length > 0) {
+      await doIngest(paths);
+      return;
     }
   }
 
-  if (paths.length === 0) {
-    showMsg("无法获取拖拽文件的绝对路径，请点击「选择文件」按钮导入", "error");
-    return;
-  }
-
-  await doIngest(paths);
+  // 纯浏览器环境或无本地绝对路径时：直接以 File 流读取 Base64 上传至云端
+  await doUploadBrowserFiles(files);
 }
 
 async function doIngest(paths: string[]) {
   try {
     const results = await projectStore.ingestFiles(engine.baseUrl, paths);
-    const failed = results.filter((r) => r.status === "error");
-    if (failed.length > 0) {
-      ingestFailures.value = failed.map((f) => ({
-        filename: f.filename,
-        error: f.error || (f.ext === ".pdf" ? "未检测到可提取文字（纯图片扫描件，需先经 OCR 识别转文字）" : "解析失败或内容为空"),
-        isPdfScan: f.ext === ".pdf" || (f.error?.includes("扫描件") ?? false),
-      }));
-      showMsg(`摄取完成，${failed.length} 份文件无法解析入库，请查看下方排查卡片`, "error");
-    } else {
-      ingestFailures.value = [];
-      showMsg(`成功摄取 ${results.length} 份文件并完成向量化！`);
-    }
+    handleIngestResults(results);
   } catch (err) {
     showMsg(`摄取资料失败: ${(err as Error).message}`, "error");
   }
@@ -453,6 +509,14 @@ function nextStep() {
               >
                 {{ projectStore.ingesting ? "正在向量化摄取..." : "选择文件" }}
               </button>
+              <input
+                ref="browserFileInputRef"
+                type="file"
+                multiple
+                accept=".docx,.xlsx,.csv,.md,.txt,.pdf"
+                style="display: none"
+                @change="handleBrowserFileInput"
+              />
             </div>
           </div>
 

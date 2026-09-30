@@ -129,7 +129,14 @@ def _count_chapters(outline_md: str) -> int:
         l for l in re.findall(r'^#\s+([^#\n]+)$', outline_md, re.MULTILINE)
         if not (l.strip().startswith("标题（") or l.strip() == "标题" or "（体现核心研判" in l)
     ]
-    return len(h1_matches) or 1
+    if h1_matches:
+        return len(h1_matches)
+    # 防御性降级：匹配公文序号二级标题章
+    h2_matches = re.findall(
+        r'^##\s+((?:第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$',
+        outline_md, re.MULTILINE
+    )
+    return len(h2_matches) or 1
 
 
 def _trim_outline_to_position(outline_md: str, allowed_seqs: list) -> str:
@@ -140,11 +147,24 @@ def _trim_outline_to_position(outline_md: str, allowed_seqs: list) -> str:
     allowed_set = set(allowed_seqs)
     h1_count = 0
 
+    has_h1 = any(
+        re.match(r'^#\s+[^#\n]+$', l.strip()) and not (l.strip().startswith("# 标题（") or l.strip() == "# 标题" or "（体现核心研判" in l)
+        for l in lines
+    )
+
     for line in lines:
         s = line.strip()
-        if re.match(r'^#\s+[^#\n]+$', s):
-            if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
-                continue
+        is_chapter_line = False
+        if has_h1:
+            if re.match(r'^#\s+[^#\n]+$', s):
+                if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
+                    continue
+                is_chapter_line = True
+        else:
+            if re.match(r'^##\s+((?:第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$', s):
+                is_chapter_line = True
+
+        if is_chapter_line:
             h1_count += 1
             current_seq = h1_count
             in_chapter = (current_seq in allowed_set)
@@ -193,6 +213,13 @@ def _extract_chapter_skeleton(outline_md: str, chapter_seq: int) -> str:
                 continue
             h1_indices.append(idx)
 
+    # 防御性降级：若未找到任何一级章（例如公文式大纲全用 '## 一、' 或 '## 【导语】'），匹配二级标题章
+    if not h1_indices:
+        for idx, line in enumerate(lines):
+            s = line.strip()
+            if re.match(r'^##\s+((?:第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$', s):
+                h1_indices.append(idx)
+
     if not (1 <= chapter_seq <= len(h1_indices)):
         return ""
 
@@ -223,23 +250,35 @@ def _parse_outline_hierarchy(outline_md: str, chapter_seq: int) -> dict:
                 continue
             h1_indices.append(idx)
 
+    # 防御性降级：若未找到任何一级章，匹配二级公文序号章
+    if not h1_indices:
+        for idx, line in enumerate(lines):
+            s = line.strip()
+            if re.match(r'^##\s+((?:第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$', s):
+                h1_indices.append(idx)
+
     if not (1 <= chapter_seq <= len(h1_indices)):
         return result
 
     target_start_idx = h1_indices[chapter_seq - 1]
     target_end_idx = h1_indices[chapter_seq] if chapter_seq < len(h1_indices) else len(lines)
 
-    result["chapter_title"] = re.sub(r'^#\s+', '', lines[target_start_idx]).strip()
+    start_line = lines[target_start_idx]
+    is_h2_chapter = start_line.strip().startswith('## ')
+    result["chapter_title"] = re.sub(r'^#{1,2}\s+', '', start_line).strip()
     current_h2 = None
+
+    sec_prefix = r'^###\s+' if is_h2_chapter else r'^##\s+'
+    subsec_prefix = r'^####\s+' if is_h2_chapter else r'^###\s+'
 
     for i in range(target_start_idx + 1, target_end_idx):
         line = lines[i]
-        if re.match(r'^##\s+', line):
-            title = re.sub(r'^##\s+', '', line).strip()
+        if re.match(sec_prefix, line):
+            title = re.sub(sec_prefix, '', line).strip()
             current_h2 = {"title": title, "level": 2, "h3_subsections": []}
             result["h2_sections"].append(current_h2)
-        elif re.match(r'^###\s+', line) and current_h2 is not None:
-            title = re.sub(r'^###\s+', '', line).strip()
+        elif re.match(subsec_prefix, line) and current_h2 is not None:
+            title = re.sub(subsec_prefix, '', line).strip()
             current_h2["h3_subsections"].append({"title": title, "level": 3})
 
     return result
@@ -369,6 +408,7 @@ _SENTENCE_STARTERS = (
     "在", "为", "从", "对", "按", "按照", "根据", "通过", "依托", "围绕", "结合",
     "随着", "面对", "针对", "鉴于", "据", "由", "建议", "应", "需要", "必须", "要",
     "拟", "将", "该", "本", "其", "此", "当前", "目前", "近年来", "未来", "总体",
+    "我国", "国内", "省内", "全国", "行业", "项目",
     "调研表明", "实践表明", "实践证明", "数据显示", "统计显示"
 )
 
@@ -420,7 +460,7 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
                 h = m.group(1).strip()
                 if h:
                     known_headings.append(h)
-                    no_prefix = re.sub(r'^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*', '', h).strip()
+                    no_prefix = re.sub(r'^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*|（[一二三四五六七八九十\d]+）|[一二三四五六七八九十]+[、\.\s])\s*', '', h).strip()
                     if no_prefix:
                         known_headings.append(no_prefix)
         known_headings.sort(key=len, reverse=True)
@@ -460,6 +500,8 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         # 若以 "第X章" 开头（如 "第二章 工程建设方案"），公文序号（如 "三、对策建议"），或附表/附件（如 "附表1 核心指标..."），绝不可拆分为标题与正文
         if re.match(r'^(?:第[一二三四五六七八九十百零\d]+[章节]|附[表录图件]\d+|[一二三四五六七八九十]+[、\.\s])', rest):
             return None
+
+        is_zhiku_section = bool(re.match(r'^（[一二三四五六七八九十\d]+）', num_part) or re.search(r'^（[一二三四五六七八九十\d]+）', rest))
 
         # 6.1 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导 num_part 时生效
         sep_pattern = (
@@ -509,14 +551,19 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
                         elif pos == 0:
                             start_zero_matched = True
                             if best_split is None or not (best_split[4] == 0 and best_split[1] >= end_pos):
-                                best_split = (score, end_pos, rest[:end_pos].strip(), remainder.strip(), pos)
+                                best_split = (score, end_pos, rest[:end_pos].strip(), remainder.strip(), pos, is_starter)
                         elif not start_zero_matched:
                             if best_split is None or score > best_split[0] or (score == best_split[0] and end_pos > best_split[1]):
-                                best_split = (score, end_pos, rest[:end_pos].strip(), remainder.strip(), pos)
+                                best_split = (score, end_pos, rest[:end_pos].strip(), remainder.strip(), pos, is_starter)
                 idx = pos + 1
 
-        if best_split and best_split[0] >= 1:
-            return f"{lead}{num_lead}{best_split[2]}\n\n{best_split[3]}"
+        if best_split:
+            # 若是专报小节标题（带 （一） 公文序号），必须确保 remainder 确实是以正文引导词开头（is_starter 为 True），绝不可仅凭标点就误判腰斩标题！
+            if is_zhiku_section:
+                if best_split[5]:
+                    return f"{lead}{num_lead}{best_split[2]}\n\n{best_split[3]}"
+            elif best_split[0] >= 1:
+                return f"{lead}{num_lead}{best_split[2]}\n\n{best_split[3]}"
 
         # 6.4 检查正文引导词直接切分 (例如：...体系在中央超长期特别国债...)
         for st in _SENTENCE_STARTERS:
@@ -530,11 +577,26 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         # 6.5 超长行熔断 (整行 > 35 字且包含标点，防止整段正文被渲染为粗体 H3 标题)
         if len(rest) > 35 and sentence_punct and 8 <= sentence_punct.start() <= 28:
             p_idx = sentence_punct.start()
-            h_cand = rest[:p_idx].strip()
+            p_char = rest[p_idx]
             b_cand = rest[p_idx+1:].strip()
-            return f"{lead}{num_lead}{h_cand}\n\n{b_cand}"
+            # 专报公文小节标题保护：仅当显式句式标点(:：。)或后方明确是正文引导词开头时才切分，避免切断专报复合短语标题
+            if not is_zhiku_section or p_char in ':：。' or any(b_cand.startswith(s) for s in _SENTENCE_STARTERS):
+                h_cand = rest[:p_idx].strip()
+                return f"{lead}{num_lead}{h_cand}\n\n{b_cand}"
 
         return None
+
+    def _clean_heading_purity(text: str) -> str:
+        s = text.strip()
+        # 清除引号与特殊符号
+        s = re.sub(r'[""\'\'“”‘’]', '', s)
+        s = s.replace('+', '与').replace('＋', '与')
+        # 移除末尾标点
+        s = re.sub(r'[。：:；;！!？?]+$', '', s)
+        # 若包含逗号且总长度 <= 50，清洗逗号为纯中文字符短语（去标点化，满足无标点要求）
+        if re.search(r'[,，]', s) and len(s) <= 50:
+            s = re.sub(r'[,，]', '与', s)
+        return s.strip()
 
     # 分别匹配两类形态：
     # A) 以 Markdown # 开头（后跟可选数字/公文编号）
@@ -542,8 +604,15 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
         r'^(#{1,6})\s+((?:\d+(?:\.\d+)+|\d+[\.、]|\d+\s+|（[一二三四五六七八九十\d]+）|[一二三四五六七八九十]+[、\.\s])\s*)?([^\n]+)$'
     )
     def _repl_md_heading(m):
-        res = _split_heading_body(m.group(1), m.group(2), m.group(3))
-        return res if res else m.group(0)
+        prefix_part = m.group(1)
+        num_p = m.group(2) or ""
+        rest_p = m.group(3)
+        res = _split_heading_body(prefix_part, num_p, rest_p)
+        if res:
+            return res
+        clean_rest = _clean_heading_purity(rest_p)
+        lead = f"{prefix_part} "
+        return f"{lead}{num_p}{clean_rest}".strip()
     cleaned = re.sub(pattern_md_heading, _repl_md_heading, cleaned, flags=re.MULTILINE)
 
     # B) 无 Markdown #，以数字序号或公文序号开头（如 2. xxx、3. xxx、1、xxx、（一）xxx）

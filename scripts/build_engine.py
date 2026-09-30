@@ -137,6 +137,10 @@ def build():
     model_dir = REPO_ROOT / "data" / "fastembed_models"
     if model_dir.exists():
         cmd.extend(["--add-data", f"{model_dir}{sep}data/fastembed_models"])
+    # 添加 Word 报告专属模板包 (若存在)
+    pattern_dir = REPO_ROOT / "pattern"
+    if pattern_dir.exists():
+        cmd.extend(["--add-data", f"{pattern_dir}{sep}pattern"])
     # 入口脚本
     entry_point = REPO_ROOT / "engine" / "entrypoint.py"
     cmd.append(str(entry_point))

@@ -59,8 +59,14 @@ INDICATOR_PATTERNS = [
         "unit_converter": lambda val, unit: float(val.replace(',', '')) * 12 if unit == '年' else float(val.replace(',', ''))
     },
     {
+        "name": "资本金财务内部收益率",
+        "regex": re.compile(r'(?:项目)?资本金(?:财务)?(?:内部收益率|FIRR|IRR)[为是约：:\s]*([\d\.,]+)\s*%', re.I),
+        "standard_unit": "%",
+        "unit_converter": lambda val, unit: float(val.replace(',', ''))
+    },
+    {
         "name": "财务内部收益率",
-        "regex": re.compile(r'(?:项目)?(?:财务内部收益率|内部收益率|全投资内部收益率|IRR)[为是约：:\s]*([\d\.,]+)\s*%', re.I),
+        "regex": re.compile(r'(?:项目投资|全投资|所得税后)?(?:财务内部收益率|内部收益率|FIRR|IRR)[为是约：:\s]*([\d\.,]+)\s*%', re.I),
         "standard_unit": "%",
         "unit_converter": lambda val, unit: float(val.replace(',', ''))
     },
@@ -73,10 +79,43 @@ INDICATOR_PATTERNS = [
 ]
 
 
+def _find_context_and_section(content: str, start: int, end: int) -> Tuple[str, str]:
+    """根据在章节中的位置，查找最近的标题与上下文摘录句子。"""
+    before = content[:start]
+    headings = re.findall(r'^(#{1,4}\s*.+)$', before, re.M)
+    section = headings[-1].strip('# ') if headings else "正文段落"
+
+    # 向前截取约45字，向后截取约45字
+    s_start = max(0, start - 45)
+    s_end = min(len(content), end + 45)
+    snippet = content[s_start:s_end].replace('\n', ' ').strip()
+    return section, f"...{snippet}..."
+
+
+def _determine_occ_tag_and_baseline(param_name: str, snippet: str, section: str) -> Tuple[str, bool]:
+    """判断指标出现的业务上下文属性及是否属于本项目基准方案。"""
+    combined = f"{section} {snippet}"
+    if param_name == "总投资":
+        if re.search(r'(?:储备|谋划|重点项目|产业集群|全县|全省|全市|园区整体|上级资金)[^。！？]*?(?:个以上|[0-9]+个|850)', snippet):
+            return "地方储备库引用", False
+        return "本项目估算", True
+    if "营业收入" in param_name:
+        if any(k in combined for k in ["情景分析", "乐观情景", "悲观情景", "敏感性分析"]):
+            if "乐观" in combined:
+                return "乐观情景测算", False
+            if "悲观" in combined:
+                return "悲观情景测算", False
+            return "敏感性分析", False
+        return "基准方案收入", True
+    if "收益率" in param_name:
+        if any(k in combined for k in ["情景分析", "乐观情景", "悲观情景", "敏感性分析"]):
+            return "情景敏感性测算", False
+        return "基准收益率", True
+    return "正文论述", True
+
+
 def extract_indicators_from_chapters(chapters: Dict[str, str]) -> Dict[str, List[dict]]:
-    """从各章节正文中抽取核心量纲指标及对应数值。
-    返回 { "总投资": [{"seq": 1, "raw_val": "5000", "unit": "万元", "std_val": 5000.0, "match_text": "..."}, ...] }
-    """
+    """从各章节正文中抽取核心量纲指标及对应数值、所在小节与上下文摘要。"""
     results: Dict[str, List[dict]] = {}
 
     for ch_key, content in chapters.items():
@@ -90,21 +129,39 @@ def extract_indicators_from_chapters(chapters: Dict[str, str]) -> Dict[str, List
         for rule in INDICATOR_PATTERNS:
             p_name = rule["name"]
             for m in rule["regex"].finditer(content):
+                # 如果是普通"财务内部收益率"，但前面紧跟着"资本金"，则留给"资本金财务内部收益率"规则匹配
+                if p_name == "财务内部收益率":
+                    prefix = content[max(0, m.start() - 10):m.start()]
+                    if "资本金" in prefix:
+                        continue
+
                 val_str = m.group(1)
                 unit_str = m.group(2) if len(m.groups()) >= 2 else rule["standard_unit"]
                 try:
                     std_val = rule["unit_converter"](val_str, unit_str)
+                    section, context_snip = _find_context_and_section(content, m.start(), m.end())
+                    tag, is_baseline = _determine_occ_tag_and_baseline(p_name, context_snip, section)
+
                     if p_name not in results:
                         results[p_name] = []
-                    # 避免同章节内因重复提及同一指标导致重复计数
-                    already_in_ch = any(x["seq"] == seq and abs(x["std_val"] - std_val) < 0.01 for x in results[p_name])
+
+                    # 避免同章节内因完全相同的指标重复抽取
+                    already_in_ch = any(
+                        x["seq"] == seq and abs(x["std_val"] - std_val) < 0.01 and x.get("tag") == tag
+                        for x in results[p_name]
+                    )
                     if not already_in_ch:
                         results[p_name].append({
                             "seq": seq,
+                            "section": section,
                             "raw_val": val_str,
                             "unit": unit_str,
+                            "display_val": f"{val_str}{unit_str}",
                             "std_val": std_val,
                             "match_text": m.group(0),
+                            "context": context_snip,
+                            "tag": tag,
+                            "is_baseline": is_baseline,
                         })
                 except Exception:
                     pass
@@ -112,32 +169,96 @@ def extract_indicators_from_chapters(chapters: Dict[str, str]) -> Dict[str, List
     return results
 
 
+def _is_approximately_equal(occ1: dict, occ2: dict) -> bool:
+    """判断两个指标数值是否在允许的舍入/量纲精度误差范围内相等。"""
+    v1, v2 = occ1["std_val"], occ2["std_val"]
+    if abs(v1 - v2) < 0.01:
+        return True
+
+    # 1. 检查是否存在因单位转换（如亿元与万元、万㎡与㎡）引起的小数位舍入误差
+    for o_big, o_small in [(occ1, occ2), (occ2, occ1)]:
+        if o_big.get("unit") == "亿元" and o_small.get("unit") == "万元":
+            raw = str(o_big.get("raw_val", "")).replace(',', '').strip()
+            decimals = len(raw.split('.')[1]) if '.' in raw else 0
+            tol = 0.5 * (10 ** (-decimals)) * 10000
+            if abs(v1 - v2) <= tol + 0.01:
+                return True
+        if o_big.get("unit") in ("万平方米", "万㎡") and o_small.get("unit") in ("㎡", "m²", "平方米"):
+            raw = str(o_big.get("raw_val", "")).replace(',', '').strip()
+            decimals = len(raw.split('.')[1]) if '.' in raw else 0
+            tol = 0.5 * (10 ** (-decimals))
+            if abs(v1 - v2) <= tol + 0.0001:
+                return True
+
+    # 2. 通用相对误差容限 1.5%
+    max_v = max(abs(v1), abs(v2))
+    if max_v > 0 and abs(v1 - v2) / max_v <= 0.015:
+        return True
+
+    return False
+
+
 def verify_indicator_consistency(indicators: Dict[str, List[dict]]) -> List[ConsistencyItem]:
-    """跨章节指标自洽性核查：比对不同章节出现同名指标的数值是否一致。"""
+    """跨章节指标自洽性核查：比对不同章节出现同名指标的数值是否一致，生成结构化比对表。"""
     items: List[ConsistencyItem] = []
     item_idx = 1
 
     for param_name, occurrences in indicators.items():
-        # 如果在 2 个及以上章节中出现，比对是否一致
         distinct_chapters = sorted(list(set(x["seq"] for x in occurrences)))
         if len(distinct_chapters) >= 2:
-            # 获取各章的标准值
-            ch_values = {}
-            for occ in occurrences:
-                ch_values[occ["seq"]] = occ
+            # 区分基准方案数值与参考/宏观引用数值
+            baseline_occs = [x for x in occurrences if x.get("is_baseline", True)]
+            ref_occs = [x for x in occurrences if not x.get("is_baseline", True)]
 
-            val_list = [occ["std_val"] for occ in occurrences]
-            min_val = min(val_list)
-            max_val = max(val_list)
+            # 聚类：针对基准数据进行近似等价值判定
+            target_occs = baseline_occs if baseline_occs else occurrences
+            clusters: List[List[dict]] = []
+            for occ in target_occs:
+                matched_cluster = None
+                for c in clusters:
+                    if _is_approximately_equal(occ, c[0]):
+                        matched_cluster = c
+                        break
+                if matched_cluster is not None:
+                    matched_cluster.append(occ)
+                else:
+                    clusters.append([occ])
 
-            # 允许 0.1% 内的微小浮点误差
-            if abs(max_val - min_val) > 0.01 and (max_val - min_val) / (max_val or 1.0) > 0.001:
-                # 存在数值冲突！
-                desc_parts = []
-                for seq in distinct_chapters:
-                    occ = ch_values[seq]
-                    desc_parts.append(f"第 {seq} 章提及为 {occ['raw_val']}{occ['unit']}")
-                conflict_desc = "，但".join(desc_parts)
+            # 生成全景比对表数据（供前端以表格直观呈现）
+            comparison_table = [
+                {
+                    "chapter": occ["seq"],
+                    "chapter_label": f"第 {occ['seq']} 章",
+                    "section": occ.get("section", f"第 {occ['seq']} 章"),
+                    "value": occ.get("display_val", f"{occ['raw_val']}{occ['unit']}"),
+                    "context": occ.get("context", occ.get("match_text", "")),
+                    "tag": occ.get("tag", "正文论述"),
+                    "is_baseline": occ.get("is_baseline", True)
+                }
+                for occ in occurrences
+            ]
+
+            if len(clusters) > 1:
+                # 确实存在基准数值冲突！
+                cluster_descs = []
+                for c in clusters:
+                    chs = sorted(list(set(x["seq"] for x in c)))
+                    chs_str = "、".join(f"第 {s} 章" for s in chs)
+                    unique_reprs = []
+                    for occ in c:
+                        r = f"{occ['raw_val']}{occ['unit']}"
+                        if r not in unique_reprs:
+                            unique_reprs.append(r)
+                    cluster_descs.append(f"{chs_str}提及为 {' / '.join(unique_reprs)}")
+
+                conflict_desc = "，但".join(cluster_descs)
+                all_affected = sorted(list(set(x["seq"] for x in target_occs)))
+
+                desc_text = (
+                    f"全书关于本项目「{param_name}」的基准数值存在跨章节矛盾：\n"
+                    f"检测到 {conflict_desc}。\n"
+                    f"前后数据不一致会导致评审专家质疑报告真实性与自洽性，各章节具体出处与上下文详见下方比对表。"
+                )
 
                 items.append(ConsistencyItem(
                     id=f"IND-CONFLICT-{item_idx}",
@@ -145,30 +266,65 @@ def verify_indicator_consistency(indicators: Dict[str, List[dict]]) -> List[Cons
                     status="conflict",
                     severity="critical" if param_name in ("总投资", "建设用地") else "high",
                     title=f"核心指标「{param_name}」在跨章节间存在数值矛盾",
-                    description=f"检测到 {conflict_desc}。前后数据不一致会导致评审专家质疑报告真实性与自洽性。",
-                    affected_chapters=distinct_chapters,
-                    suggestion=f"请核实是否在人工修改了第 {distinct_chapters[-1]} 章后，未同步修正第 {distinct_chapters[0]} 章总论概述中的对应数值，建议全篇统一为权威估算值。",
-                    details={"param": param_name, "occurrences": occurrences}
+                    description=desc_text,
+                    affected_chapters=all_affected,
+                    suggestion=f"请核实是否在人工修改了第 {all_affected[-1]} 章后，未同步修正第 {all_affected[0]} 章总论概述中的对应数值，建议全篇统一为权威估算值。",
+                    details={
+                        "param": param_name,
+                        "occurrences": occurrences,
+                        "table": comparison_table
+                    }
                 ))
             else:
-                # 全篇高度一致！
-                first_occ = occurrences[0]
-                chs_str = "、".join(f"第 {s} 章" for s in distinct_chapters)
+                # 全篇基准数值高度一致！
+                first_cluster = clusters[0]
+                base_chs = sorted(list(set(x["seq"] for x in first_cluster)))
+                chs_str = "、".join(f"第 {s} 章" for s in base_chs)
+                unique_reprs = []
+                for occ in first_cluster:
+                    r = f"{occ['raw_val']}{occ['unit']}"
+                    if r not in unique_reprs:
+                        unique_reprs.append(r)
+                repr_str = "（与 " + " / ".join(unique_reprs[1:]) + " 相互呼应）" if len(unique_reprs) > 1 else ""
+
+                if ref_occs:
+                    ref_tags = sorted(list(set(x.get("tag", "参考数据") for x in ref_occs)))
+                    desc_text = (
+                        f"{chs_str}提及的本项目「{param_name}」基准数值高度自洽，均为 {unique_reprs[0]}{repr_str}。\n"
+                        f"正文中出现的其他数值（涉及 {', '.join(ref_tags)}）已在下方表格中分类标明并完成上下文溯源。"
+                    )
+                else:
+                    desc_text = f"{chs_str}提及的「{param_name}」均为 {unique_reprs[0]}{repr_str}，前后逻辑严密吻合。"
+
                 items.append(ConsistencyItem(
                     id=f"IND-PASS-{item_idx}",
                     type="indicator",
                     status="pass",
                     severity="low",
                     title=f"核心指标「{param_name}」全篇数值高度自洽",
-                    description=f"{chs_str}提及的「{param_name}」均为 {first_occ['raw_val']}{first_occ['unit']}，前后逻辑严密吻合。",
-                    affected_chapters=distinct_chapters,
+                    description=desc_text,
+                    affected_chapters=base_chs,
                     suggestion="",
-                    details={"param": param_name, "occurrences": occurrences}
+                    details={
+                        "param": param_name,
+                        "occurrences": occurrences,
+                        "table": comparison_table
+                    }
                 ))
             item_idx += 1
         elif len(distinct_chapters) == 1:
-            # 仅在单章出现的关键指标，给予提示
             occ = occurrences[0]
+            comparison_table = [
+                {
+                    "chapter": occ["seq"],
+                    "chapter_label": f"第 {occ['seq']} 章",
+                    "section": occ.get("section", f"第 {occ['seq']} 章"),
+                    "value": occ.get("display_val", f"{occ['raw_val']}{occ['unit']}"),
+                    "context": occ.get("context", occ.get("match_text", "")),
+                    "tag": occ.get("tag", "正文论述"),
+                    "is_baseline": occ.get("is_baseline", True)
+                }
+            ]
             items.append(ConsistencyItem(
                 id=f"IND-INFO-{item_idx}",
                 type="indicator",
@@ -177,7 +333,12 @@ def verify_indicator_consistency(indicators: Dict[str, List[dict]]) -> List[Cons
                 title=f"关键指标「{param_name}」已明确论述",
                 description=f"在第 {occ['seq']} 章明确界定「{param_name}」为 {occ['raw_val']}{occ['unit']}。",
                 affected_chapters=[occ["seq"]],
-                suggestion=""
+                suggestion="",
+                details={
+                    "param": param_name,
+                    "occurrences": occurrences,
+                    "table": comparison_table
+                }
             ))
             item_idx += 1
 

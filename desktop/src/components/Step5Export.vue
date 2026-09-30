@@ -556,21 +556,68 @@ async function handleDownloadExport(filePath?: string) {
                 <div v-if="item.suggestion" class="vitem-sug">
                   💡 <strong>修改建议：</strong>{{ item.suggestion }}
                 </div>
-              </div>
 
-              <!-- 涉及章节与快速定位按钮 -->
-              <div v-if="item.affected_chapters && item.affected_chapters.length > 0" class="vitem-actions">
-                <span class="vitem-chs-label">涉及章节：</span>
-                <div class="vitem-chs-btns">
-                  <button
-                    v-for="chSeq in item.affected_chapters"
-                    :key="chSeq"
-                    class="btn btn-outline btn-xs"
-                    @click="jumpToChapter(chSeq)"
-                    title="点击立即跳转至步骤 4 对应章节进行修改"
-                  >
-                    📍 定位第 {{ chSeq }} 章修改
-                  </button>
+                <!-- 指标跨章节上下文与出处对照表（表格展示） -->
+                <div
+                  v-if="item.details?.occurrences && item.details.occurrences.length > 0"
+                  class="vitem-table-container"
+                >
+                  <div class="vitem-table-header">
+                    <span class="vitem-table-title">📊 跨章节出现位置与上下文对照</span>
+                    <span class="vitem-table-count">共检测到 {{ item.details.occurrences.length }} 处表述</span>
+                  </div>
+                  <div class="vitem-table-scroll">
+                    <table class="vitem-compare-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 24%">章节与小节</th>
+                          <th style="width: 16%">提取数值</th>
+                          <th style="width: 18%">业务属性</th>
+                          <th>上下文原句摘录</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="(occ, oIdx) in item.details.occurrences"
+                          :key="oIdx"
+                          :class="{ 'row-ref': occ.is_baseline === false }"
+                        >
+                          <td class="col-section">
+                            <span class="ch-badge">第 {{ occ.seq }} 章</span>
+                            <span class="sec-name" :title="occ.section">{{ occ.section }}</span>
+                          </td>
+                          <td class="col-value">
+                            <span
+                              class="val-chip"
+                              :class="{
+                                'val-chip-baseline': occ.is_baseline !== false,
+                                'val-chip-ref': occ.is_baseline === false,
+                                'val-chip-conflict': item.status === 'conflict' && occ.is_baseline !== false
+                              }"
+                            >
+                              {{ occ.display_val || (occ.raw_val + occ.unit) }}
+                            </span>
+                          </td>
+                          <td class="col-tag">
+                            <span
+                              class="tag-badge"
+                              :class="{
+                                'tag-baseline': occ.is_baseline !== false,
+                                'tag-ref': occ.is_baseline === false
+                              }"
+                            >
+                              {{ occ.tag || (occ.is_baseline !== false ? '本项目基准' : '参考引用') }}
+                            </span>
+                          </td>
+                          <td class="col-context">
+                            <div class="context-snippet" :title="occ.context">
+                              {{ occ.context }}
+                            </div>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1514,7 +1561,8 @@ async function handleDownloadExport(filePath?: string) {
 
 .vitem-desc {
   color: #334155;
-  line-height: 1.5;
+  line-height: 1.6;
+  white-space: pre-line;
 }
 
 .vitem-sug {
@@ -1525,31 +1573,156 @@ async function handleDownloadExport(filePath?: string) {
   color: #78350f;
   font-size: 12px;
   line-height: 1.45;
+  margin-top: 4px;
 }
 
-.vitem-actions {
+/* 跨章节指标上下文对照表格 */
+.vitem-table-container {
+  margin-top: 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.vitem-table-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-  padding-top: 6px;
-  border-top: 1px dashed rgba(0, 0, 0, 0.08);
+  padding: 6px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
 }
 
-.vitem-chs-label {
+.vitem-table-title {
   font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.vitem-table-count {
+  font-size: 11px;
   color: #64748b;
 }
 
-.vitem-chs-btns {
-  display: flex;
-  gap: 6px;
+.vitem-table-scroll {
+  max-height: 260px;
+  overflow-y: auto;
 }
 
-.btn-xs {
-  padding: 2px 8px;
+.vitem-compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+
+.vitem-compare-table th {
+  background: #f1f5f9;
+  color: #475569;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e2e8f0;
   font-size: 11.5px;
+}
+
+.vitem-compare-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.vitem-compare-table tr:last-child td {
+  border-bottom: none;
+}
+
+.vitem-compare-table tr:hover td {
+  background: #f8fafc;
+}
+
+.vitem-compare-table tr.row-ref td {
+  background: #fbfbfb;
+}
+
+.col-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ch-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 1px 6px;
+  border-radius: 3px;
+  width: fit-content;
+}
+
+.sec-name {
+  font-size: 11.5px;
+  color: #1e293b;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.val-chip {
+  display: inline-block;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  padding: 2px 7px;
   border-radius: 4px;
+}
+
+.val-chip-baseline {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.val-chip-conflict {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.val-chip-ref {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.tag-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.tag-baseline {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.tag-ref {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px dashed #cbd5e1;
+}
+
+.context-snippet {
+  font-size: 11.5px;
+  color: #475569;
+  line-height: 1.45;
+  word-break: break-all;
 }
 
 /* Modal */

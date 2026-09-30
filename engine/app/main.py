@@ -43,6 +43,31 @@ def health():
     return {"status": "ok", "host": settings.host}
 
 
+# ── 静态 Web 资源托管（支持云端单端口一键托管浏览器界面）──
+import os
+from pathlib import Path
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+_web_dist_candidates = [
+    Path(__file__).resolve().parents[2] / "desktop" / "dist",
+    Path(__file__).resolve().parents[2] / "web_dist",
+    Path("desktop/dist"),
+    Path("web_dist"),
+]
+_web_dist = next((p for p in _web_dist_candidates if p.is_dir() and (p / "index.html").is_file()), None)
+if _web_dist:
+    if (_web_dist / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_web_dist / "assets")), name="assets")
+
+    @app.get("/")
+    @app.get("/index.html")
+    def serve_index():
+        """提供 Web 前端单页应用入口。"""
+        return FileResponse(str(_web_dist / "index.html"))
+
+
+
 def main() -> None:
     """启动服务。"""
     import argparse

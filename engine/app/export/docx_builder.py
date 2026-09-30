@@ -392,20 +392,27 @@ def _setup_body_section(doc: Document, header_title: str):
 
 
 def _find_pattern_template(report_type: str = "") -> Path | None:
-    """在项目根目录 pattern/ 下查找对应报告类型的 Word 模板文件。"""
+    """查找对应报告类型的 Word 模板文件（支持便携解压目录、PyInstaller 解压包与源码目录）。"""
     if not report_type:
         return None
-    root_dir = Path(__file__).resolve().parents[3]
-    pattern_dir = root_dir / "pattern"
-    if not pattern_dir.is_dir():
-        return None
+    candidate_dirs = []
+    if hasattr(sys, "executable"):
+        candidate_dirs.append(Path(sys.executable).parent / "pattern")
+    if hasattr(sys, "_MEIPASS"):
+        candidate_dirs.append(Path(sys._MEIPASS) / "pattern")
+    candidate_dirs.append(Path(__file__).resolve().parents[3] / "pattern")
+
     safe_name = report_type.replace("/", "_").strip()
-    candidate = pattern_dir / f"{safe_name}.docx"
-    if candidate.is_file():
-        return candidate
-    candidate_raw = pattern_dir / f"{report_type.strip()}.docx"
-    if candidate_raw.is_file():
-        return candidate_raw
+    raw_name = report_type.strip()
+
+    for p_dir in candidate_dirs:
+        if p_dir.is_dir():
+            candidate = p_dir / f"{safe_name}.docx"
+            if candidate.is_file():
+                return candidate
+            candidate_raw = p_dir / f"{raw_name}.docx"
+            if candidate_raw.is_file():
+                return candidate_raw
     return None
 
 
@@ -453,7 +460,7 @@ def md_to_docx(
                 h = m.group(1).strip()
                 if h:
                     known_headings.append(h)
-                    no_prefix = re.sub(r'^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*)\s*', '', h).strip()
+                    no_prefix = re.sub(r'^(?:第[一二三四五六七八九十百零\d]+章|\d+(?:\.\d+)*|（[一二三四五六七八九十\d]+）|[一二三四五六七八九十]+[、\.\s])\s*', '', h).strip()
                     if no_prefix:
                         known_headings.append(no_prefix)
         known_headings.sort(key=len, reverse=True)
@@ -1311,10 +1318,20 @@ def _parse_inline_formatting(text: str) -> list:
 _BODY_STARTERS = (
     "本项目", "项目", "本工程", "工程", "本报告",
     "从宏观", "从中观", "从微观", "从区域", "从空间", "从规划", "从技术", "从经济", "从环境",
-    "截至", "目前", "当前", "根据", "按照", "依据", "随着", "调查", "结合", "经", "为",
+    "截至", "目前", "当前", "根据", "按照", "依据", "随着",
+    "经调查", "经核实", "经核算", "经评估", "经核查", "经分析", "经测算",
+    "为贯彻", "为落实", "为推进", "为进一步", "为了",
     "在宏观", "在中观", "在微观", "在产业", "在规划", "在政策", "在土地", "在资源", "在生态", "在环境", "在就业", "在市场", "在乡村", "在绿色",
     "国内", "省内", "县域"
 )
+
+
+def _clean_heading_text(text: str) -> str:
+    """清理标题文字中的引号与特殊字符（保留句式终结符供句法判定）"""
+    s = text.strip()
+    s = re.sub(r'[""\'\'“”‘’]', '', s)
+    s = s.replace('+', '与').replace('＋', '与')
+    return s.strip()
 
 
 def _split_heading_and_body(heading_text: str, known_headings: list = None) -> tuple:
@@ -1326,35 +1343,37 @@ def _split_heading_and_body(heading_text: str, known_headings: list = None) -> t
     if not text:
         return "", ""
 
+    text = _clean_heading_text(text)
+
     # 1. 优先根据已知大纲标题库高精度匹配
     if known_headings:
         for kh in known_headings:
             if not kh or not isinstance(kh, str):
                 continue
-            kh_escaped = re.escape(kh)
-            m = re.match(rf'^((?:\d+(?:\.\d+)*\s+)?{kh_escaped})\s*([:：，。—\-\s]*)(.*)$', text)
+            kh_clean = _clean_heading_text(kh)
+            kh_escaped = re.escape(kh_clean)
+            m = re.match(rf'^((?:\d+(?:\.\d+)*\s+|（[一二三四五六七八九十\d]+）\s*|[一二三四五六七八九十]+[、\.\s]\s*)?{kh_escaped})\s*([:：，。—\-\s]*)(.*)$', text)
             if m:
                 h_part = m.group(1).strip()
                 rest = m.group(3).strip()
-                if rest:
+                # 仅当 rest 明确具备正文起始特征（以正文引导词开头、包含句号、或长度 > 25 且包含标点）时才拆分
+                if rest and (any(rest.startswith(s) for s in _BODY_STARTERS) or "。" in rest or len(rest) > 25):
                     return h_part, rest
+                elif not rest:
+                    return h_part, ""
 
-    # 2. 若长度 <= 35 且不包含句子标点，判定为纯标题
-    if len(text) <= 35 and not re.search(r'[，。；！？]', text):
-        return text, ""
-
-    # 3. 启发式防御：基于多级数字编号及标点/正文首句特征解耦
-    num_m = re.match(r'^(\d+(?:\.\d+)*\s+)?(.*)$', text)
+    # 2. 检查多级编号与正文引导词解耦
+    num_m = re.match(r'^((?:\d+(?:\.\d+)*|（[一二三四五六七八九十\d]+）|[一二三四五六七八九十]+[、\.\s])\s*)?(.*)$', text)
     if num_m:
         num_prefix = num_m.group(1) or ""
         rest_title = num_m.group(2).strip()
 
-        # 3.1 若有冒号/句号/破折号
-        p_split = re.split(r'[:：。—\-]\s*', rest_title, maxsplit=1)
+        # 2.1 冒号/破折号明确分隔
+        p_split = re.split(r'[:：—\-]\s*', rest_title, maxsplit=1)
         if len(p_split) == 2 and 2 <= len(p_split[0]) <= 30:
             return f"{num_prefix}{p_split[0]}".strip(), p_split[1].strip()
 
-        # 3.2 若包含正文起始主体词
+        # 2.2 若包含正文起始主体词（如 本项目、目前、当前、根据、经调查 等）
         for starter in _BODY_STARTERS:
             idx = rest_title.find(starter)
             if 2 <= idx <= 30:
@@ -1362,12 +1381,27 @@ def _split_heading_and_body(heading_text: str, known_headings: list = None) -> t
                 b = rest_title[idx:].strip()
                 return f"{num_prefix}{h}".strip(), b
 
-        # 3.3 截断至首个逗号前（若逗号前在合理标题长度内）
+    # 3. 若长度 <= 40 且不包含句子标点，判定为纯标题
+    if len(text) <= 40 and not re.search(r'[，。；！？]', text):
+        return text, ""
+
+    # 4. 若有句号切分
+    if num_m:
+        p_split = re.split(r'。\s*', rest_title, maxsplit=1)
+        if len(p_split) == 2 and 2 <= len(p_split[0]) <= 30:
+            return f"{num_prefix}{p_split[0]}".strip(), p_split[1].strip()
+
+    # 5. 若有逗号：仅在逗号后明显是正文起始时才拆分；若无正文起始特征，清洗为纯中文字符短语
+    if num_m:
         comma_idx = rest_title.find("，")
         if comma_idx != -1 and 2 <= comma_idx <= 25:
-            return f"{num_prefix}{rest_title[:comma_idx]}".strip(), rest_title[comma_idx + 1:].strip()
+            b_cand = rest_title[comma_idx + 1:].strip()
+            if any(b_cand.startswith(s) for s in _BODY_STARTERS) or "。" in b_cand or len(b_cand) > 30:
+                return f"{num_prefix}{rest_title[:comma_idx]}".strip(), b_cand
 
-    return text, ""
+    # 若未发生正文切分，清理标题内逗号为纯中文短语（去标点化）
+    clean_text = re.sub(r'[,，]', '与', text)
+    return clean_text, ""
 
 
 def _parse_md_line(line: str):

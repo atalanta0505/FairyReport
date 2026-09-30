@@ -14,6 +14,25 @@ export const useEngineStore = defineStore("engine", () => {
   async function start() {
     const settings = useSettingsStore();
 
+    // 0. 浏览器环境自适应：若在纯 Web 环境（非 Tauri）中访问，优先探测当前同源后端地址
+    if (
+      typeof (globalThis as any).__TAURI_INTERNALS__ === "undefined" &&
+      typeof window !== "undefined" &&
+      window.location &&
+      (window.location.protocol === "http:" || window.location.protocol === "https:")
+    ) {
+      const currentOrigin = window.location.origin;
+      try {
+        await pollHealth(currentOrigin, { maxAttempts: 2, sleep: () => Promise.resolve() });
+        baseUrl.value = currentOrigin;
+        status.value = "healthy";
+        isRemote.value = true;
+        return;
+      } catch {
+        // 同源地址未提供 /health（可能为独立的 vite dev 前端开发服务），继续向下探测
+      }
+    }
+
     // 1. 若已配置云端引擎地址，优先直连云端，跳过本地 Python 启动
     if (settings.engineUrl && settings.engineUrl.trim()) {
       status.value = "starting";

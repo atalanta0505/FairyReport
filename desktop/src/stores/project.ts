@@ -691,6 +691,32 @@ export const useProjectStore = defineStore("project", () => {
     }
   }
 
+  async function uploadFiles(
+    baseUrl: string,
+    items: engineApi.UploadFileItem[],
+    projectName?: string,
+  ): Promise<IngestResult[]> {
+    const targetName = projectName || currentProject.value?.name;
+    if (!baseUrl || !targetName) {
+      throw new Error("请先选择项目");
+    }
+    if (!items || items.length === 0) {
+      return [];
+    }
+    ingesting.value = true;
+    error.value = null;
+    try {
+      const results = await engineApi.uploadMaterials(baseUrl, targetName, items);
+      await loadMaterials(baseUrl, targetName);
+      return results;
+    } catch (e) {
+      error.value = (e as Error).message;
+      throw e;
+    } finally {
+      ingesting.value = false;
+    }
+  }
+
   async function deleteMaterial(
     baseUrl: string,
     sourceId: string,
@@ -2325,6 +2351,7 @@ export const useProjectStore = defineStore("project", () => {
     deleteProject,
     loadMaterials,
     ingestFiles,
+    uploadFiles,
     scanMaterials,
     openProjectDir,
     deleteMaterial,

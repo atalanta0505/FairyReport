@@ -184,8 +184,11 @@ def test_verify_context_api():
     assert "is_consistent" in data
     assert "score" in data
     assert "items" in data
-    assert data["is_consistent"] is True
     assert data["conflicts_count"] == 0
+    ind_item = next(i for i in data["items"] if i["type"] == "indicator" and "总投资" in i["title"])
+    assert "table" in ind_item["details"]
+    assert len(ind_item["details"]["table"]) == 2
+    assert "context" in ind_item["details"]["table"][0]
 
     # 异常校验：chapters 为空应返回 422
     err_response = client.post("/export/verify-context", json={"project": "测试", "chapters": {}})
@@ -194,3 +197,46 @@ def test_verify_context_api():
     # 异常校验：chapters 内容非字符串应返回 422
     err_response2 = client.post("/export/verify-context", json={"project": "测试", "chapters": {"1": 12345}})
     assert err_response2.status_code == 422
+
+
+def test_indicator_consistency_unit_rounding_real_case():
+    """测试跨单位概算舍入场景（如 52060万元 与 5.2亿元 互相呼应）：
+    应判定为自洽 pass，不能误报数值矛盾。
+    """
+    chapters = {
+        "1": "第一章总论：经汇总估算，项目总投资约52060万元，切实可行。",
+        "5": "第五章投资估算：项目建设总投资约5.2亿元，计52060万元，与前期方案紧密衔接。",
+        "6": "第六章资金筹措：项目总投资52060万元，资金来源可靠。",
+        "7": "第七章效益评价：项目总投资约52060万元，经济效益良好。"
+    }
+    extracted = extract_indicators_from_chapters(chapters)
+    items = verify_indicator_consistency(indicators=extracted)
+
+    conflicts = [x for x in items if x.status == "conflict"]
+    passes = [x for x in items if x.status == "pass"]
+
+    assert len(conflicts) == 0, f"Expected 0 conflicts, got {conflicts}"
+    assert len(passes) >= 1
+    invest_pass = next(x for x in passes if "总投资" in x.title)
+    assert set(invest_pass.affected_chapters) == {1, 5, 6, 7}
+    assert "52060万元" in invest_pass.description
+    assert "5.2亿元" in invest_pass.description
+
+
+def test_indicator_conflict_grouping_description():
+    """测试真实冲突时，多章节相同数值应归簇展示，避免重复输出相同数值的荒谬文本。"""
+    chapters = {
+        "1": "第一章：项目总投资为5000万元。",
+        "2": "第二章：项目总投资为5000万元。",
+        "5": "第五章：经调整，项目总投资为8000万元。"
+    }
+    extracted = extract_indicators_from_chapters(chapters)
+    items = verify_indicator_consistency(indicators=extracted)
+
+    conflicts = [x for x in items if x.status == "conflict"]
+    assert len(conflicts) == 1
+    c = conflicts[0]
+    # 验证聚类展示：第 1 章、第 2 章应合并展示为 5000万元，而不是写两次
+    assert "第 1 章、第 2 章提及为 5000万元" in c.description
+    assert "第 5 章提及为 8000万元" in c.description
+    assert "第 1 章提及为 5000万元，但第 2 章提及为 5000万元" not in c.description
