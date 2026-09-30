@@ -180,6 +180,11 @@ class OpenExportFolderRequest(BaseModel):
 def open_export_folder_endpoint(req: OpenExportFolderRequest = None):
     """在系统资源管理器中打开导出成果文件夹（若传入 path 则直接定位并高亮选中该文件）。"""
     exports_dir = _exports_dir()
+
+    # 测试/无头环境保护：防止测试套件或无人值守环境意外唤起真实资源管理器窗口
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("FAIRYREPORT_NO_SHELL_OPEN"):
+        return {"path": exports_dir, "skipped": True}
+
     target_path = req.path.strip() if req and req.path else ""
 
     if target_path and os.path.exists(target_path):

@@ -262,13 +262,21 @@ def test_export_md_success(client):
     assert "# 参考文献" in content
     assert "GB/T 7714" in content
 def test_export_open_folder(client):
-    """验证 /export/open-folder 能够正常返回 exports 目录路径。"""
-    resp = client.post("/export/open-folder", json={})
+    """验证 /export/open-folder 能正确返回 exports 目录路径，
+    且测试环境绝不唤起真实资源管理器窗口（双保险：端点无头保护 + 系统调用 mock）。"""
+    from unittest.mock import patch
+
+    with patch("os.startfile", create=True) as mock_startfile, \
+         patch("subprocess.Popen") as mock_popen:
+        resp = client.post("/export/open-folder", json={})
     assert resp.status_code == 200
     data = resp.json()
     assert "path" in data
     assert os.path.exists(data["path"])
     assert "exports" in data["path"].lower()
+    # pytest 环境下端点必须走无头保护，且不得触发任何系统级打开动作
+    assert data.get("skipped") is True
+    assert not mock_startfile.called and not mock_popen.called
 
 
 def test_dense_heading_separation():
