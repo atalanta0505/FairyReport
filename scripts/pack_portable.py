@@ -28,10 +28,12 @@ def main():
         os.path.join(target_release, "fairyreport-desktop.exe"),
         os.path.join(stage_dir, "FairyReport.exe")
     )
-    shutil.copy2(
-        os.path.join(target_release, "fairyreport_desktop_lib.dll"),
-        os.path.join(stage_dir, "fairyreport_desktop_lib.dll")
-    )
+    # cdylib 只在部分目标上生成，Windows 桌面运行不需要它：有就拷，没有就跳过
+    lib_dll = os.path.join(target_release, "fairyreport_desktop_lib.dll")
+    if os.path.exists(lib_dll):
+        shutil.copy2(lib_dll, os.path.join(stage_dir, "fairyreport_desktop_lib.dll"))
+    else:
+        print("  提示：未找到 fairyreport_desktop_lib.dll（Windows 运行不需要），已跳过")
     shutil.copy2(
         os.path.join(target_release, "fairyreport-engine.exe"),
         os.path.join(stage_dir, "fairyreport-engine.exe")
