@@ -58,7 +58,7 @@ def cover(doc: Document, subtitle: str):
     p_org.paragraph_format.space_before = Pt(36)
     p_org.paragraph_format.space_after = Pt(4)
     p_org.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    format_run(p_org.add_run("现代工程设计咨询研究院  ·  智能技术创新中心"),
+    format_run(p_org.add_run("智能报告编制应用"),
                font_name="Arial", east_asia="黑体", font_size=Pt(11), bold=True, color=COLOR_MUTED)
 
     p_line = doc.add_paragraph()

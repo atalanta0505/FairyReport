@@ -2,6 +2,7 @@
 FairyReport 快速上手操作指南 — 出版级 Word (.docx) 排版与导出工具
 """
 
+import json
 import os
 import re
 from pathlib import Path
@@ -13,7 +14,13 @@ from docx.enum.section import WD_SECTION
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 
-REPO_ROOT = Path(r"D:\Repo\FairyReport_lite")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def app_version() -> str:
+    """版本号唯一来源：desktop/package.json。"""
+    with open(REPO_ROOT / "desktop" / "package.json", encoding="utf-8") as fh:
+        return json.load(fh)["version"]
 DOCS_DIR = REPO_ROOT / "docs"
 IMAGES_DIR = DOCS_DIR / "images"
 OUTPUT_DOCX_DOCS = DOCS_DIR / "FairyReport_快速上手操作指南.docx"
@@ -76,7 +83,7 @@ def create_cover_page(doc: Document):
     p_org.paragraph_format.space_before = Pt(36)
     p_org.paragraph_format.space_after = Pt(4)
     p_org.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r_org = p_org.add_run("现代工程设计咨询研究院  ·  智能技术创新中心")
+    r_org = p_org.add_run("智能报告编制应用")
     format_run(r_org, font_name="Arial", east_asia="黑体", font_size=Pt(11), bold=True, color=COLOR_MUTED)
 
     # 细横线
@@ -114,6 +121,11 @@ def create_cover_page(doc: Document):
     p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r_sub = p_sub.add_run("快速上手操作指南")
     format_run(r_sub, font_name="Times New Roman", east_asia="黑体", font_size=Pt(18), bold=True, color=COLOR_PRIMARY)
+
+    p_ver = doc.add_paragraph()
+    p_ver.paragraph_format.first_line_indent = Pt(0)
+    p_ver.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    format_run(p_ver.add_run(f"版本 {app_version()}"), font_size=Pt(11), color=COLOR_MUTED)
 
     # 5. 特性亮点卡片 (1行4列表格)
     features_table = doc.add_table(rows=1, cols=4)
@@ -168,7 +180,7 @@ def create_cover_page(doc: Document):
 
     # 7. 底部元数据信息
     meta_info = [
-        ("适用版本", "FairyReport v1.5.0 正式版"),
+        ("适用版本", f"FairyReport v{app_version()} 正式版"),
         ("受众定位", "零技术背景业务人员 · 投资与工程咨询规划师"),
         ("配图说明", "系统真实操作界面截屏"),
         ("交付标准", "出版级公文排版 · 行业现行工程咨询规范"),
@@ -262,7 +274,7 @@ def init_body_section(doc: Document):
     p_hdr = header.paragraphs[0]
     p_hdr.paragraph_format.first_line_indent = Pt(0)
     p_hdr.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    r_hdr = p_hdr.add_run("FairyReport 智能报告编制应用 · 快速上手操作指南 (v1.5.0)")
+    r_hdr = p_hdr.add_run(f"FairyReport 智能报告编制应用 · 快速上手操作指南 (v{app_version()})")
     format_run(r_hdr, font_name="Times New Roman", east_asia="仿宋", font_size=Pt(9), color=COLOR_MUTED)
 
     # 页眉下划线

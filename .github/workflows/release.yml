@@ -59,6 +59,9 @@ jobs:
       - name: Build Tauri application
         run: npm --prefix desktop run tauri build
 
+      - name: Check guides match current version
+        run: python scripts/check_guides.py
+
       - name: Export guide docx from Markdown
         run: |
           python scripts/export_beginner_guide_docx.py
