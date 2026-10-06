@@ -1,0 +1,74 @@
+{
+    "task":  "V2-T50",
+    "script":  "scripts/verify.ps1",
+    "mode":  "full",
+    "selected":  [
+                     "unit-desktop",
+                     "typecheck",
+                     "build",
+                     "unit-engine",
+                     "rust-check"
+                 ],
+    "startedAt":  "2026-10-06T14:58:56",
+    "finishedAt":  "2026-10-06T15:00:18",
+    "git":  {
+                "headBefore":  "ef5a19236258cbb86ceb5c4b739f58fdafa1642c",
+                "headAfter":  "ef5a19236258cbb86ceb5c4b739f58fdafa1642c",
+                "statusBefore":  "M AGENTS.md\r\n M docs/dev-flow/PROCESS.md\r\n?? docs/dev-flow/tasks/V2-T50/\r\n?? scripts/verify.ps1",
+                "statusAfter":  "M AGENTS.md\r\n M docs/dev-flow/PROCESS.md\r\n?? docs/dev-flow/tasks/V2-T50/\r\n?? scripts/verify.ps1",
+                "worktreeStable":  true
+            },
+    "passed":  true,
+    "gates":  [
+                  {
+                      "gate":  "unit-desktop",
+                      "label":  "Frontend unit tests (Vitest)",
+                      "command":  "npx vitest run",
+                      "workdir":  "desktop",
+                      "status":  "PASS",
+                      "exitCode":  0,
+                      "seconds":  1.8,
+                      "summary":  "Tests  196 passed (196)"
+                  },
+                  {
+                      "gate":  "typecheck",
+                      "label":  "Vue type check (vue-tsc)",
+                      "command":  "npx vue-tsc --noEmit",
+                      "workdir":  "desktop",
+                      "status":  "PASS",
+                      "exitCode":  0,
+                      "seconds":  2,
+                      "summary":  "no type errors"
+                  },
+                  {
+                      "gate":  "build",
+                      "label":  "Frontend production build (Vite)",
+                      "command":  "npx vite build",
+                      "workdir":  "desktop",
+                      "status":  "PASS",
+                      "exitCode":  0,
+                      "seconds":  1.7,
+                      "summary":  "built in 950ms"
+                  },
+                  {
+                      "gate":  "unit-engine",
+                      "label":  "Backend unit tests (Pytest)",
+                      "command":  "python -m pytest engine/tests -q",
+                      "workdir":  ".",
+                      "status":  "PASS",
+                      "exitCode":  0,
+                      "seconds":  75.2,
+                      "summary":  "172 passed, 2 warnings in 73.40s (0:01:13)"
+                  },
+                  {
+                      "gate":  "rust-check",
+                      "label":  "Rust shell check (cargo check)",
+                      "command":  "cargo check",
+                      "workdir":  "desktop/src-tauri",
+                      "status":  "PASS",
+                      "exitCode":  0,
+                      "seconds":  0.9,
+                      "summary":  "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.78s"
+                  }
+              ]
+}

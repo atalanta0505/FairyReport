@@ -12,7 +12,7 @@
 | Checker | 独立会话：主代理切 checker | 产品负责人手动选择 | 对精确 SHA 独立验收 | 改代码、改需求、相信 Maker 自述 |
 
 三个角色的 LLM 一律由产品负责人在会话中手动选择，**不在项目文件内约定模型**（2026-08-21 产品决定：alibaba token plan (china) 对 qwen 系列之外的模型支持不稳定）。选型建议：尽量使用不同家族的模型以降低相关性误差，Checker 与 Maker 保持模型隔离。
-协调者为主会话；Maker/Checker 由产品负责人在独立会话执行（主代理切到对应角色、粘贴转发话术直接执行）。**不使用 @ 子代理委派**（该通道在本环境实测空返回）。
+协调者为主会话；Maker/Checker 默认由产品负责人在独立会话执行（主代理切到对应角色、粘贴转发话术直接执行）。**子代理委派现已可用**（2026-10-06 实测：主会话内 `subagent` 前台调用正常返回）。推荐用专用 `checker` 子代理实例承担验收角色：该实例在 DSH preset 中固定 `agentOptions.model`（与 Maker 强制不同模型）、只读 `toolFilter`、`maxDepth=0`；配置副本与回滚步骤见 `docs/dev-flow/dsh-checker-subagent.md`。
 
 ## 状态机
 
@@ -35,12 +35,12 @@ DRAFT → READY_FOR_MAKER → MAKING → READY_FOR_CHECKER → ACCEPTED → PUSH
 
 | 等级 | 证据 | 说明 |
 |---|---|---|
-| A | `python -m pytest` 自动化测试、可复现命令输出 | 高风险项首选 |
+| A | `pwsh -File scripts/verify.ps1`（5 项全量门禁，输出逐项 exitCode/耗时的 JSON）、其他可复现命令输出 | 高风险项首选 |
 | B | Streamlit GUI 人工操作观察 | 无法自动化时使用，列入剩余人工项 |
 | C | 源代码/配置检查 | 证明实现存在，不能单独证明运行正确 |
 | D | Maker 自述 | 仅作线索，不作为验收结论 |
 
-验证漏斗（前一级失败即停止）：目标单测 → 静态/模块检查 → 全量回归 → 构建/打包 → GUI/人工证据 → Checker 判定。
+验证漏斗（前一级失败即停止）：目标单测 → 静态/模块检查 → 全量回归 → 构建/打包 → GUI/人工证据 → Checker 判定。前四级即 `scripts/verify.ps1` 的 5 项门禁（目标单测单独先跑，脚本负责全量）。
 
 ## 工件位置（只新增版本，不覆盖历史）
 
@@ -52,22 +52,24 @@ docs/dev-flow/
     00-product-decision-v<N>.md      产品决定（可选）
     01-planner-task-contract-v<N>.md 任务合同
     02-planner-to-maker-message-v<N>.md Maker 转发消息
-    rounds/<NN>/
+    rounds/<NN>/                       旧式（V2-T35 及以前）
       maker-completion.md    Maker 完成说明
       checker-report.md      Checker 验收报告
       checker-fix-task.md    FAIL 时的窄修复输入
+    03-maker-summary-v<N>.md            现行（V2-T36 起）
+    04-checker-acceptance-report-v<N>.md 现行（V2-T36 起）
 ```
 
 ## 项目特定适配
 
 - **前置条件**：本流程依赖精确 Git SHA。仓库必须先 `git init` 并建立基线提交；未初始化时 Planner 应报告阻断。
-- **测试现状**：仓库暂无 pytest 用例；每个涉及行为变化的切片，合同必须包含 Maker 先补最小目标测试（pytest + pytest-bdd）。
+- **测试现状**（2026-10-06 基线）：`engine/tests/` 172 个 pytest 用例、前端 Vitest 196 个用例，全量门禁 `scripts/verify.ps1` 约 90 秒跑完。每个涉及行为变化的切片，合同仍必须包含 Maker 先补最小目标测试（pytest + pytest-bdd）。
 - **GUI 证据**：Streamlit 界面行为用 B 级证据（人工操作），在隔离数据目录（`FRL_DATA_DIR` 指向临时目录）下运行，避免污染真实项目数据。
 - **凭据**：`.env` 中的 API Key 永不进入提交、报告或截图。
 - **依赖**：安装/升级依赖前必须获产品负责人批准。
 - **人工分工（V2 起）**：开发依赖的下载与安装、GUI 截图验证（B 级证据）由产品负责人承担；凭据类操作（如邮箱 SMTP 授权码）按 HUMAN_ACTION_REQUIRED 交接。Agent 不等待回复的时间计入工时。
 - **命令交付格式（2026-08-21 起）**：Planner/协调者给产品负责人的每条命令必须注明执行窗口（PowerShell 或 cmd；本仓库默认 PowerShell）与完整详细指令，不得只给命令片段；涉及多窗口时明确各窗口用途。
-- **运行模式（V2 起，T3 后修正；2026-08-21 模型解绑）**：Planner+协调 = 主会话；Maker/Checker 由产品负责人在独立会话运行：Tab 把主代理切到 maker/checker（`mode: all`，只绑定权限护栏与角色提示词；模型由产品负责人当场手动选择），粘贴含精确 SHA 的转发话术直接执行；**禁止 @ 子代理委派**（实测空返回）。产品负责人回贴完成说明/验收报告。产品负责人未给出清晰指令词（如"T? 开工"）前，不启动任何实现。
+- **运行模式（V2 起，T3 后修正；2026-08-21 模型解绑）**：Planner+协调 = 主会话；Maker/Checker 由产品负责人在独立会话运行：Tab 把主代理切到 maker/checker（`mode: all`，只绑定权限护栏与角色提示词；模型由产品负责人当场手动选择），粘贴含精确 SHA 的转发话术直接执行。**子代理委派可用**（2026-10-06 实测），可用 `checker` 子代理替代一轮人工转贴；跨模型独立性由 preset 的 `agentOptions` 固定，不再依赖当场手选。产品负责人回贴完成说明/验收报告。产品负责人未给出清晰指令词（如"T? 开工"）前，不启动任何实现。
 
 ## 每轮最小检查表
 
