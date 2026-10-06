@@ -32,6 +32,27 @@ describe("Settings Store - DeepSeek API 配置与动态拉取", () => {
     expect(store.availableModels).toContain("deepseek-v4-pro");
   });
 
+  it("已下线的旧模型名被剔除，且拉取成功时以官方清单为唯一真源", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        object: "list",
+        data: [
+          { id: "deepseek-flash", object: "model" },
+          { id: "deepseek-v4-flash", object: "model" },
+        ],
+      })
+    );
+
+    const store = useSettingsStore();
+    store.llmKey = "sk-test-mock-key";
+
+    const models = await store.fetchRemoteModels();
+    expect(models).toEqual(["deepseek-flash"]);
+    expect(store.availableModels).not.toContain("deepseek-v4-flash");
+    // 不再把硬编码兜底清单并回来
+    expect(store.availableModels).toEqual(["deepseek-flash"]);
+  });
+
   it("fetchRemoteModels 在未提供 API Key 时给出友好拦截", async () => {
     const store = useSettingsStore();
     store.llmKey = "";

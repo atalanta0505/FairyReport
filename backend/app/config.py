@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # ── LLM 网关（Key 只从环境变量/.env 读取，禁止硬编码）──
     llm_api_keys: str = ""
     llm_base_url: str = "https://api.deepseek.com/v1"
-    llm_model_allowlist: str = "deepseek-v4-flash"
+    llm_model_allowlist: str = "deepseek-flash,deepseek-v4-pro"
     llm_timeout: int = 120
 
     # ── 通用知识包目录（JWT 保护下发；manifest.json + pack.zip）──

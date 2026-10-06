@@ -11,6 +11,16 @@ const testingEngine = ref(false);
 const engineTestResult = ref<string>("");
 const fetchingModels = ref(false);
 const modelFetchMsg = ref<string>("");
+const customModel = ref(false);
+
+function onPickModel(e: Event) {
+  const picked = (e.target as HTMLSelectElement).value;
+  if (picked === "__custom__") {
+    customModel.value = true;
+    return;
+  }
+  settings.llmModel = picked;
+}
 
 async function onSave() {
   await settings.save();
@@ -132,17 +142,22 @@ async function onTestEngine() {
         </div>
       </div>
       <div class="field">
-        <label>模型选择（可直接点选下拉项，或点击右侧拉取官方最新列表）</label>
+        <label>模型选择（下拉为已知模型，亦可选「自定义」手输 ID；右侧可拉取官方最新列表）</label>
         <div class="row">
-          <input
-            v-model="settings.llmModel"
-            type="text"
-            list="model-options"
-            placeholder="deepseek-flash"
-          />
-          <datalist id="model-options">
-            <option v-for="m in settings.availableModels" :key="m" :value="m" />
-          </datalist>
+          <select v-if="!customModel" :value="settings.llmModel" @change="onPickModel">
+            <option v-for="m in settings.availableModels" :key="m" :value="m">{{ m }}</option>
+            <option
+              v-if="settings.llmModel && !settings.availableModels.includes(settings.llmModel)"
+              :value="settings.llmModel"
+            >
+              {{ settings.llmModel }}（当前值，不在已知清单）
+            </option>
+            <option value="__custom__">自定义模型 ID…</option>
+          </select>
+          <template v-else>
+            <input v-model="settings.llmModel" type="text" placeholder="deepseek-flash" />
+            <button class="ghost" @click="customModel = false">选已有</button>
+          </template>
           <button class="ghost" @click="onResetLlmModel">默认</button>
           <button class="ghost" :disabled="fetchingModels" @click="onFetchModels">
             {{ fetchingModels ? "拉取中…" : "🔄 获取最新模型" }}

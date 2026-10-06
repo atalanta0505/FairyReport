@@ -6,7 +6,7 @@ from sqlalchemy import select
 from backend.app import db
 from backend.app.models import UsageLog
 
-ALLOWED_MODEL = "deepseek-v4-flash"
+ALLOWED_MODEL = "deepseek-flash"
 
 
 def _auth(token: str) -> dict:

@@ -6,7 +6,22 @@ export const DEFAULT_SERVER_URL = "http://101.42.9.223";
 export const DEFAULT_ENGINE_URL = "";
 export const DEFAULT_LLM_BASE_URL = "https://api.deepseek.com";
 export const DEFAULT_LLM_MODEL = "deepseek-flash";
-export const BUILTIN_MODELS = ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"];
+/** 官方已下线的旧模型名：虽仍可调用，但会被新模型顶替，不应再出现在清单或默认值里。 */
+export const DEPRECATED_MODELS = ["deepseek-v4-flash"];
+/** 仅当拉取官方 /models 失败时使用的兜底清单；成功时一律以官方返回为准。 */
+export const BUILTIN_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
+
+/** 去空、去重，并剔除官方已下线的旧模型名。 */
+function sanitizeModels(ids: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      ids
+        .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        .map((id) => id.trim())
+        .filter((id) => !DEPRECATED_MODELS.includes(id))
+    )
+  );
+}
 
 async function getHttpFetch() {
   try {
@@ -44,7 +59,7 @@ export const useSettingsStore = defineStore("settings", () => {
       } else {
         llmBaseUrl.value = s.llmBaseUrl;
       }
-      if (!s.llmModel || s.llmModel === "deepseek-v4-flash") {
+      if (!s.llmModel || DEPRECATED_MODELS.includes(s.llmModel)) {
         llmModel.value = DEFAULT_LLM_MODEL;
       } else {
         llmModel.value = s.llmModel;
@@ -99,18 +114,20 @@ export const useSettingsStore = defineStore("settings", () => {
 
     const data = await resp.json();
     if (data && Array.isArray(data.data)) {
-      const remoteIds: string[] = data.data
-        .map((m: any) => m.id)
-        .filter((id: any) => typeof id === "string" && id.trim().length > 0);
-      if (remoteIds.length > 0) {
-        // 合并去重并优先保留拉取到的模型
-        const merged = Array.from(new Set([...remoteIds, ...BUILTIN_MODELS]));
-        availableModels.value = merged;
-        // 如果当前选中的模型不在列表中，自动选中第一个
-        if (!merged.includes(llmModel.value)) {
-          llmModel.value = remoteIds[0];
+      // 官方为唯一真源：不再把硬编码兜底清单并回来，只剔除已下线的旧名
+      const official = sanitizeModels(data.data.map((m: any) => m?.id));
+      if (official.length > 0) {
+        // 保留用户手输的自定义 ID，避免拉取后从选择器里消失
+        const custom =
+          llmModel.value && !official.includes(llmModel.value) && !DEPRECATED_MODELS.includes(llmModel.value)
+            ? [llmModel.value]
+            : [];
+        availableModels.value = sanitizeModels([...official, ...custom]);
+        // 当前选中项已失效（下线或不在清单）时，回落到官方首选
+        if (!availableModels.value.includes(llmModel.value)) {
+          llmModel.value = official[0];
         }
-        return remoteIds;
+        return official;
       }
     }
     throw new Error("官方返回的模型列表为空");
