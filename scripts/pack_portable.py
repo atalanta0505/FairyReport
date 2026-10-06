@@ -57,6 +57,13 @@ def main():
         else:
             print(f"  提示：未找到 {src}，已跳过")
 
+    # 更新历史（与 Release / 网站同一份来源）
+    changelog = os.path.join(repo_root, "CHANGELOG.md")
+    if os.path.exists(changelog):
+        shutil.copy2(changelog, os.path.join(guide_dir, "更新历史.md"))
+    else:
+        print(f"  提示：未找到 {changelog}，已跳过")
+
     readme_text = f"""FairyReport 智能报告编制应用 (v{version} 本地安全专业版)
 ==================================================
 
@@ -75,7 +82,9 @@ def main():
 4. 模型选择：默认推荐 deepseek-flash（高性价比、流式响应极速），亦可点击「🔄 获取最新模型」动态拉取官方最新模型列表。
 
 【使用说明文档】
-本包内「使用说明」文件夹含《快速上手操作指南》与《用户操作手册》的 Word 版（.docx），以及对应的 Markdown 源文件。
+本包内「使用说明」文件夹含：
+- 《快速上手操作指南》与《用户操作手册》Word 版（.docx）及 Markdown 源文件；
+- 更新历史.md：本软件的版本更新记录。
 
 【核心安全与便携特性】
 1. 纯本地物理隔离：工程底稿、解析切片、向量索引与编制成果 100% 封闭保存在本机的 data/ 目录中，物理隔离、零数据上云。
