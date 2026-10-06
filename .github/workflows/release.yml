@@ -29,6 +29,11 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      # Windows 运行器的 Python 控制台默认 cp1252，脚本里的中文 print 会 UnicodeEncodeError
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -84,10 +89,17 @@ jobs:
             desktop/src-tauri/target/release/bundle/**
             desktop/src-tauri/target/release/fairyreport-desktop*
 
+      - name: Prepare release notes from CHANGELOG
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          python scripts/release_notes.py "${{ github.ref_name }}" release-notes.md
+          type release-notes.md || cat release-notes.md
+
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          body_path: release-notes.md
           files: |
             desktop/src-tauri/target/release/bundle/**
             desktop/src-tauri/target/release/fairyreport-desktop*

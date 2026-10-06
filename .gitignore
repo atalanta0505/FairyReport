@@ -72,3 +72,4 @@ site/.vitepress/cache/
 # Test exports and generated packs
 standard_export_demo.docx
 backend/pack/
+/release-notes.md
