@@ -1,44 +1,20 @@
-# AGENTS.md — FairyReport_lite 项目级规则
+# FairyReport_lite 项目规则
 
-所有在本仓库工作的 Agent（人或 AI）每次都必须遵守以下规则。
-开发流程见 `docs/dev-flow/PROCESS.md`（Planner-Maker-Checker 模式，基于《可移植的 AI 协作开发手册》）。
+## 项目
+- FairyReport 智能报告编制应用：Tauri 2 + Vue 3（`desktop/`）+ FastAPI（`engine/` 本地引擎、`backend/` 云端网关）+ 三源 RAG。
+- 前端入口 `desktop/`；本地引擎入口 `engine/app/main.py`；数据目录开发模式 `data/`（可用 `ENGINE_DATA_DIR` 覆盖）。
 
-## 项目概况
+## 硬规则
+- **不许 push**：只能在本地提交。推送与打标签必须由产品负责人对精确 SHA 明确授权；禁止 force push。
+- **单写入者**：同一时刻只有一个执行者改产品代码，其他人只读。
+- **未跟踪文件是用户数据**：不清理、不覆盖、不提交。
+- **凭据**：`.env` 永不提交、永不打印、永不写入工件；不硬编码密钥；API Key 只从 `.env` 读。
+- **依赖**：安装或升级依赖先获批准，批准后同步 `requirements.txt`。
 
-- FairyReport 智能报告编制应用：基于 **Tauri 2 + Vue 3 + FastAPI + LLM + 三源 RAG** 架构（涵盖 15 类投前咨询交付物）。
-- 技术栈：Rust (Tauri 2)、Vue 3 + TypeScript + Vite + Pinia、Python 3.10+ (FastAPI + Pydantic + fastembed + chromadb)、python-docx、openpyxl。
-- 前端入口：`desktop/`；后端引擎入口：`engine/app/main.py`。
-- 核心模块：`engine/app/materials/`（解析/分块/向量化）、`engine/app/writing/`（大纲/流式撰写/审阅/自洽性核验）、`engine/app/export/`（出版级 Word 与 Markdown 导出）、`generic_knowledge/`（只读行业规程与模板 JSON 库）。
-- 全局配置：`engine/app/config.py`（支持 `.env` 覆盖）。数据目录：开发模式为 `data/`（可用 `ENGINE_DATA_DIR` 覆盖）。
+## 验证
+- 全量门禁一条命令：`powershell -NoProfile -File scripts\verify.ps1`（5 项，约 90 秒；`-Fast` 跳过前端构建，`-Only <id>` 只跑指定项）。
+- 云端网关测试：`python -m pytest backend/tests -q`（依赖 PyJWT）。
+- 行为变化补最小目标测试。交付时说明：改了什么、跑了什么、结果如何。
 
-## 单写入者规则
-
-- 同一时刻只有当前 Maker 可修改产品代码；Planner 与 Checker 对产品代码只读。
-- 未跟踪文件视为用户数据：不擅自清理、覆盖、暂存、提交或推送。
-
-## 测试与验证
-
-- 测试框架：pytest + pytest-bdd（requirements.txt）。运行：`python -m pytest`。
-- 测试规模（基线事实，2026-10-06）：`engine/tests/` 172 个 pytest 用例；前端 `npx vitest run` 196 个用例。任务合同涉及行为变化时，Planner 必须要求 Maker 先补能证明主要行为的最小目标测试。
-- 全量门禁：`powershell -NoProfile -File scripts\verify.ps1`（Windows PowerShell 5.1 或 pwsh 7 均可；5 项，约 90 秒；`-Fast` 跳过前端构建，`-Only <id>` 只跑指定项）。Maker 与 Checker 都跑这一条命令，粘贴同一份 JSON 作为证据。
-- 已知保护逻辑（基线事实）：`config.py` 中 FRL-003（`CHUNK_OVERLAP >= CHUNK_SIZE` 时钳制，防止 `_chunk_segment` 死循环）。
-
-## 凭据与安全
-
-- API Key 从 `.env` 读取（如 `DEEPSEEK_API_KEY`、可选 SiliconFlow rerank key）。
-- `.env` 永不提交、永不打印、永不写入任何工件；代码中不得硬编码密钥。
-- 人工动作交接（HUMAN_ACTION_REQUIRED）不得包含 Token、密码或含凭据截图。
-
-## 发布边界
-
-- Maker 只创建本地候选提交，不 push。
-- 发布需要产品负责人对**精确已验收 SHA** 的明确授权；禁止 force push；推送前后都要精确比对远端 SHA。
-
-## 依赖纪律
-
-- 安装新依赖或升级版本必须先获产品负责人批准；批准后同步更新 `requirements.txt`。
-
-## Git 纪律
-
-- 每轮开始读取 `git rev-parse HEAD` 与 `git status --short`。
-- 候选提交只包含合同允许的文件；验收针对精确 SHA；任何新提交都需要重新验收。
+## 历史
+- 早期 Planner-Maker-Checker 三角色流程与逐轮工件保留在 `docs/dev-flow/tasks/` 作记录，**不再是必须遵循的流程**。
