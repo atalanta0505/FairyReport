@@ -1,5 +1,11 @@
 # 更新记录
 
+## v1.6.4 — 2026-10-06
+
+- 修复应用图标：原为 1×1 占位图，Windows 图标空白，macOS/Linux 直接编译失败。
+- 发布流程简化为 Windows 便携版：打 tag 后自动编译、自动打包 `FairyReport-Local-v<版本>-Windows-x64.zip`、自动写入本说明。
+- 不再发布 macOS / Linux 桌面版，也不再产出未签名的安装包。
+
 ## v1.6.3 — 2026-10-06
 
 - 修复设置页模型选择：清单以 DeepSeek 官方 `/models` 返回为唯一真源，不再把硬编码清单并回；剔除已下线的旧模型名 `deepseek-v4-flash`。
