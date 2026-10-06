@@ -59,6 +59,11 @@ jobs:
       - name: Build Tauri application
         run: npm --prefix desktop run tauri build
 
+      - name: Export guide docx from Markdown
+        run: |
+          python scripts/export_beginner_guide_docx.py
+          python scripts/export_user_guide_docx.py
+
       - name: Pack portable Windows zip
         run: python scripts/pack_portable.py
 

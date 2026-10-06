@@ -42,6 +42,21 @@ def main():
     if os.path.exists(pattern_src):
         shutil.copytree(pattern_src, os.path.join(stage_dir, "pattern"), dirs_exist_ok=True)
 
+    # 拷贝使用说明：两份指南的 Word 版与 Markdown 源文件
+    guide_dir = os.path.join(stage_dir, "使用说明")
+    os.makedirs(guide_dir, exist_ok=True)
+    for name in (
+        "FairyReport_快速上手操作指南.docx",
+        "FairyReport_用户操作手册.docx",
+        "BEGINNER_GUIDE.md",
+        "USER_GUIDE.md",
+    ):
+        src = os.path.join(repo_root, "docs", name)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(guide_dir, name))
+        else:
+            print(f"  提示：未找到 {src}，已跳过")
+
     readme_text = f"""FairyReport 智能报告编制应用 (v{version} 本地安全专业版)
 ==================================================
 
@@ -58,6 +73,9 @@ def main():
 2. 基础地址（Base URL）：默认已配置官方规范 https://api.deepseek.com。
 3. API Key：填入您在 DeepSeek 开放平台申请的 API Key（系统仅保存在您本地，绝不上云）。
 4. 模型选择：默认推荐 deepseek-flash（高性价比、流式响应极速），亦可点击「🔄 获取最新模型」动态拉取官方最新模型列表。
+
+【使用说明文档】
+本包内「使用说明」文件夹含《快速上手操作指南》与《用户操作手册》的 Word 版（.docx），以及对应的 Markdown 源文件。
 
 【核心安全与便携特性】
 1. 纯本地物理隔离：工程底稿、解析切片、向量索引与编制成果 100% 封闭保存在本机的 data/ 目录中，物理隔离、零数据上云。

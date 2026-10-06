@@ -590,6 +590,26 @@ def _split_row(line: str):
     return "", _clean_inline(text)
 
 
+def _add_md_table(doc: Document, rows: list):
+    """把 Markdown 表格渲染成 Word 表格（首行加粗）。"""
+    width = max(len(r) for r in rows)
+    table = doc.add_table(rows=0, cols=width)
+    table.style = "Table Grid"
+    for idx, row in enumerate(rows):
+        cells = table.add_row().cells
+        for col in range(width):
+            text = _clean_inline(row[col]) if col < len(row) else ""
+            para = cells[col].paragraphs[0]
+            para.paragraph_format.first_line_indent = Pt(0)
+            para.paragraph_format.space_before = Pt(2)
+            para.paragraph_format.space_after = Pt(2)
+            format_run(para.add_run(text), font_name="Times New Roman",
+                       east_asia="黑体" if idx == 0 else "仿宋", font_size=Pt(9.5),
+                       bold=(idx == 0), color=COLOR_TITLE)
+    spacer = doc.add_paragraph()
+    spacer.paragraph_format.space_after = Pt(4)
+
+
 def render_markdown(doc: Document, markdown_text: str):
     """把指南 Markdown 渲染进正文（跳过 H1 与目录页）。"""
     lines = markdown_text.splitlines()
@@ -619,6 +639,28 @@ def render_markdown(doc: Document, markdown_text: str):
             else:
                 add_heading_2(doc, text)
             i += 1
+            continue
+
+        if line.startswith("```"):
+            i += 1
+            block = []
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                block.append(lines[i])
+                i += 1
+            i += 1
+            if block and block[0].strip().lower() == "mermaid":
+                add_body_paragraph(doc, "（架构示意图：请参见网页版文档中的流程图。）")
+            continue
+
+        if line.startswith("|"):
+            rows = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                if not all(set(c) <= set("-: ") for c in cells):
+                    rows.append(cells)
+                i += 1
+            if rows:
+                _add_md_table(doc, rows)
             continue
 
         img = re.match(r"!\[(.*?)\]\((.*?)\)", line)
