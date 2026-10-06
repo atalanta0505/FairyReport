@@ -35,7 +35,7 @@ DRAFT → READY_FOR_MAKER → MAKING → READY_FOR_CHECKER → ACCEPTED → PUSH
 
 | 等级 | 证据 | 说明 |
 |---|---|---|
-| A | `pwsh -File scripts/verify.ps1`（5 项全量门禁，输出逐项 exitCode/耗时的 JSON）、其他可复现命令输出 | 高风险项首选 |
+| A | `powershell -NoProfile -File scripts\verify.ps1`（5 项全量门禁，输出逐项 exitCode/耗时/前后 git 状态的 JSON）、其他可复现命令输出 | 高风险项首选 |
 | B | Streamlit GUI 人工操作观察 | 无法自动化时使用，列入剩余人工项 |
 | C | 源代码/配置检查 | 证明实现存在，不能单独证明运行正确 |
 | D | Maker 自述 | 仅作线索，不作为验收结论 |
@@ -63,7 +63,7 @@ docs/dev-flow/
 ## 项目特定适配
 
 - **前置条件**：本流程依赖精确 Git SHA。仓库必须先 `git init` 并建立基线提交；未初始化时 Planner 应报告阻断。
-- **测试现状**（2026-10-06 基线）：`engine/tests/` 172 个 pytest 用例、前端 Vitest 196 个用例，全量门禁 `scripts/verify.ps1` 约 90 秒跑完。每个涉及行为变化的切片，合同仍必须包含 Maker 先补最小目标测试（pytest + pytest-bdd）。
+- **测试现状**（2026-10-06 基线）：`engine/tests/` 172 个 pytest 用例、前端 Vitest 196 个用例，全量门禁 `powershell -NoProfile -File scripts\verify.ps1` 约 90 秒跑完。每个涉及行为变化的切片，合同仍必须包含 Maker 先补最小目标测试（pytest + pytest-bdd）。
 - **GUI 证据**：Streamlit 界面行为用 B 级证据（人工操作），在隔离数据目录（`FRL_DATA_DIR` 指向临时目录）下运行，避免污染真实项目数据。
 - **凭据**：`.env` 中的 API Key 永不进入提交、报告或截图。
 - **依赖**：安装/升级依赖前必须获产品负责人批准。

@@ -20,7 +20,7 @@
 
 - 测试框架：pytest + pytest-bdd（requirements.txt）。运行：`python -m pytest`。
 - 测试规模（基线事实，2026-10-06）：`engine/tests/` 172 个 pytest 用例；前端 `npx vitest run` 196 个用例。任务合同涉及行为变化时，Planner 必须要求 Maker 先补能证明主要行为的最小目标测试。
-- 全量门禁：`pwsh -File scripts/verify.ps1`（5 项，约 90 秒；`-Fast` 跳过前端构建，`-Only <id>` 只跑指定项）。Maker 与 Checker 都跑这一条命令，粘贴同一份 JSON 作为证据。
+- 全量门禁：`powershell -NoProfile -File scripts\verify.ps1`（Windows PowerShell 5.1 或 pwsh 7 均可；5 项，约 90 秒；`-Fast` 跳过前端构建，`-Only <id>` 只跑指定项）。Maker 与 Checker 都跑这一条命令，粘贴同一份 JSON 作为证据。
 - 已知保护逻辑（基线事实）：`config.py` 中 FRL-003（`CHUNK_OVERLAP >= CHUNK_SIZE` 时钳制，防止 `_chunk_segment` 死循环）。
 
 ## 凭据与安全

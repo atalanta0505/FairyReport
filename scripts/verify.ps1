@@ -5,12 +5,14 @@
     that both Maker and Checker paste into their reports, plus the git state
     observed before and after the run (Checker read-only self-evidence).
 
-        pwsh -File scripts/verify.ps1
-        pwsh -File scripts/verify.ps1 -Fast                # skip the frontend production build
-        pwsh -File scripts/verify.ps1 -Only unit-engine    # run selected gates only
-        pwsh -File scripts/verify.ps1 -Json report.json    # also write the JSON report to a file
+        powershell -NoProfile -File scripts\verify.ps1
+        powershell -NoProfile -File scripts\verify.ps1 -Fast              # skip the frontend production build
+        powershell -NoProfile -File scripts\verify.ps1 -Only unit-engine  # run selected gates only
+        powershell -NoProfile -File scripts\verify.ps1 -Json report.json  # also write the JSON report to a file
 
     Exit code is 0 when every executed gate passed, 1 otherwise.
+    pwsh 7 works too where it is installed; this host only ships Windows
+    PowerShell 5.1, so the documented form uses `powershell`.
 
     This file is intentionally ASCII-only: Windows PowerShell 5.1 misreads
     BOM-less UTF-8 script files, and this script must run on both hosts.

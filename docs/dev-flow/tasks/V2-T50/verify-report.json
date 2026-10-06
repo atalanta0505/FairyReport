@@ -9,13 +9,13 @@
                      "unit-engine",
                      "rust-check"
                  ],
-    "startedAt":  "2026-10-06T14:58:56",
-    "finishedAt":  "2026-10-06T15:00:18",
+    "startedAt":  "2026-10-06T15:01:07",
+    "finishedAt":  "2026-10-06T15:02:24",
     "git":  {
-                "headBefore":  "ef5a19236258cbb86ceb5c4b739f58fdafa1642c",
-                "headAfter":  "ef5a19236258cbb86ceb5c4b739f58fdafa1642c",
-                "statusBefore":  "M AGENTS.md\r\n M docs/dev-flow/PROCESS.md\r\n?? docs/dev-flow/tasks/V2-T50/\r\n?? scripts/verify.ps1",
-                "statusAfter":  "M AGENTS.md\r\n M docs/dev-flow/PROCESS.md\r\n?? docs/dev-flow/tasks/V2-T50/\r\n?? scripts/verify.ps1",
+                "headBefore":  "6bbc9caf1eb24a866f4f35042d43d221891a733b",
+                "headAfter":  "6bbc9caf1eb24a866f4f35042d43d221891a733b",
+                "statusBefore":  "M AGENTS.md\r\n M docs/dev-flow/PROCESS.md\r\n M docs/dev-flow/tasks/V2-T50/01-planner-task-contract-v1.md\r\n M scripts/verify.ps1",
+                "statusAfter":  "M AGENTS.md\r\n M docs/dev-flow/PROCESS.md\r\n M docs/dev-flow/tasks/V2-T50/01-planner-task-contract-v1.md\r\n M scripts/verify.ps1",
                 "worktreeStable":  true
             },
     "passed":  true,
@@ -48,7 +48,7 @@
                       "status":  "PASS",
                       "exitCode":  0,
                       "seconds":  1.7,
-                      "summary":  "built in 950ms"
+                      "summary":  "built in 941ms"
                   },
                   {
                       "gate":  "unit-engine",
@@ -57,8 +57,8 @@
                       "workdir":  ".",
                       "status":  "PASS",
                       "exitCode":  0,
-                      "seconds":  75.2,
-                      "summary":  "172 passed, 2 warnings in 73.40s (0:01:13)"
+                      "seconds":  70.2,
+                      "summary":  "172 passed, 2 warnings in 68.39s (0:01:08)"
                   },
                   {
                       "gate":  "rust-check",
@@ -67,8 +67,8 @@
                       "workdir":  "desktop/src-tauri",
                       "status":  "PASS",
                       "exitCode":  0,
-                      "seconds":  0.9,
-                      "summary":  "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.78s"
+                      "seconds":  0.8,
+                      "summary":  "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.69s"
                   }
               ]
 }

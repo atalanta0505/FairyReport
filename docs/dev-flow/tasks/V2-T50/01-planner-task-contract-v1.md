@@ -27,7 +27,7 @@ PMC 流程的第 3 条硬门禁（证据门）目前靠人肉维持：README 第
 
 三项交付物，逐条对应验收标准：
 
-- [ ] **AC1** `scripts/verify.ps1` 存在，且 `pwsh -File scripts/verify.ps1` 在干净工作树上返回 exit code 0；
+- [ ] **AC1** `scripts/verify.ps1` 存在，且 `powershell -NoProfile -File scripts\verify.ps1` 在干净工作树上返回 exit code 0；
 - [ ] **AC2** 脚本覆盖 5 项全量门禁，且与 README:171–188 逐项一致：Vitest、vue-tsc、Vite 构建、Pytest、cargo check（构建项不与类型检查重复执行）；
 - [ ] **AC3** 脚本输出结构化 JSON，每条包含 `gate/label/command/workdir/exitCode/seconds/summary`，Maker 与 Checker 可直接粘贴同一份结构，无需再各自抄数字；
 - [ ] **AC4** 脚本在开始与结束各记录一次 `git rev-parse HEAD` 与 `git status --short`，并给出 `worktreeStable` 布尔值——这是 Checker 子代理"只读"的自证机制（配合 §7 的 `toolFilter`）；
@@ -56,8 +56,8 @@ PMC 流程的第 3 条硬门禁（证据门）目前靠人肉维持：README 第
 
 ## 8. Maker 快速测试（按顺序）
 
-1. `pwsh -File scripts/verify.ps1 -Only unit-desktop,typecheck`（脚本自身可跑通）
-2. `pwsh -File scripts/verify.ps1`（全量 5 项，作为本切片的 A 级证据）
+1. `powershell -NoProfile -File scripts\verify.ps1 -Only unit-desktop,typecheck`（脚本自身可跑通）
+2. `powershell -NoProfile -File scripts\verify.ps1`（全量 5 项，作为本切片的 A 级证据）
 3. `git status --short`（确认脚本前后工作树一致）
 
 ## 9. Evidence Runner 分级验证计划
