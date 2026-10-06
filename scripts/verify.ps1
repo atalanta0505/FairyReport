@@ -73,6 +73,16 @@ $gateTable = @(
     }
 )
 
+function Remove-NativeStderrNoise {
+    param([string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $clean = $Text
+    $clean = [regex]::Replace($clean, '(?m)^\s*\+ CategoryInfo.*$', '')
+    $clean = [regex]::Replace($clean, '(?m)^\s*\+ FullyQualifiedErrorId.*$', '')
+    $clean = [regex]::Replace($clean, ':(String|Object)\[\]\s*,\s*RemoteException', '')
+    return $clean
+}
+
 function Get-Summary {
     param([string]$Text, [string]$Pattern, [string]$Fallback)
     if ([string]::IsNullOrWhiteSpace($Text)) { if ($Fallback) { return $Fallback } else { return '(no output)' } }
@@ -118,11 +128,17 @@ function Invoke-Gate {
         $watch.Stop()
         Pop-Location
     }
+    $clean = Remove-NativeStderrNoise -Text $text
     $result.exitCode = $code
     $result.seconds = [math]::Round($watch.Elapsed.TotalSeconds, 1)
-    $result.summary = Get-Summary -Text $text -Pattern $Gate.pattern -Fallback $Gate.passSummary
-    if ($code -ne 0) { $result.status = 'FAIL' }
-    $result.output = $text
+    if ($code -eq 0) {
+        $result.status = 'PASS'
+        $result.summary = Get-Summary -Text $clean -Pattern $Gate.pattern -Fallback $Gate.passSummary
+    } else {
+        $result.status = 'FAIL'
+        $result.summary = Get-Summary -Text $clean -Pattern $Gate.pattern -Fallback ''
+    }
+    $result.output = $clean
     return [pscustomobject]$result
 }
 
@@ -131,7 +147,29 @@ $gitBefore = Get-GitState -Root $repoRoot
 $mode = 'full'
 if ($Fast) { $mode = 'fast' }
 
-$selected = @($gateTable | Where-Object { -not ($Only -and ($Only -notcontains $_.id)) -and -not ($Fast -and $_.skipInFast) })
+$onlyIds = @()
+if ($Only) {
+    foreach ($entry in $Only) {
+        foreach ($piece in ($entry -split ',')) {
+            $trimmed = $piece.Trim()
+            if ($trimmed -ne '') { $onlyIds += $trimmed }
+        }
+    }
+}
+$knownIds = @($gateTable | ForEach-Object { $_.id })
+$unknownIds = @($onlyIds | Where-Object { $knownIds -notcontains $_ })
+if ($unknownIds.Count -gt 0) {
+    Write-Host ('ERROR: unknown gate id(s): ' + ($unknownIds -join ', '))
+    Write-Host ('known ids: ' + ($knownIds -join ', '))
+    exit 2
+}
+
+$selected = @($gateTable | Where-Object { -not ($onlyIds.Count -gt 0 -and ($onlyIds -notcontains $_.id)) -and -not ($Fast -and $_.skipInFast) })
+
+if ($selected.Count -eq 0) {
+    Write-Host 'ERROR: no gate selected - refusing to report a pass (check -Only / -Fast).'
+    exit 2
+}
 
 Write-Host ''
 Write-Host ('FairyReport pipeline gates  |  mode: ' + $mode + '  |  repo: ' + $repoRoot)

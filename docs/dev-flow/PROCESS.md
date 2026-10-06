@@ -11,7 +11,7 @@
 | Maker | 独立会话：主代理切 maker | 产品负责人手动选择 | 唯一写入者，实现合同，产出冻结候选 | 改需求、push、amend、rebase |
 | Checker | 独立会话：主代理切 checker | 产品负责人手动选择 | 对精确 SHA 独立验收 | 改代码、改需求、相信 Maker 自述 |
 
-三个角色的 LLM 一律由产品负责人在会话中手动选择，**不在项目文件内约定模型**（2026-08-21 产品决定：alibaba token plan (china) 对 qwen 系列之外的模型支持不稳定）。选型建议：尽量使用不同家族的模型以降低相关性误差，Checker 与 Maker 保持模型隔离。
+三个角色的 LLM **默认**由产品负责人在会话中手动选择，**不在项目文件内约定模型**（2026-08-21 产品决定：alibaba token plan (china) 对 qwen 系列之外的模型支持不稳定）。启用 DSH 子代理后，允许在 DSH preset 里为专用子代理实例固定模型（如 `checker` 固定 `deepseek-v4-pro`），此时模型选择随 preset 走、可审计。选型建议：尽量使用不同家族的模型以降低相关性误差，Checker 与 Maker 保持模型隔离。
 协调者为主会话；Maker/Checker 默认由产品负责人在独立会话执行（主代理切到对应角色、粘贴转发话术直接执行）。**子代理委派现已可用**（2026-10-06 实测：主会话内 `subagent` 前台调用正常返回）。推荐用专用 `checker` 子代理实例承担验收角色：该实例在 DSH preset 中固定 `agentOptions.model`（与 Maker 强制不同模型）、只读 `toolFilter`、`maxDepth=0`；配置副本与回滚步骤见 `docs/dev-flow/dsh-checker-subagent.md`。
 
 ## 状态机
@@ -56,8 +56,11 @@ docs/dev-flow/
       maker-completion.md    Maker 完成说明
       checker-report.md      Checker 验收报告
       checker-fix-task.md    FAIL 时的窄修复输入
-    03-maker-summary-v<N>.md            现行（V2-T36 起）
-    04-checker-acceptance-report-v<N>.md 现行（V2-T36 起）
+    03-maker-*.md                       现行（V2-T36 起不再使用 rounds/）
+    04-checker-acceptance-*.md          现行（后缀随轮次实际而定：T36/T37 为
+      03-maker-completed-instructions.md + 04-checker-acceptance-record.md，
+      T38 为 03-maker-work-summary-v1.md，T39 起为 03-maker-summary-v1.md +
+      04-checker-acceptance-report-v1.md）
 ```
 
 ## 项目特定适配
