@@ -13,7 +13,7 @@ hero:
       text: 🚀 快速上手指引
       link: /guide/getting-started
     - theme: alt
-      text: 📥 下载 v1.5.0 客户端
+      text: 📥 下载 v1.6.5 客户端
       link: /download
     - theme: alt
       text: 📖 功能与架构手册
@@ -143,7 +143,7 @@ FairyReport 采用 Tauri 2 原生架构与现代工业设计语言，界面简�
 
 <div style="text-align: center; margin: 3rem 0;">
   <a href="/download" style="display: inline-block; background-color: var(--vp-c-brand-1); color: #fff; padding: 12px 32px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 1.1rem; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);">
-    立即下载 FairyReport v1.5.0 (Windows x64)
+    立即下载 FairyReport v1.6.5 (Windows x64)
   </a>
 </div>
 

@@ -15,7 +15,7 @@
 ## 🚀 快速启动三步法
 
 ### 1. 下载与解压缩
-前往 [客户端下载中心](/download) 获取最新版 `FairyReport-Local-v1.5.0-Windows-x64.zip`。  
+前往 [客户端下载中心](/download) 获取最新版 `FairyReport-Local-v1.6.5-Windows-x64.zip`。  
 下载完成后，右键选择 **「解压到当前文件夹」**。建议解压至空间充足的纯英文或非深层目录（例如 `D:\FairyReport\`）。
 
 ### 2. 双击启动

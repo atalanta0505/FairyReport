@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { useSettingsStore, DEFAULT_SERVER_URL, DEFAULT_ENGINE_URL, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from "../stores/settings";
+import { useSettingsStore, DEFAULT_ENGINE_URL, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL } from "../stores/settings";
 import { useEngineStore } from "../stores/engine";
 
 const settings = useSettingsStore();
@@ -26,10 +26,6 @@ async function onSave() {
   await settings.save();
   saved.value = true;
   setTimeout(() => (saved.value = false), 2000);
-}
-
-function onResetServer() {
-  settings.serverUrl = DEFAULT_SERVER_URL;
 }
 
 function onResetEngine() {
@@ -112,19 +108,8 @@ async function onTestEngine() {
           {{ engineTestResult }}
         </p>
         <p class="field-desc">
-          💡 提示：默认留空为<strong>纯本地引擎模式</strong>（工程底稿 100% 封闭在本地电脑，物理级隔离，零上传）；若需使用云端算力，可填入 <code>http://101.42.9.223:8000</code>。
+          💡 提示：默认留空为<strong>纯本地引擎模式</strong>（工程底稿 100% 封闭在本地电脑，物理级隔离，零上传）。
         </p>
-      </div>
-    </section>
-
-    <section class="group">
-      <h3>认证与知识库服务</h3>
-      <div class="field">
-        <label>账号与知识库服务地址</label>
-        <div class="row">
-          <input v-model="settings.serverUrl" type="text" placeholder="http://101.42.9.223" />
-          <button class="ghost" @click="onResetServer">默认</button>
-        </div>
       </div>
     </section>
 

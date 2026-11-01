@@ -1,12 +1,13 @@
 """
-模板加载 — 从已安装通用知识包目录读模板 JSON（替代根目录 config.py 的 _load_template）。
+模板加载 — 优先从已安装通用知识包目录读模板 JSON，未安装时自动回退至本地内置 generic_knowledge/templates/。
 
-未安装通用包 → 抛 TemplatesNotInstalled，调用方映射 409。
-模板缓存挂在已装版本上，版本变化自动失效。
+既无已安装通用包也无本地内置模板 → 抛 TemplatesNotInstalled，调用方映射 409。
+模板缓存挂在当前版本标识上，版本变化自动失效。
 """
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from ..generic.store import GenericStore
@@ -23,19 +24,38 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class TemplatesNotInstalled(Exception):
-    """通用知识包未安装，无法读取模板。"""
+    """通用知识包与内置模板均不可用，无法读取模板。"""
+
+
+def _find_builtin_templates_dir() -> Path | None:
+    """查找本地内置的 generic_knowledge/templates 目录（兼容源码开发、PyInstaller 冻结与便携包）。"""
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).parent / "generic_knowledge" / "templates")
+        if hasattr(sys, "_MEIPASS"):
+            candidates.append(Path(sys._MEIPASS) / "generic_knowledge" / "templates")
+    candidates.append(_REPO_ROOT / "generic_knowledge" / "templates")
+    for d in candidates:
+        if d.is_dir() and any(d.glob("*.json")):
+            return d
+    return None
 
 
 def _templates_dir() -> Path:
-    """返回已安装通用包的 templates 目录；未装则抛异常。"""
+    """返回可用的 templates 目录（优先已安装知识包，否则回退至本地内置目录）；均不存在则抛异常。"""
     state = GenericStore._read_state()
-    if not state or not state.get("version"):
-        raise TemplatesNotInstalled("通用知识包未安装，请先从云端同步知识包")
-    vdir = GenericStore._version_dir(state["version"])
-    tdir = vdir / "templates"
-    if not tdir.is_dir():
+    if state and state.get("version"):
+        vdir = GenericStore._version_dir(state["version"])
+        tdir = vdir / "templates"
+        if tdir.is_dir():
+            return tdir
         raise TemplatesNotInstalled("通用知识包缺少 templates 目录")
-    return tdir
+
+    builtin = _find_builtin_templates_dir()
+    if builtin is not None:
+        return builtin
+
+    raise TemplatesNotInstalled("通用知识包未安装，请先从云端同步知识包")
 
 
 # ── 模板缓存（按版本隔离，版本变化失效）──
@@ -45,7 +65,11 @@ _cache_version: str | None = None
 
 def _current_version() -> str | None:
     state = GenericStore._read_state()
-    return state.get("version") if state else None
+    if state and state.get("version"):
+        return state.get("version")
+    if _find_builtin_templates_dir() is not None:
+        return "builtin"
+    return None
 
 
 def _ensure_cache_fresh() -> None:
@@ -208,9 +232,5 @@ def get_writing_order_reason(report_type: str) -> str:
 
 
 def require_installed() -> None:
-    """显式要求通用包已安装；未装抛 TemplatesNotInstalled（路由映射 409）。"""
-    state = GenericStore._read_state()
-    if not state or not state.get("version"):
-        raise TemplatesNotInstalled("通用知识包未安装，请先从云端同步知识包")
-    if not GenericStore._version_dir(state["version"]).exists():
-        raise TemplatesNotInstalled("通用知识包目录缺失")
+    """显式要求模板可用（已安装知识包或存在本地内置 templates）；均不可用则抛 TemplatesNotInstalled（路由映射 409）。"""
+    _templates_dir()

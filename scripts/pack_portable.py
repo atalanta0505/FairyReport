@@ -44,6 +44,15 @@ def main():
     if os.path.exists(pattern_src):
         shutil.copytree(pattern_src, os.path.join(stage_dir, "pattern"), dirs_exist_ok=True)
 
+    # 拷贝 15 类报告内置 JSON 大纲模板包（开箱即用，无需云端同步）
+    templates_src = os.path.join(repo_root, "generic_knowledge", "templates")
+    if os.path.exists(templates_src):
+        shutil.copytree(
+            templates_src,
+            os.path.join(stage_dir, "generic_knowledge", "templates"),
+            dirs_exist_ok=True,
+        )
+
     # 拷贝使用说明：两份指南的 Word 版与 Markdown 源文件
     guide_dir = os.path.join(stage_dir, "使用说明")
     os.makedirs(guide_dir, exist_ok=True)
@@ -71,14 +80,11 @@ def main():
 
 【快速启动】
 1. 解压本压缩包至任意磁盘文件夹（例如 D:\\Tools\\FairyReport）。
-2. 双击运行「FairyReport.exe」即可直接启动工作台。
+2. 双击运行「FairyReport.exe」即可直接进入五步编制工作台（免注册、免登录、完全免费使用）。
    （首次启动时若出现 Windows Defender 安全拦截提示，点击“更多信息” -> “仍要运行”即可）
 
-【免登录体验】
-在登录界面底部点击「🎯 快捷演示体验（免登录直接进入）」按钮，即可免登录直接进入编制工作台。
-
 【模型与 API Key 设置】
-1. 进入工作台后，点击右上角「⚙️ 设置」图标。
+1. 进入工作台后，点击右上角「设置」按钮。
 2. 基础地址（Base URL）：默认已配置官方规范 https://api.deepseek.com。
 3. API Key：填入您在 DeepSeek 开放平台申请的 API Key（系统仅保存在您本地，绝不上云）。
 4. 模型选择：默认推荐 deepseek-flash（高性价比、流式响应极速），亦可点击「🔄 获取最新模型」动态拉取官方最新模型列表。
@@ -89,7 +95,7 @@ def main():
 - 更新历史.md：本软件的版本更新记录。
 
 【核心安全与便携特性】
-1. 纯本地物理隔离：工程底稿、解析切片、向量索引与编制成果 100% 封闭保存在本机的 data/ 目录中，物理隔离、零数据上云。
+1. 纯本地物理隔离：15 类专业报告模板、工程底稿、解析切片、向量索引与编制成果 100% 封闭保存在本机，物理隔离、零数据上云。
 2. 绿色免安装（.portable）：本便携包完全自包含，不写 Windows 注册表，无需预装 Python、Rust 或 NodeJS，解压即用、随 U 盘即插即用。
 3. 纯净发布：本安装包为完全纯净空白模板，无任何历史项目数据或开发缓存，放心分发。
 """

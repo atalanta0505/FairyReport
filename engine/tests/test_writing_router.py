@@ -118,13 +118,27 @@ def test_outline_422_missing_api_key(client, installed_pack):
     assert resp.status_code == 422
 
 
-def test_outline_409_no_pack(client):
-    """通用包未装 → outline 409 明确语义。"""
+def test_outline_409_no_pack(client, monkeypatch):
+    """通用包未装且无内置模板 → outline 409 明确语义。"""
+    from engine.app.writing import templates_loader as tmpl
+    monkeypatch.setattr(tmpl, "_find_builtin_templates_dir", lambda: None)
     resp = client.post("/writing/outline", json={
         "project": "x", "report_type": "可行性研究报告", "llm_config": LLM_CONFIG,
     })
     assert resp.status_code == 409
     assert "未安装" in resp.json()["detail"]
+
+
+def test_outline_builtin_templates_out_of_box(client):
+    """未同步云端知识包时，默认直接使用本地内置 generic_knowledge/templates 开箱即用生成大纲。"""
+    _set_llm(LLMStub())
+    resp = client.post("/writing/outline", json={
+        "project": "builtin_demo", "report_type": "可行性研究报告", "llm_config": LLM_CONFIG,
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert len(body["chapters"]) > 0
+    assert "第一章" in body["outline_md"]
 
 
 # ── outline 章数/顺序与模板一致 ──
@@ -318,8 +332,18 @@ def test_key_not_leaked_in_request_headers(client):
 
 
 # ── templates ──
-def test_list_templates_returns_15_types(client):
-    """未装通用包时也可获取 15 种报告类型及默认字数预算。"""
+def test_list_templates_returns_15_types(client, monkeypatch):
+    """既未装通用包也无内置模板时，也可获取 15 种报告类型（字数预算回落为 0）；默认内置模板存在时直接加载完整配置。"""
+    resp_builtin = client.get("/writing/templates")
+    assert resp_builtin.status_code == 200
+    items_builtin = resp_builtin.json()
+    assert len(items_builtin) == 15
+    fe_builtin = next(it for it in items_builtin if it["report_type"] == "可行性研究报告")
+    assert fe_builtin["notes"] != ""
+    assert len(fe_builtin["writing_order"]) > 0
+
+    from engine.app.writing import templates_loader as tmpl
+    monkeypatch.setattr(tmpl, "_find_builtin_templates_dir", lambda: None)
     resp = client.get("/writing/templates")
     assert resp.status_code == 200
     items = resp.json()
@@ -329,7 +353,7 @@ def test_list_templates_returns_15_types(client):
     assert "产业发展规划报告" in report_types
     assert "智库专报" in report_types
     fe = next(it for it in items if it["report_type"] == "可行性研究报告")
-    assert fe["total_words_max"] == 0
+    assert fe["notes"] == ""
 
 
 def test_list_templates_with_installed_pack(client, installed_pack):

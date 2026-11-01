@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { useAuthStore } from "../stores/auth";
 import { useEngineStore } from "../stores/engine";
-import { useSettingsStore } from "../stores/settings";
 import { useProjectStore } from "../stores/project";
 
-const auth = useAuthStore();
 const engine = useEngineStore();
-const settings = useSettingsStore();
 const projectStore = useProjectStore();
 
 const showNewProjectInput = ref(false);
@@ -45,10 +41,7 @@ onMounted(async () => {
 async function initData() {
   if (!engine.baseUrl) return;
   try {
-    await Promise.all([
-      projectStore.loadProjects(engine.baseUrl),
-      projectStore.checkGenericStatus(engine.baseUrl),
-    ]);
+    await projectStore.loadProjects(engine.baseUrl);
   } catch (e) {
     showMsg(`初始化数据失败: ${(e as Error).message}`, "error");
   }
@@ -137,28 +130,6 @@ async function handleScanMaterials() {
     }
   } catch (err) {
     showMsg(`扫描本地资料失败: ${(err as Error).message}`, "error");
-  }
-}
-
-async function handleSyncGeneric() {
-  if (!engine.baseUrl) {
-    showMsg("引擎未就绪", "error");
-    return;
-  }
-  if (!auth.token) {
-    showMsg("请先在左侧完成登录或使用演示模式，再同步云端知识库", "error");
-    return;
-  }
-  try {
-    const res = await projectStore.updateGeneric(engine.baseUrl, settings.serverUrl, auth.token);
-    if (res && res.status === "already_installed") {
-      showMsg(`通用知识包已是最新版本（${res.version}）`);
-    } else {
-      showMsg("通用知识包同步成功！");
-    }
-  } catch (err) {
-    const errMsg = (err as Error).message || "";
-    showMsg(`通用知识包同步失败: ${errMsg}`, "error");
   }
 }
 
@@ -405,47 +376,7 @@ function nextStep() {
       </div>
     </div>
 
-    <!-- 2. 通用知识包状态卡片 -->
-    <div class="card generic-card">
-      <div class="card-header">
-        <h3>通用知识包状态</h3>
-        <span
-          class="status-tag"
-          :class="projectStore.genericStatus?.installed ? 'ready' : 'missing'"
-        >
-          {{ projectStore.genericStatus?.installed ? "● 已就绪" : "○ 未就绪" }}
-        </span>
-      </div>
-      <div class="card-body generic-body">
-        <div v-if="projectStore.genericStatus?.installed" class="generic-info">
-          <p>
-            已安装知识包版本：
-            <strong>{{ projectStore.genericStatus.version || "未知版本" }}</strong>
-          </p>
-          <p class="text-muted">
-            安装时间：{{ formatDate(projectStore.genericStatus.installed_at || "") }}（含 15 类专业报告交付物标准模板与行业规范向量库）
-          </p>
-        </div>
-        <div v-else class="generic-info">
-          <p class="text-warning">
-            本地尚未同步通用知识包（包含 15 类报告标准模板与行业规范向量库）。知识包由云端统一维护和更新，请点击右侧「从云端同步知识包」。
-          </p>
-        </div>
-
-        <button
-          class="btn btn-outline"
-          :disabled="projectStore.updatingGeneric"
-          @click="handleSyncGeneric"
-        >
-          <span v-if="projectStore.updatingGeneric">同步中...</span>
-          <span v-else>
-            {{ projectStore.genericStatus?.installed ? "检查云端更新" : "从云端同步知识包" }}
-          </span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 3. 资料导入与管理卡片 -->
+    <!-- 2. 资料导入与管理卡片 -->
     <div class="card materials-card">
       <div class="card-header">
         <div class="title-with-badge">

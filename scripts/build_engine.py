@@ -141,6 +141,10 @@ def build():
     pattern_dir = REPO_ROOT / "pattern"
     if pattern_dir.exists():
         cmd.extend(["--add-data", f"{pattern_dir}{sep}pattern"])
+    # 添加内置 15 类报告 JSON 模板库 (若存在)
+    templates_dir = REPO_ROOT / "generic_knowledge" / "templates"
+    if templates_dir.exists():
+        cmd.extend(["--add-data", f"{templates_dir}{sep}generic_knowledge/templates"])
     # 入口脚本
     entry_point = REPO_ROOT / "engine" / "entrypoint.py"
     cmd.append(str(entry_point))

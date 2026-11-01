@@ -1,6 +1,6 @@
 """
 FairyReport 纯净开发源码包打包脚本
-生成目标：dist/FairyReport-Dev-Source-v1.6.2.zip
+生成目标：dist/FairyReport-Dev-Source-v1.6.5.zip
 用途：将本项目打包迁移至另一台未配置环境的 Windows 电脑接续开发
 特性：
 1. 包含完整前后端源码、Tauri 桌面外壳、测试套件、构建脚本、行业规程与15类Word模板；
@@ -22,7 +22,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = REPO_ROOT / "dist"
-PACKAGE_NAME = "FairyReport-Dev-Source-v1.6.2"
+PACKAGE_NAME = "FairyReport-Dev-Source-v1.6.5"
 STAGE_DIR = DIST_DIR / "stage_dev_pack" / PACKAGE_NAME
 OUTPUT_ZIP = DIST_DIR / f"{PACKAGE_NAME}.zip"
 
@@ -185,19 +185,13 @@ def main():
     # (9) 根目录核心配置文件
     root_files = [
         "requirements.txt",
+        "requirements-engine.txt",
         "pytest.ini",
         "AGENTS.md",
         "README.md",
         ".env.example",
         ".gitignore",
-        "Dockerfile",
-        "docker-compose.yml",
-        ".dockerignore",
-        "start_cloud.sh",
-        "start_cloud.bat",
         "新电脑开发环境搭建与快速启动指引.md",
-        "云端部署操作手册.md",
-        "云端部署与浏览器访问指引.md",
     ]
     for rf in root_files:
         p = REPO_ROOT / rf

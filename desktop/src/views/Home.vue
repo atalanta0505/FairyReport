@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from "vue";
-import { useAuthStore } from "../stores/auth";
 import { useEngineStore } from "../stores/engine";
 import { useProjectStore } from "../stores/project";
 import Settings from "./Settings.vue";
@@ -10,7 +9,6 @@ import Step3Writing from "../components/Step3Writing.vue";
 import Step4Review from "../components/Step4Review.vue";
 import Step5Export from "../components/Step5Export.vue";
 
-const auth = useAuthStore();
 const engine = useEngineStore();
 const projectStore = useProjectStore();
 
@@ -45,12 +43,9 @@ onMounted(async () => {
       await invoke("log_from_js", { msg: `Home.vue engine.start ok: baseUrl=${engine.baseUrl}` });
     } catch {}
     if (engine.baseUrl) {
-      await Promise.all([
-        projectStore.loadProjects(engine.baseUrl),
-        projectStore.checkGenericStatus(engine.baseUrl),
-      ]);
+      await projectStore.loadProjects(engine.baseUrl);
       try {
-        await invoke("log_from_js", { msg: "Home.vue projects and generic status loaded" });
+        await invoke("log_from_js", { msg: "Home.vue projects loaded" });
       } catch {}
     }
   } catch (err: any) {
@@ -64,10 +59,7 @@ watch(
   () => engine.status,
   async (newStatus) => {
     if (newStatus === "healthy" && engine.baseUrl) {
-      await Promise.all([
-        projectStore.loadProjects(engine.baseUrl),
-        projectStore.checkGenericStatus(engine.baseUrl),
-      ]);
+      await projectStore.loadProjects(engine.baseUrl);
     }
   },
 );
@@ -110,11 +102,6 @@ function goToStep(stepNum: number) {
   }
   projectStore.setStep(stepNum);
   scrollToTop();
-}
-
-async function onLogout() {
-  await engine.stop();
-  await auth.logout();
 }
 </script>
 
@@ -176,7 +163,7 @@ async function onLogout() {
         >
           {{
             engine.status === "healthy"
-              ? (engine.isRemote ? "云端就绪" : "引擎就绪")
+              ? (engine.isRemote ? "远程就绪" : "引擎就绪")
               : engine.status === "starting"
               ? "启动中…"
               : engine.status === "error"
@@ -184,16 +171,13 @@ async function onLogout() {
               : "未启动"
           }}
         </span>
-
-        <span class="user-email" :title="auth.email">{{ auth.email }}</span>
-        <button class="logout-btn" @click="onLogout">退出</button>
       </div>
     </header>
 
     <!-- 主视口内容 -->
     <main ref="mainContentRef" class="main-content">
       <div v-if="view === 'wizard' && engine.status === 'error'" class="engine-alert-bar">
-        <span>⚠️ 引擎未就绪：请确保云服务器 Docker 容器已启动，并在「设置」中填入引擎地址（如 http://IP:8000）。</span>
+        <span>⚠️ 本地计算引擎未就绪：请点击右侧前往「设置」测试并启动本地引擎。</span>
         <button class="alert-btn" @click="view = 'settings'">前往配置</button>
       </div>
 

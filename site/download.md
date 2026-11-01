@@ -4,9 +4,9 @@
 
 ---
 
-## 💻 最新发布版本：v1.5.0
+## 💻 最新发布版本：v1.6.5
 
-- **发布日期**：2026 年 9 月 24 日
+- **发布日期**：2026 年 11 月 1 日
 - **系统要求**：Windows 10 / Windows 11 (64 位)
 - **推荐硬件**：4GB 以上内存，预留 2GB 可用磁盘空间
 
@@ -20,11 +20,11 @@
 :::
 
 ### 1. Windows x64 绿色免安装便携版（推荐）
-- **文件包名**：`FairyReport-Local-v1.5.0-Windows-x64.zip`
+- **文件包名**：`FairyReport-Local-v1.6.5-Windows-x64.zip`
 - **文件体积**：370 MB (自包含完整后端计算引擎与内嵌模型)
 - **SHA-256 校验码**：`97B214137B32D1A7A4CC191FE34629487CE1E9A95588565ADA372A6D22B52D09`
 - **下载通道**：
-  - [⚡ 官方直链下载](/downloads/FairyReport-Local-v1.5.0-Windows-x64.zip)
+  - [⚡ 官方直链下载](/downloads/FairyReport-Local-v1.6.5-Windows-x64.zip)
   - [🚀 百度网盘高速分流（提取码: 6dyu）](https://pan.baidu.com/s/1RecwmytG9KITEQ_0Djwn_A?pwd=6dyu)
 
 ---
@@ -38,9 +38,9 @@
 ---
 
 ### 3. Windows x64 标准安装包
-- **文件包名**：`FairyReport_1.5.0_x64-setup.exe`
+- **文件包名**：`FairyReport_1.6.5_x64-setup.exe`
 - **下载通道**：
-  - [⚡ 官方直链下载](/downloads/FairyReport_1.5.0_x64-setup.exe)
+  - [⚡ 官方直链下载](/downloads/FairyReport_1.6.5_x64-setup.exe)
 
 ---
 
@@ -49,7 +49,7 @@
 为了确保你下载的安装包未被篡改或损坏，建议在 PowerShell 中运行以下命令核验哈希值：
 
 ```powershell
-Get-FileHash -Path "FairyReport-Local-v1.5.0-Windows-x64.zip" -Algorithm SHA256
+Get-FileHash -Path "FairyReport-Local-v1.6.5-Windows-x64.zip" -Algorithm SHA256
 ```
 确认输出的 Hash 字符串与官方给出的 `97B214137B32D1A7A4CC191FE34629487CE1E9A95588565ADA372A6D22B52D09` 一致即可。
 

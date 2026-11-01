@@ -1,6 +1,6 @@
 [package]
 name = "fairyreport-desktop"
-version = "1.6.4"
+version = "1.6.5"
 description = "FairyReport 桌面壳（Tauri 2）"
 edition = "2021"
 
