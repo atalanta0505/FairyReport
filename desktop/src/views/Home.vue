@@ -462,29 +462,4 @@ function goToStep(stepNum: number) {
   justify-content: center;
   gap: 12px;
 }
-
-.btn {
-  padding: 8px 18px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.15s ease;
-}
-.btn-primary {
-  background: #2563eb;
-  color: #fff;
-}
-.btn-primary:hover {
-  background: #1d4ed8;
-}
-.btn-secondary {
-  background: #f1f5f9;
-  color: #334155;
-  border-color: #cbd5e1;
-}
-.btn-secondary:hover {
-  background: #e2e8f0;
-}
 </style>

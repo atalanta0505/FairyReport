@@ -169,56 +169,61 @@ def _sse_event(data: str) -> str:
     return f"data: {data}\n\n"
 
 
-def _read_outline_file(name: str) -> OutlineData:
-    p = settings.project_dir(name) / "outline.json"
+def _sse_json(payload: dict) -> str:
+    return _sse_event(json.dumps(payload, ensure_ascii=False))
+
+
+def _sse_stage(stage: str, message: str) -> str:
+    return _sse_json({"type": "stage", "stage": stage, "message": message})
+
+
+def _load_project_json(name: str, filename: str, model_cls):
+    p = settings.project_dir(name) / filename
     if p.exists():
         try:
             with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            outline_data = OutlineData(**data)
-            if not outline_data.writing_order and outline_data.report_type:
-                outline_data.writing_order = tmpl.get_writing_order(
-                    outline_data.report_type, total_chapters=len(outline_data.chapters)
-                )
-                outline_data.writing_order_reason = tmpl.get_writing_order_reason(outline_data.report_type)
-            return outline_data
+                return model_cls(**json.load(f))
         except Exception:
             pass
-    return OutlineData()
+    return model_cls()
+
+
+def _save_project_json(name: str, filename: str, data):
+    pdir = settings.project_dir(name)
+    pdir.mkdir(parents=True, exist_ok=True)
+    if not getattr(data, "updated_at", ""):
+        data.updated_at = datetime.now(timezone.utc).isoformat()
+    with open(pdir / filename, "w", encoding="utf-8") as f:
+        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
+    return data
+
+
+def _read_outline_file(name: str) -> OutlineData:
+    p = settings.project_dir(name) / "outline.json"
+    if not p.exists():
+        return OutlineData()
+    outline_data: OutlineData = _load_project_json(name, "outline.json", OutlineData)
+    if not outline_data.writing_order and outline_data.report_type:
+        try:
+            outline_data.writing_order = tmpl.get_writing_order(
+                outline_data.report_type, total_chapters=len(outline_data.chapters)
+            )
+            outline_data.writing_order_reason = tmpl.get_writing_order_reason(outline_data.report_type)
+        except Exception:
+            pass
+    return outline_data
 
 
 def _write_outline_file(name: str, data: OutlineData) -> OutlineData:
-    pdir = settings.project_dir(name)
-    pdir.mkdir(parents=True, exist_ok=True)
-    p = pdir / "outline.json"
-    if not data.updated_at:
-        data.updated_at = datetime.now(timezone.utc).isoformat()
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
-    return data
+    return _save_project_json(name, "outline.json", data)
 
 
 def _read_chapters_file(name: str) -> ChaptersData:
-    p = settings.project_dir(name) / "chapters.json"
-    if p.exists():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return ChaptersData(**data)
-        except Exception:
-            pass
-    return ChaptersData()
+    return _load_project_json(name, "chapters.json", ChaptersData)
 
 
 def _write_chapters_file(name: str, data: ChaptersData) -> ChaptersData:
-    pdir = settings.project_dir(name)
-    pdir.mkdir(parents=True, exist_ok=True)
-    p = pdir / "chapters.json"
-    if not data.updated_at:
-        data.updated_at = datetime.now(timezone.utc).isoformat()
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
-    return data
+    return _save_project_json(name, "chapters.json", data)
 
 
 # ── 大纲持久化端点 ──
@@ -299,26 +304,11 @@ def delete_project_chapter(name: str, seq: int):
 
 # ── 专家审阅持久化辅助与端点 ──
 def _read_reviews_file(name: str) -> ReviewsData:
-    p = settings.project_dir(name) / "reviews.json"
-    if p.exists():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return ReviewsData(**data)
-        except Exception:
-            pass
-    return ReviewsData()
+    return _load_project_json(name, "reviews.json", ReviewsData)
 
 
 def _write_reviews_file(name: str, data: ReviewsData) -> ReviewsData:
-    pdir = settings.project_dir(name)
-    pdir.mkdir(parents=True, exist_ok=True)
-    p = pdir / "reviews.json"
-    if not data.updated_at:
-        data.updated_at = datetime.now(timezone.utc).isoformat()
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
-    return data
+    return _save_project_json(name, "reviews.json", data)
 
 
 @router.get("/projects/{name}/reviews", response_model=ReviewsData)
@@ -353,26 +343,11 @@ def delete_project_review(name: str, seq: int):
 
 # ── 全书一体化审阅总档案持久化 ──
 def _read_full_review_file(name: str) -> FullReviewData:
-    p = settings.project_dir(name) / "full_review.json"
-    if p.exists():
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return FullReviewData(**data)
-        except Exception:
-            pass
-    return FullReviewData()
+    return _load_project_json(name, "full_review.json", FullReviewData)
 
 
 def _write_full_review_file(name: str, data: FullReviewData) -> FullReviewData:
-    pdir = settings.project_dir(name)
-    pdir.mkdir(parents=True, exist_ok=True)
-    p = pdir / "full_review.json"
-    if not data.updated_at:
-        data.updated_at = datetime.now(timezone.utc).isoformat()
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(data.model_dump(), f, ensure_ascii=False, indent=2)
-    return data
+    return _save_project_json(name, "full_review.json", data)
 
 
 @router.get("/projects/{name}/full_review", response_model=FullReviewData)
@@ -539,16 +514,31 @@ def chapter(req: ChapterRequest):
     return {"chapter_text": content}
 
 
+def _guard_sse(gen):
+    """统一捕获 SSE 流生成器内的 LLMError 与未预期异常，转换为标准 JSON 错误事件。"""
+    try:
+        yield from gen
+    except LLMError as e:
+        yield _sse_json({"error": e.detail, "status": e.status_code})
+    except Exception as e:
+        yield _sse_json({"error": str(e), "status": 500})
+
+
+def _stream_llm_with_buffer(llm: LLMClient, messages: list[dict], temperature: float, raw_acc: list[str]):
+    """迭代大模型流输出，透传 thought 事件并将正文分片包装为 chunk 事件同时累加到 raw_acc。"""
+    for chunk in llm.chat_stream_iter(messages, temperature=temperature):
+        if chunk.startswith('{"type": "thought"'):
+            yield _sse_event(chunk)
+        else:
+            raw_acc.append(chunk)
+            yield _sse_json({"type": "chunk", "chunk": chunk})
+
+
 def _stream_chapter(writer, llm, req, chapter_title,
                     chapter_budget, is_summary, topic):
     """SSE 生成器：阶段事件 + 思考事件 + 透传 LLM chunks + 最终生成附带URL的参考资料段。"""
-    try:
-        # 1. RAG 检索阶段
-        yield _sse_event(json.dumps({
-            "type": "stage",
-            "stage": "rag",
-            "message": "🔍 正在三源检索：工程底稿库 + 行业规程库 + 百度免 Key 外部联网 RAG...",
-        }, ensure_ascii=False))
+    def _inner():
+        yield _sse_stage("rag", "🔍 正在三源检索：工程底稿库 + 行业规程库 + 百度免 Key 外部联网 RAG...")
 
         rep_name = getattr(req, "report_name", "") or req.project
         rag_context = query_rag(
@@ -561,12 +551,7 @@ def _stream_chapter(writer, llm, req, chapter_title,
             report_type=getattr(req, "report_type", ""),
         )
 
-        # 2. 骨架锁定与构建阶段
-        yield _sse_event(json.dumps({
-            "type": "stage",
-            "stage": "skeleton",
-            "message": "📋 正在提取并锁定章节全层级大纲骨架...",
-        }, ensure_ascii=False))
+        yield _sse_stage("skeleton", "📋 正在提取并锁定章节全层级大纲骨架...")
 
         prompt, system = writer._build_chapter_write_args(
             chapter_title, req.outline_md, req.predecessor_chapters,
@@ -575,12 +560,7 @@ def _stream_chapter(writer, llm, req, chapter_title,
             is_summary=is_summary, chapter_seq=req.chapter_seq,
         )
 
-        # 3. 深度推理构思阶段
-        yield _sse_event(json.dumps({
-            "type": "stage",
-            "stage": "reasoning",
-            "message": "🧠 大模型正在深度构思与组织专业工程论证与数据表格...",
-        }, ensure_ascii=False))
+        yield _sse_stage("reasoning", "🧠 大模型正在深度构思与组织专业工程论证与数据表格...")
 
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
         full_content_parts = []
@@ -591,26 +571,28 @@ def _stream_chapter(writer, llm, req, chapter_title,
             top_p=TOP_P,
         ):
             yield _sse_event(chunk)
-            try:
-                c_obj = json.loads(chunk)
-                if c_obj.get("type") == "chunk" and c_obj.get("chunk"):
-                    full_content_parts.append(c_obj["chunk"])
-            except Exception:
-                pass
+            if chunk.startswith('{"type": "thought"'):
+                continue
+            if chunk.startswith("{"):
+                try:
+                    c_obj = json.loads(chunk)
+                    if isinstance(c_obj, dict) and c_obj.get("type") == "chunk":
+                        full_content_parts.append(c_obj.get("chunk") or "")
+                        continue
+                except Exception:
+                    pass
+            full_content_parts.append(chunk)
 
         full_body = "".join(full_content_parts)
         if full_body and "## 📎 本章参考资料" not in full_body:
             refs = extract_chapter_refs(full_body, rag_context=rag_context, project_name=req.project)
             ref_sec = build_chapter_ref_section(refs)
             if ref_sec:
-                ref_chunk = "\n\n" + ref_sec
-                yield _sse_event(json.dumps({"type": "chunk", "chunk": ref_chunk}, ensure_ascii=False))
+                yield _sse_json({"type": "chunk", "chunk": "\n\n" + ref_sec})
 
         yield "data: [DONE]\n\n"
-    except LLMError as e:
-        yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}, ensure_ascii=False))
-    except Exception as e:
-        yield _sse_event(json.dumps({"error": str(e), "status": 500}, ensure_ascii=False))
+
+    return _guard_sse(_inner())
 
 
 @router.post("/writing/review")
@@ -629,27 +611,23 @@ def review(req: ReviewRequest):
     return {"raw": raw, "review": parsed}
 
 
+_REVIEW_STAGE_MESSAGES = {
+    "fast": "⚡ 正在执行常规快速体检：校核专有名词称谓、关键数值自洽与底线合规...",
+    "compliance": "🔍 正在对照现行政策法规与行业技术规程进行专项合规校核...",
+    "numeric": "🔢 正在提取并复核关键工程技术参数与投资测算自洽性...",
+    "numerical": "🔢 正在提取并复核关键工程技术参数与投资测算自洽性...",
+    "technical": "🛠️ 正在进行技术方案可行性与工艺路线专项审校...",
+}
+
+
 def _stream_review(writer: ChapterWriter, llm: LLMClient, req: ReviewRequest):
     """SSE 生成器：阶段事件 + 思考事件 + 输出 chunks + 最终解析 review 结果。"""
-    try:
+    def _inner():
         mode = req.mode or "fast"
-        # 1. 阶段事件
-        if mode == "fast":
-            stage_msg = "⚡ 正在执行常规快速体检：校核专有名词称谓、关键数值自洽与底线合规..."
-        elif mode == "compliance":
-            stage_msg = "🔍 正在对照现行政策法规与行业技术规程进行专项合规校核..."
-        elif mode in ("numeric", "numerical"):
-            stage_msg = "🔢 正在提取并复核关键工程技术参数与投资测算自洽性..."
-        elif mode == "technical":
-            stage_msg = "🛠️ 正在进行技术方案可行性与工艺路线专项审校..."
-        else:
-            stage_msg = "🔍 正在对照行业编制规程与工程底稿进行全维度专家逐句诊断..."
-
-        yield _sse_event(json.dumps({
-            "type": "stage",
-            "stage": "init",
-            "message": stage_msg,
-        }, ensure_ascii=False))
+        stage_msg = _REVIEW_STAGE_MESSAGES.get(
+            mode, "🔍 正在对照行业编制规程与工程底稿进行全维度专家逐句诊断..."
+        )
+        yield _sse_stage("init", stage_msg)
 
         prompt, system = writer._build_expert_review_args(
             chapter_title=req.chapter_title,
@@ -658,32 +636,19 @@ def _stream_review(writer: ChapterWriter, llm: LLMClient, req: ReviewRequest):
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
 
-        raw_buffer = ""
-        for chunk in llm.chat_stream_iter(messages, temperature=0.2):
-            if chunk.startswith('{"type": "thought"'):
-                yield _sse_event(chunk)
-            else:
-                raw_buffer += chunk
-                yield _sse_event(json.dumps({
-                    "type": "chunk",
-                    "chunk": chunk,
-                }, ensure_ascii=False))
+        raw_parts: list[str] = []
+        yield from _stream_llm_with_buffer(llm, messages, temperature=0.2, raw_acc=raw_parts)
+        raw_buffer = "".join(raw_parts)
 
-        if mode == "technical":
-            parsed = parse_tech_review_result(raw_buffer)
-        else:
-            parsed = parse_expert_review_result(raw_buffer)
-
-        yield _sse_event(json.dumps({
-            "type": "done",
-            "review": parsed,
-            "raw": raw_buffer,
-        }, ensure_ascii=False))
+        parsed = (
+            parse_tech_review_result(raw_buffer)
+            if mode == "technical"
+            else parse_expert_review_result(raw_buffer)
+        )
+        yield _sse_json({"type": "done", "review": parsed, "raw": raw_buffer})
         yield "data: [DONE]\n\n"
-    except LLMError as e:
-        yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}, ensure_ascii=False))
-    except Exception as e:
-        yield _sse_event(json.dumps({"error": str(e), "status": 500}, ensure_ascii=False))
+
+    return _guard_sse(_inner())
 
 
 @router.post("/writing/review_stream")
@@ -698,12 +663,8 @@ def review_stream(req: ReviewRequest):
 
 
 def _stream_revise(writer: ChapterWriter, llm: LLMClient, req: ReviseRequest):
-    try:
-        yield _sse_event(json.dumps({
-            "type": "stage",
-            "stage": "locate",
-            "message": "统筹专家诊断意见与修改清单...",
-        }, ensure_ascii=False))
+    def _inner():
+        yield _sse_stage("locate", "统筹专家诊断意见与修改清单...")
 
         prompt, system = writer._build_modify_args(
             req.chapter_text,
@@ -714,35 +675,17 @@ def _stream_revise(writer: ChapterWriter, llm: LLMClient, req: ReviseRequest):
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
 
-        yield _sse_event(json.dumps({
-            "type": "stage",
-            "stage": "reasoning",
-            "message": "AI 专家正在推演深度重构方案...",
-        }, ensure_ascii=False))
+        yield _sse_stage("reasoning", "AI 专家正在推演深度重构方案...")
 
-        raw_buffer = ""
-        for chunk in llm.chat_stream_iter(messages, temperature=0.35):
-            if chunk.startswith('{"type": "thought"'):
-                yield _sse_event(chunk)
-            else:
-                raw_buffer += chunk
-                yield _sse_event(json.dumps({
-                    "type": "chunk",
-                    "chunk": chunk,
-                }, ensure_ascii=False))
-
+        raw_parts: list[str] = []
+        yield from _stream_llm_with_buffer(llm, messages, temperature=0.35, raw_acc=raw_parts)
+        raw_buffer = "".join(raw_parts)
         normalized = normalize_chapter_markdown(raw_buffer)
 
-        yield _sse_event(json.dumps({
-            "type": "done",
-            "revised_text": normalized,
-            "raw": raw_buffer,
-        }, ensure_ascii=False))
+        yield _sse_json({"type": "done", "revised_text": normalized, "raw": raw_buffer})
         yield "data: [DONE]\n\n"
-    except LLMError as e:
-        yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}, ensure_ascii=False))
-    except Exception as e:
-        yield _sse_event(json.dumps({"error": str(e), "status": 500}, ensure_ascii=False))
+
+    return _guard_sse(_inner())
 
 
 @router.post("/writing/revise_stream")
@@ -791,12 +734,8 @@ def revise_paragraph(req: ReviseParagraphRequest):
 
 
 def _stream_revise_paragraph(writer: ChapterWriter, llm: LLMClient, req: ReviseParagraphRequest):
-    try:
-        yield _sse_event(json.dumps({
-            "type": "stage",
-            "stage": "locate",
-            "message": "AI 专家正在锁定目标段落并对照投资项目编制规程...",
-        }, ensure_ascii=False))
+    def _inner():
+        yield _sse_stage("locate", "AI 专家正在锁定目标段落并对照投资项目编制规程...")
 
         prompt, system = writer._build_paragraph_modify_args(
             req.paragraph_text,
@@ -806,32 +745,16 @@ def _stream_revise_paragraph(writer: ChapterWriter, llm: LLMClient, req: ReviseP
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
 
-        yield _sse_event(json.dumps({
-            "type": "stage",
-            "stage": "reasoning",
-            "message": "AI 专家正在推演段落精准重构与合规表述方案...",
-        }, ensure_ascii=False))
+        yield _sse_stage("reasoning", "AI 专家正在推演段落精准重构与合规表述方案...")
 
-        raw_buffer = ""
-        for chunk in llm.chat_stream_iter(messages, temperature=0.3):
-            if chunk.startswith('{"type": "thought"'):
-                yield _sse_event(chunk)
-            else:
-                raw_buffer += chunk
-                yield _sse_event(json.dumps({
-                    "type": "chunk",
-                    "chunk": chunk,
-                }, ensure_ascii=False))
+        raw_parts: list[str] = []
+        yield from _stream_llm_with_buffer(llm, messages, temperature=0.3, raw_acc=raw_parts)
+        raw_buffer = "".join(raw_parts)
 
-        yield _sse_event(json.dumps({
-            "type": "done",
-            "revised_paragraph": raw_buffer.strip(),
-        }, ensure_ascii=False))
+        yield _sse_json({"type": "done", "revised_paragraph": raw_buffer.strip()})
         yield "data: [DONE]\n\n"
-    except LLMError as e:
-        yield _sse_event(json.dumps({"error": e.detail, "status": e.status_code}, ensure_ascii=False))
-    except Exception as e:
-        yield _sse_event(json.dumps({"error": str(e), "status": 500}, ensure_ascii=False))
+
+    return _guard_sse(_inner())
 
 
 @router.post("/writing/revise_paragraph_stream")

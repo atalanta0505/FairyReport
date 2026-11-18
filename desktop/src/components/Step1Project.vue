@@ -552,79 +552,6 @@ function nextStep() {
   gap: 20px;
 }
 
-.alert-banner {
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-size: 14px;
-  line-height: 1.4;
-  margin-bottom: 4px;
-}
-.alert-banner.success {
-  background: #e8f5e9;
-  color: #2e7d32;
-  border: 1px solid #c8e6c9;
-}
-.alert-banner.error {
-  background: #ffebee;
-  color: #c62828;
-  border: 1px solid #ffcdd2;
-}
-.alert-banner.info {
-  background: #e0f2fe;
-  color: #0369a1;
-  border: 1px solid #bae6fd;
-}
-
-.card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  overflow: hidden;
-}
-
-.card-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #f1f5f9;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.card-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1e293b;
-}
-
-.title-with-badge {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.badge {
-  background: #e0e7ff;
-  color: #4338ca;
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 500;
-}
-
-.count-badge {
-  background: #f1f5f9;
-  color: #475569;
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 12px;
-}
-
-.card-body {
-  padding: 20px;
-}
-
 .new-project-row {
   display: flex;
   gap: 10px;
@@ -822,71 +749,6 @@ function nextStep() {
   font-size: 12px;
 }
 
-.btn {
-  padding: 7px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.15s ease;
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn-primary {
-  background: #2b6cff;
-  color: #fff;
-}
-.btn-primary:hover:not(:disabled) {
-  background: #1d57e0;
-}
-.btn-secondary {
-  background: #f1f5f9;
-  color: #334155;
-  border-color: #cbd5e1;
-}
-.btn-secondary:hover:not(:disabled) {
-  background: #e2e8f0;
-}
-.btn-outline {
-  background: #fff;
-  border-color: #cbd5e1;
-  color: #334155;
-}
-.btn-outline:hover:not(:disabled) {
-  background: #f8fafc;
-  border-color: #94a3b8;
-}
-.btn-danger-outline {
-  background: #fff;
-  border-color: #fecaca;
-  color: #dc2626;
-}
-.btn-danger-outline:hover:not(:disabled) {
-  background: #fef2f2;
-}
-.btn-text {
-  background: transparent;
-  color: #64748b;
-}
-.btn-text:hover {
-  color: #334155;
-}
-.btn-lg {
-  padding: 10px 24px;
-  font-size: 15px;
-}
-.btn-sm {
-  padding: 5px 12px;
-  font-size: 12px;
-}
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 .btn-icon-danger {
   padding: 4px 8px;
   border: 1px solid #fecaca;
@@ -908,18 +770,7 @@ function nextStep() {
 }
 
 .bottom-nav {
-  display: flex;
   justify-content: flex-end;
-  padding-top: 8px;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 /* 摄取失败排查卡片样式 */

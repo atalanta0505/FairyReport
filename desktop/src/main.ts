@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
 import App from "./App.vue";
+import "./styles/common.css";
 import { invoke } from "@tauri-apps/api/core";
 
 function log(msg: string) {

@@ -611,4 +611,32 @@ def test_normalize_chapter_markdown_glued_zhiku_headings():
     assert "### 4. 强化专业运维人才与应急演练保障" in res_clean
 
 
+def test_find_chapter_heading_indices_and_cn_seq_parsing():
+    """验证统一抽离的大纲章边界定位与中文序号解析单一事实源。"""
+    from engine.app.writing.outline import (
+        find_chapter_heading_indices,
+        is_placeholder_h1,
+        parse_chapter_seq,
+    )
+
+    lines_h1 = [
+        "# 标题（体现核心研判）",
+        "# 一、总体形势",
+        "## （一）宏观背景",
+        "# 二、政策建议",
+    ]
+    assert is_placeholder_h1("标题（体现核心研判）") is True
+    assert find_chapter_heading_indices(lines_h1) == [1, 3]
+
+    lines_h2_fallback = [
+        "## 【导语】核心摘要",
+        "### 1. 现状",
+        "## 一、存在问题",
+    ]
+    assert find_chapter_heading_indices(lines_h2_fallback) == [0, 2]
+    assert parse_chapter_seq("第十二章 社会评价") == 12
+    assert parse_chapter_seq("二十一、专项保障") == 21
+
+
+
 

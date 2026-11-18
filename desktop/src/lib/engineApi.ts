@@ -390,21 +390,58 @@ export interface WritingProgressEvent {
   chunk?: string;
 }
 
-/** 流式写作单章（SSE 透传，支持中止取消与阶段/思考/正文事件回调） */
-export function streamChapterWriting(
-  baseUrl: string,
-  req: ChapterStreamRequest,
-  onChunk: (chunk: string) => void,
-  onDone: () => void,
-  onError: (err: Error) => void,
-  onProgress?: (event: WritingProgressEvent) => void,
-): () => void {
-  const controller = new AbortController();
-  const { signal } = controller;
+interface SseStreamHandlers {
+  signal?: AbortSignal;
+  headers?: Record<string, string>;
+  errorPrefix?: string;
+  wrapStreamErrorAsApiError?: boolean;
+  defaultStreamErrorMsg?: string;
+  allowRawMultilineContinuation?: boolean;
+  ignorePlainTextFallback?: boolean;
+  onStage?: (stage: string, message: string) => void;
+  onThought?: (thought: string) => void;
+  onChunk?: (chunk: string) => void;
+  onDoneObject?: (parsed: Record<string, any>) => void;
+  onDoneSignal?: () => void;
+  onDirectJsonFallback?: (obj: Record<string, any>, rawText?: string) => void;
+  onPlainFallbackText?: (fullText: string) => void;
+}
 
-  const processContent = (content: string): boolean => {
+/**
+ * 统一底层 SSE 流式请求与多模态降级解析器：
+ * 兼容 ReadableStream (getReader)、文本块回退 (resp.text) 与直接 JSON 回退 (resp.json)。
+ */
+async function consumeSseEndpoint(
+  baseUrl: string,
+  path: string,
+  body: unknown,
+  handlers: SseStreamHandlers,
+): Promise<void> {
+  const resp = await engineFetch(joinUrl(baseUrl, path), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(handlers.headers || {}),
+    },
+    body: JSON.stringify(body),
+    signal: handlers.signal,
+  });
+
+  if (!resp.ok) {
+    let detail = handlers.errorPrefix ? `HTTP ${resp.status}` : `引擎错误 ${resp.status}`;
+    try {
+      const j = await resp.json();
+      detail = j.detail || j.message || detail;
+    } catch {
+      /* ignore non-JSON error body */
+    }
+    const fullMsg = handlers.errorPrefix ? `${handlers.errorPrefix}: ${detail}` : detail;
+    throw new EngineApiError(resp.status, fullMsg);
+  }
+
+  const dispatchPayload = (content: string): boolean => {
     if (content === "[DONE]") {
-      onDone();
+      handlers.onDoneSignal?.();
       return true;
     }
     if (content.startsWith("{")) {
@@ -412,26 +449,29 @@ export function streamChapterWriting(
         const parsed = JSON.parse(content);
         if (parsed && typeof parsed === "object") {
           if (parsed.error) {
+            if (handlers.wrapStreamErrorAsApiError) {
+              throw new EngineApiError(
+                parsed.status || 500,
+                parsed.error || handlers.defaultStreamErrorMsg || "流式服务异常",
+              );
+            }
             throw new Error(parsed.error);
           }
           if (parsed.type === "stage") {
-            if (onProgress) {
-              onProgress({
-                type: "stage",
-                stage: parsed.stage,
-                message: parsed.message,
-              });
-            }
+            handlers.onStage?.(parsed.stage, parsed.message);
             return false;
           }
           if (parsed.type === "thought") {
-            if (onProgress) {
-              onProgress({
-                type: "thought",
-                chunk: parsed.chunk || "",
-              });
-            }
+            handlers.onThought?.(parsed.thought || parsed.chunk || "");
             return false;
+          }
+          if (parsed.type === "chunk") {
+            handlers.onChunk?.(parsed.chunk || "");
+            return false;
+          }
+          if (parsed.type === "done") {
+            handlers.onDoneObject?.(parsed);
+            return true;
           }
         }
       } catch (err) {
@@ -444,96 +484,129 @@ export function streamChapterWriting(
         }
       }
     }
-    if (onProgress) {
-      onProgress({ type: "chunk", chunk: content });
+    if (!handlers.ignorePlainTextFallback) {
+      handlers.onChunk?.(content);
     }
-    onChunk(content);
     return false;
+  };
+
+  if (resp.body && typeof (resp.body as any).getReader === "function") {
+    const reader = (resp.body as any).getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let eventEndIndex: number;
+      while ((eventEndIndex = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, eventEndIndex);
+        buffer = buffer.slice(eventEndIndex + 2);
+        if (!rawEvent.trim()) continue;
+
+        for (const line of rawEvent.split("\n")) {
+          if (line.startsWith("data:")) {
+            const content = line.slice(5).replace(/^\s/, "");
+            if (dispatchPayload(content)) return;
+          } else if (
+            handlers.allowRawMultilineContinuation &&
+            !line.startsWith(":") &&
+            line.length > 0
+          ) {
+            handlers.onChunk?.("\n" + line);
+          }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      for (const line of buffer.trim().split("\n")) {
+        if (line.startsWith("data:")) {
+          const content = line.slice(5).replace(/^\s/, "");
+          if (dispatchPayload(content)) return;
+        }
+      }
+    }
+  } else if (typeof resp.text === "function") {
+    const fullText = await resp.text();
+    let hasSseData = false;
+    for (const block of fullText.split("\n\n")) {
+      const trimmed = block.trim();
+      if (trimmed.startsWith("data:")) {
+        hasSseData = true;
+        const content = trimmed.slice(5).replace(/^\s/, "");
+        if (dispatchPayload(content)) return;
+      }
+    }
+    if (!hasSseData && fullText.trim()) {
+      if (fullText.trim().startsWith("{")) {
+        try {
+          const directObj = JSON.parse(fullText);
+          if (directObj && typeof directObj === "object") {
+            handlers.onDirectJsonFallback?.(directObj, fullText);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      handlers.onPlainFallbackText?.(fullText);
+    }
+  } else if (typeof resp.json === "function") {
+    try {
+      const directObj = await resp.json();
+      if (directObj && typeof directObj === "object") {
+        handlers.onDirectJsonFallback?.(directObj);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** 流式写作单章（SSE 透传，支持中止取消与阶段/思考/正文事件回调） */
+export function streamChapterWriting(
+  baseUrl: string,
+  req: ChapterStreamRequest,
+  onChunk: (chunk: string) => void,
+  onDone: () => void,
+  onError: (err: Error) => void,
+  onProgress?: (event: WritingProgressEvent) => void,
+): () => void {
+  const controller = new AbortController();
+  const { signal } = controller;
+  let doneCalled = false;
+  const notifyDone = () => {
+    if (!doneCalled) {
+      doneCalled = true;
+      onDone();
+    }
   };
 
   (async () => {
     try {
-      const resp = await engineFetch(joinUrl(baseUrl, "/writing/chapter"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...req, stream: true }),
-        signal,
-      });
-
-      if (!resp.ok) {
-        let msg = `引擎错误 ${resp.status}`;
-        try {
-          const j = await resp.json();
-          msg = j.detail || j.message || msg;
-        } catch {
-          /* ignore */
-        }
-        throw new EngineApiError(resp.status, msg);
-      }
-
-      if (resp.body && typeof resp.body.getReader === "function") {
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          let eventEndIndex: number;
-          while ((eventEndIndex = buffer.indexOf("\n\n")) !== -1) {
-            const rawEvent = buffer.slice(0, eventEndIndex);
-            buffer = buffer.slice(eventEndIndex + 2);
-
-            if (!rawEvent.trim()) continue;
-
-            const lines = rawEvent.split("\n");
-            for (const line of lines) {
-              if (line.startsWith("data:")) {
-                const content = line.slice(5).replace(/^\s/, "");
-                const isDone = processContent(content);
-                if (isDone) return;
-              } else if (!line.startsWith(":") && line.length > 0) {
-                if (onProgress) {
-                  onProgress({ type: "chunk", chunk: "\n" + line });
-                }
-                onChunk("\n" + line);
-              }
-            }
-          }
-        }
-
-        if (buffer.trim()) {
-          const lines = buffer.trim().split("\n");
-          for (const line of lines) {
-            if (line.startsWith("data:")) {
-              const content = line.slice(5).replace(/^\s/, "");
-              const isDone = processContent(content);
-              if (isDone) return;
-            }
-          }
-        }
-      } else if (typeof resp.text === "function") {
-        const fullText = await resp.text();
-        const lines = fullText.split("\n\n");
-        for (const block of lines) {
-          const trimmed = block.trim();
-          if (trimmed.startsWith("data:")) {
-            const content = trimmed.slice(5).replace(/^\s/, "");
-            const isDone = processContent(content);
-            if (isDone) return;
-          }
-        }
-      }
-
-      onDone();
+      await consumeSseEndpoint(
+        baseUrl,
+        "/writing/chapter",
+        { ...req, stream: true },
+        {
+          signal,
+          allowRawMultilineContinuation: true,
+          onStage: (stage, message) => onProgress?.({ type: "stage", stage, message }),
+          onThought: (chunk) => onProgress?.({ type: "thought", chunk }),
+          onChunk: (chunk) => {
+            onProgress?.({ type: "chunk", chunk });
+            onChunk(chunk);
+          },
+          onDoneSignal: notifyDone,
+        },
+      );
+      notifyDone();
     } catch (err) {
-      if (signal.aborted) {
-        return;
+      if (!signal.aborted) {
+        onError(err as Error);
       }
-      onError(err as Error);
     }
   })();
 
@@ -598,234 +671,12 @@ export interface ReviewChapterRequest {
   llm_config: LLMConfig;
 }
 
-export interface ReviseChapterRequest {
-  chapter_text: string;
-  instruction: string;
-  llm_config: LLMConfig;
-  chapter_title?: string;
-  report_type?: string;
-  chapter_budget?: number;
-}
-
 export interface ReviewProgressEvent {
   type: "stage" | "thought" | "chunk" | "done";
   stage?: string;
   message?: string;
   chunk?: string;
   review?: ExpertReviewResult;
-}
-
-/** 针对章节执行专家全维审阅或专项审查 */
-export async function reviewChapter(
-  baseUrl: string,
-  req: ReviewChapterRequest,
-): Promise<{ raw: string; review: ExpertReviewResult }> {
-  return request<{ raw: string; review: ExpertReviewResult }>(
-    baseUrl,
-    "/writing/review",
-    {
-      method: "POST",
-      body: JSON.stringify(req),
-    },
-  );
-}
-
-/** 流式全维专家审阅章节（SSE 透传，支持阶段/思考/诊断事件回调与 Promise 结果返回） */
-export async function streamChapterReview(
-  baseUrl: string,
-  req: ReviewChapterRequest,
-  onProgress?: (event: ReviewProgressEvent) => void,
-): Promise<{ raw: string; review: ExpertReviewResult }> {
-  const resp = await engineFetch(joinUrl(baseUrl, "/writing/review_stream"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-
-  if (!resp.ok) {
-    let msg = `引擎错误 ${resp.status}`;
-    try {
-      const j = await resp.json();
-      msg = j.detail || j.message || msg;
-    } catch {
-      /* ignore */
-    }
-    throw new EngineApiError(resp.status, msg);
-  }
-
-  let finalReview: ExpertReviewResult | null = null;
-  let rawBuffer = "";
-
-  const processContent = (content: string): boolean => {
-    if (content === "[DONE]") {
-      return true;
-    }
-    if (content.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(content);
-        if (parsed && typeof parsed === "object") {
-          if (parsed.error) {
-            throw new Error(parsed.error);
-          }
-          if (parsed.type === "stage") {
-            if (onProgress) {
-              onProgress({
-                type: "stage",
-                stage: parsed.stage,
-                message: parsed.message,
-              });
-            }
-            return false;
-          }
-          if (parsed.type === "thought") {
-            if (onProgress) {
-              onProgress({
-                type: "thought",
-                chunk: parsed.chunk || "",
-              });
-            }
-            return false;
-          }
-          if (parsed.type === "chunk") {
-            rawBuffer += parsed.chunk || "";
-            if (onProgress) {
-              onProgress({
-                type: "chunk",
-                chunk: parsed.chunk || "",
-              });
-            }
-            return false;
-          }
-          if (parsed.type === "done") {
-            finalReview = parsed.review as ExpertReviewResult;
-            if (parsed.raw) {
-              rawBuffer = parsed.raw;
-            }
-            if (onProgress) {
-              onProgress({
-                type: "done",
-                review: finalReview,
-              });
-            }
-            return true;
-          }
-        }
-      } catch (err) {
-        if (
-          err instanceof Error &&
-          !(err instanceof SyntaxError) &&
-          err.message !== "Unexpected token"
-        ) {
-          throw err;
-        }
-      }
-    }
-    rawBuffer += content;
-    if (onProgress) {
-      onProgress({ type: "chunk", chunk: content });
-    }
-    return false;
-  };
-
-  if (resp.body && typeof resp.body.getReader === "function") {
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      let eventEndIndex: number;
-      while ((eventEndIndex = buffer.indexOf("\n\n")) !== -1) {
-        const rawEvent = buffer.slice(0, eventEndIndex);
-        buffer = buffer.slice(eventEndIndex + 2);
-
-        if (!rawEvent.trim()) continue;
-
-        const lines = rawEvent.split("\n");
-        for (const line of lines) {
-          if (line.startsWith("data:")) {
-            const content = line.slice(5).replace(/^\s/, "");
-            const isDone = processContent(content);
-            if (isDone) break;
-          }
-        }
-      }
-    }
-
-    if (buffer.trim()) {
-      const lines = buffer.trim().split("\n");
-      for (const line of lines) {
-        if (line.startsWith("data:")) {
-          const content = line.slice(5).replace(/^\s/, "");
-          processContent(content);
-        }
-      }
-    }
-  } else if (typeof resp.text === "function") {
-    const fullText = await resp.text();
-    let hasSseData = false;
-    const blocks = fullText.split("\n\n");
-    for (const block of blocks) {
-      const trimmed = block.trim();
-      if (trimmed.startsWith("data:")) {
-        hasSseData = true;
-        const content = trimmed.slice(5).replace(/^\s/, "");
-        const isDone = processContent(content);
-        if (isDone) break;
-      }
-    }
-    if (!hasSseData && fullText.trim().startsWith("{")) {
-      try {
-        const directObj = JSON.parse(fullText);
-        if (directObj.review) {
-          finalReview = directObj.review;
-          rawBuffer = directObj.raw || JSON.stringify(directObj.review);
-        } else if (directObj.status) {
-          finalReview = directObj;
-          rawBuffer = fullText;
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-  } else if (typeof resp.json === "function") {
-    try {
-      const directObj = await resp.json();
-      if (directObj && typeof directObj === "object") {
-        if (directObj.review) {
-          finalReview = directObj.review;
-          rawBuffer = directObj.raw || JSON.stringify(directObj.review);
-        } else if (directObj.status) {
-          finalReview = directObj;
-          rawBuffer = JSON.stringify(directObj);
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-
-  if (!finalReview) {
-    finalReview = {
-      status: "通过",
-      score: 85,
-      summary: rawBuffer ? "审阅已完成" : "未能获取审阅结果",
-      issues: [],
-      numerical_checks: [],
-      data_gap_checklist: [],
-      suggestions: "",
-      raw: rawBuffer,
-    };
-  }
-
-  return {
-    raw: rawBuffer,
-    review: finalReview,
-  };
 }
 
 export interface ReviseChapterRequest {
@@ -851,19 +702,78 @@ export type ReviseStreamProgress =
   | { type: "chunk"; chunk: string }
   | { type: "done"; revised_text: string };
 
-/** 针对章节执行 AI 定向修改与润色（非流式） */
-export async function reviseChapter(
+/** 针对章节执行专家全维审阅或专项审查 */
+export async function reviewChapter(
   baseUrl: string,
-  req: ReviseChapterRequest,
-): Promise<{ revised_text: string }> {
-  return request<{ revised_text: string }>(
+  req: ReviewChapterRequest,
+): Promise<{ raw: string; review: ExpertReviewResult }> {
+  return request<{ raw: string; review: ExpertReviewResult }>(
     baseUrl,
-    "/writing/revise",
+    "/writing/review",
     {
       method: "POST",
       body: JSON.stringify(req),
     },
   );
+}
+
+/** 流式全维专家审阅章节（SSE 透传，支持阶段/思考/诊断事件回调与 Promise 结果返回） */
+export async function streamChapterReview(
+  baseUrl: string,
+  req: ReviewChapterRequest,
+  onProgress?: (event: ReviewProgressEvent) => void,
+): Promise<{ raw: string; review: ExpertReviewResult }> {
+  let finalReview: ExpertReviewResult | null = null;
+  let rawBuffer = "";
+
+  await consumeSseEndpoint(baseUrl, "/writing/review_stream", req, {
+    onStage: (stage, message) => onProgress?.({ type: "stage", stage, message }),
+    onThought: (chunk) => onProgress?.({ type: "thought", chunk }),
+    onChunk: (chunk) => {
+      rawBuffer += chunk;
+      onProgress?.({ type: "chunk", chunk });
+    },
+    onDoneObject: (parsed) => {
+      finalReview = parsed.review as ExpertReviewResult;
+      if (parsed.raw) rawBuffer = parsed.raw;
+      onProgress?.({ type: "done", review: finalReview });
+    },
+    onDirectJsonFallback: (directObj, rawText) => {
+      if (directObj.review) {
+        finalReview = directObj.review;
+        rawBuffer = directObj.raw || JSON.stringify(directObj.review);
+      } else if (directObj.status) {
+        finalReview = directObj as ExpertReviewResult;
+        rawBuffer = rawText || JSON.stringify(directObj);
+      }
+    },
+  });
+
+  if (!finalReview) {
+    finalReview = {
+      status: "通过",
+      score: 85,
+      summary: rawBuffer ? "审阅已完成" : "未能获取审阅结果",
+      issues: [],
+      numerical_checks: [],
+      data_gap_checklist: [],
+      suggestions: "",
+      raw: rawBuffer,
+    };
+  }
+
+  return { raw: rawBuffer, review: finalReview };
+}
+
+/** 针对章节执行 AI 定向修改与润色（非流式） */
+export async function reviseChapter(
+  baseUrl: string,
+  req: ReviseChapterRequest,
+): Promise<{ revised_text: string }> {
+  return request<{ revised_text: string }>(baseUrl, "/writing/revise", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 /** 针对章节执行流式 AI 定向修改与润色（SSE 流式透传思考推演过程） */
@@ -872,177 +782,33 @@ export async function reviseChapterStream(
   req: ReviseChapterRequest,
   onProgress?: (progress: ReviseStreamProgress) => void,
 ): Promise<{ revised_text: string }> {
-  const url = joinUrl(baseUrl, "/writing/revise_stream");
-  const resp = await engineFetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-    },
-    body: JSON.stringify(req),
-  });
-
-  if (!resp.ok) {
-    let errDetail = `HTTP ${resp.status}`;
-    try {
-      const errJson = await resp.json();
-      errDetail = errJson.detail || errJson.message || errDetail;
-    } catch {
-      // ignore
-    }
-    throw new EngineApiError(resp.status, `AI智能修订失败: ${errDetail}`);
-  }
-
   let finalRevisedText = "";
   let rawBuffer = "";
 
-  const processContent = (content: string): boolean => {
-    if (content === "[DONE]") return true;
-    if (content.startsWith("{") && content.endsWith("}")) {
-      try {
-        const parsed = JSON.parse(content);
-        if (parsed.error) {
-          throw new EngineApiError(
-            parsed.status || 500,
-            parsed.error || "智能修订服务异常",
-          );
-        }
-        if (parsed.type === "stage") {
-          if (onProgress) {
-            onProgress({
-              type: "stage",
-              stage: parsed.stage,
-              message: parsed.message,
-            });
-          }
-          return false;
-        }
-        if (parsed.type === "thought") {
-          const th = parsed.thought || parsed.chunk || "";
-          if (onProgress) {
-            onProgress({
-              type: "thought",
-              thought: th,
-              chunk: th,
-            });
-          }
-          return false;
-        }
-        if (parsed.type === "chunk") {
-          rawBuffer += parsed.chunk || "";
-          if (onProgress) {
-            onProgress({
-              type: "chunk",
-              chunk: parsed.chunk || "",
-            });
-          }
-          return false;
-        }
-        if (parsed.type === "done") {
-          finalRevisedText = parsed.revised_text || rawBuffer;
-          if (onProgress) {
-            onProgress({
-              type: "done",
-              revised_text: finalRevisedText,
-            });
-          }
-          return true;
-        }
-      } catch (err) {
-        if (
-          err instanceof Error &&
-          !(err instanceof SyntaxError) &&
-          err.message !== "Unexpected token"
-        ) {
-          throw err;
-        }
-      }
-    }
-    rawBuffer += content;
-    if (onProgress) {
-      onProgress({ type: "chunk", chunk: content });
-    }
-    return false;
-  };
+  await consumeSseEndpoint(baseUrl, "/writing/revise_stream", req, {
+    headers: { Accept: "text/event-stream" },
+    errorPrefix: "AI智能修订失败",
+    wrapStreamErrorAsApiError: true,
+    defaultStreamErrorMsg: "智能修订服务异常",
+    onStage: (stage, message) => onProgress?.({ type: "stage", stage, message }),
+    onThought: (th) => onProgress?.({ type: "thought", thought: th, chunk: th }),
+    onChunk: (chunk) => {
+      rawBuffer += chunk;
+      onProgress?.({ type: "chunk", chunk });
+    },
+    onDoneObject: (parsed) => {
+      finalRevisedText = parsed.revised_text || rawBuffer;
+      onProgress?.({ type: "done", revised_text: finalRevisedText });
+    },
+    onDirectJsonFallback: (directObj) => {
+      if (directObj.revised_text) finalRevisedText = directObj.revised_text;
+    },
+    onPlainFallbackText: (fullText) => {
+      if (!finalRevisedText) finalRevisedText = rawBuffer || fullText;
+    },
+  });
 
-  if (resp.body && typeof resp.body.getReader === "function") {
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      let eventEndIndex: number;
-      while ((eventEndIndex = buffer.indexOf("\n\n")) !== -1) {
-        const rawEvent = buffer.slice(0, eventEndIndex);
-        buffer = buffer.slice(eventEndIndex + 2);
-
-        if (!rawEvent.trim()) continue;
-
-        const lines = rawEvent.split("\n");
-        for (const line of lines) {
-          if (line.startsWith("data:")) {
-            const content = line.slice(5).replace(/^\s/, "");
-            const isDone = processContent(content);
-            if (isDone) break;
-          }
-        }
-      }
-    }
-
-    if (buffer.trim()) {
-      const lines = buffer.trim().split("\n");
-      for (const line of lines) {
-        if (line.startsWith("data:")) {
-          const content = line.slice(5).replace(/^\s/, "");
-          processContent(content);
-        }
-      }
-    }
-  } else if (typeof resp.text === "function") {
-    const fullText = await resp.text();
-    const blocks = fullText.split("\n\n");
-    for (const block of blocks) {
-      const trimmed = block.trim();
-      if (trimmed.startsWith("data:")) {
-        const content = trimmed.slice(5).replace(/^\s/, "");
-        const isDone = processContent(content);
-        if (isDone) break;
-      }
-    }
-    if (!finalRevisedText && fullText.trim()) {
-      if (fullText.trim().startsWith("{")) {
-        try {
-          const directObj = JSON.parse(fullText);
-          if (directObj.revised_text) {
-            finalRevisedText = directObj.revised_text;
-          }
-        } catch {
-          // ignore
-        }
-      }
-      if (!finalRevisedText) {
-        finalRevisedText = rawBuffer || fullText;
-      }
-    }
-  } else if (typeof resp.json === "function") {
-    try {
-      const data = await resp.json();
-      finalRevisedText = data.revised_text || rawBuffer;
-    } catch {
-      // ignore
-    }
-  }
-
-  if (!finalRevisedText) {
-    finalRevisedText = rawBuffer;
-  }
-
-  return { revised_text: finalRevisedText };
+  return { revised_text: finalRevisedText || rawBuffer };
 }
 
 /** 针对局部段落执行外科手术式精准修订（毫秒级响应，零副作用） */
@@ -1050,14 +816,10 @@ export async function reviseParagraph(
   baseUrl: string,
   req: ReviseParagraphRequest,
 ): Promise<{ revised_paragraph: string }> {
-  return request<{ revised_paragraph: string }>(
-    baseUrl,
-    "/writing/revise-paragraph",
-    {
-      method: "POST",
-      body: JSON.stringify(req),
-    },
-  );
+  return request<{ revised_paragraph: string }>(baseUrl, "/writing/revise-paragraph", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
 
 /** 流式单段落精准重构（SSE 透传阶段、实时思考流与重构内容） */
@@ -1066,159 +828,29 @@ export async function streamParagraphRevision(
   req: ReviseParagraphRequest,
   onProgress?: (event: ReviseStreamProgress) => void,
 ): Promise<{ revised_paragraph: string }> {
-  const resp = await engineFetch(joinUrl(baseUrl, "/writing/revise_paragraph_stream"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-
-  if (!resp.ok) {
-    let msg = `引擎错误 ${resp.status}`;
-    try {
-      const j = await resp.json();
-      msg = j.detail || j.message || msg;
-    } catch {
-      /* ignore */
-    }
-    throw new EngineApiError(resp.status, msg);
-  }
-
   let finalRevisedParagraph = "";
   let rawBuffer = "";
 
-  const processContent = (content: string): boolean => {
-    if (content === "[DONE]") return true;
-    if (content.startsWith("{") && content.endsWith("}")) {
-      try {
-        const parsed = JSON.parse(content);
-        if (parsed.error) {
-          throw new EngineApiError(
-            parsed.status || 500,
-            parsed.error || "段落精准修订服务异常",
-          );
-        }
-        if (parsed.type === "stage") {
-          if (onProgress) {
-            onProgress({
-              type: "stage",
-              stage: parsed.stage,
-              message: parsed.message,
-            });
-          }
-          return false;
-        }
-        if (parsed.type === "thought") {
-          const th = parsed.thought || parsed.chunk || "";
-          if (onProgress) {
-            onProgress({
-              type: "thought",
-              thought: th,
-              chunk: th,
-            });
-          }
-          return false;
-        }
-        if (parsed.type === "chunk") {
-          rawBuffer += parsed.chunk || "";
-          if (onProgress) {
-            onProgress({
-              type: "chunk",
-              chunk: parsed.chunk || "",
-            });
-          }
-          return false;
-        }
-        if (parsed.type === "done") {
-          finalRevisedParagraph = parsed.revised_paragraph || rawBuffer;
-          if (onProgress) {
-            onProgress({
-              type: "done",
-              revised_text: finalRevisedParagraph,
-            });
-          }
-          return true;
-        }
-      } catch (err) {
-        if (
-          err instanceof Error &&
-          !(err instanceof SyntaxError) &&
-          err.message !== "Unexpected token"
-        ) {
-          throw err;
-        }
-      }
-    }
-    return false;
-  };
+  await consumeSseEndpoint(baseUrl, "/writing/revise_paragraph_stream", req, {
+    wrapStreamErrorAsApiError: true,
+    defaultStreamErrorMsg: "段落精准修订服务异常",
+    ignorePlainTextFallback: true,
+    onStage: (stage, message) => onProgress?.({ type: "stage", stage, message }),
+    onThought: (th) => onProgress?.({ type: "thought", thought: th, chunk: th }),
+    onChunk: (chunk) => {
+      rawBuffer += chunk;
+      onProgress?.({ type: "chunk", chunk });
+    },
+    onDoneObject: (parsed) => {
+      finalRevisedParagraph = parsed.revised_paragraph || rawBuffer;
+      onProgress?.({ type: "done", revised_text: finalRevisedParagraph });
+    },
+    onDirectJsonFallback: (directObj) => {
+      if (directObj.revised_paragraph) finalRevisedParagraph = directObj.revised_paragraph;
+    },
+  });
 
-  if (resp.body && typeof (resp.body as any).getReader === "function") {
-    const reader = (resp.body as any).getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let isDone = false;
-
-    while (!isDone) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.startsWith("data:")) {
-          const content = line.slice(5).replace(/^\s/, "");
-          isDone = processContent(content);
-          if (isDone) break;
-        }
-      }
-    }
-
-    if (buffer.trim()) {
-      const lines = buffer.trim().split("\n");
-      for (const line of lines) {
-        if (line.startsWith("data:")) {
-          const content = line.slice(5).replace(/^\s/, "");
-          processContent(content);
-        }
-      }
-    }
-  } else if (typeof resp.text === "function") {
-    const fullText = await resp.text();
-    let hasSseData = false;
-    const blocks = fullText.split("\n\n");
-    for (const block of blocks) {
-      const trimmed = block.trim();
-      if (trimmed.startsWith("data:")) {
-        hasSseData = true;
-        const content = trimmed.slice(5).replace(/^\s/, "");
-        const isDone = processContent(content);
-        if (isDone) break;
-      }
-    }
-    if (!hasSseData && fullText.trim().startsWith("{")) {
-      try {
-        const directObj = JSON.parse(fullText);
-        if (directObj.revised_paragraph) {
-          finalRevisedParagraph = directObj.revised_paragraph;
-        }
-      } catch {
-        // ignore
-      }
-    }
-  } else if (typeof resp.json === "function") {
-    try {
-      const data = await resp.json();
-      finalRevisedParagraph = data.revised_paragraph || rawBuffer;
-    } catch {
-      // ignore
-    }
-  }
-
-  if (!finalRevisedParagraph) {
-    finalRevisedParagraph = rawBuffer;
-  }
-
-  return { revised_paragraph: finalRevisedParagraph };
+  return { revised_paragraph: finalRevisedParagraph || rawBuffer };
 }
 
 /** 获取项目持久化专家审阅诊断数据 */

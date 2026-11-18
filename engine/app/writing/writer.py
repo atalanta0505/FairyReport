@@ -9,7 +9,12 @@ import json
 import re
 
 from . import templates_loader as tmpl
-from .outline import _extract_chapter_titles, parse_chapter_seq
+from .outline import (
+    _extract_chapter_titles,
+    find_chapter_heading_indices,
+    is_placeholder_h1,
+    parse_chapter_seq,
+)
 from .prompts import (
     COMPLIANCE_REVIEW_SYSTEM_PROMPT,
     FAST_REVIEW_SYSTEM_PROMPT,
@@ -125,50 +130,25 @@ def _count_chapters(outline_md: str) -> int:
     matches = re.findall(r'^#\s+第.+章', outline_md, re.MULTILINE)
     if matches:
         return len(matches)
-    h1_matches = [
-        l for l in re.findall(r'^#\s+([^#\n]+)$', outline_md, re.MULTILINE)
-        if not (l.strip().startswith("标题（") or l.strip() == "标题" or "（体现核心研判" in l)
-    ]
-    if h1_matches:
-        return len(h1_matches)
-    # 防御性降级：匹配公文序号二级标题章
-    h2_matches = re.findall(
-        r'^##\s+((?:第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$',
-        outline_md, re.MULTILINE
-    )
-    return len(h2_matches) or 1
+    return len(find_chapter_heading_indices(outline_md.split('\n'))) or 1
 
 
 def _trim_outline_to_position(outline_md: str, allowed_seqs: list) -> str:
     """裁剪大纲，只保留 allowed_seqs 中的章（写作顺序位置 <= 当前章）。"""
     lines = outline_md.split('\n')
+    chapter_idx_set = set(find_chapter_heading_indices(lines))
+    allowed_set = set(allowed_seqs)
     result = []
     in_chapter = True
-    allowed_set = set(allowed_seqs)
     h1_count = 0
 
-    has_h1 = any(
-        re.match(r'^#\s+[^#\n]+$', l.strip()) and not (l.strip().startswith("# 标题（") or l.strip() == "# 标题" or "（体现核心研判" in l)
-        for l in lines
-    )
-
-    for line in lines:
+    for idx, line in enumerate(lines):
         s = line.strip()
-        is_chapter_line = False
-        if has_h1:
-            if re.match(r'^#\s+[^#\n]+$', s):
-                if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
-                    continue
-                is_chapter_line = True
-        else:
-            if re.match(r'^##\s+((?:第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$', s):
-                is_chapter_line = True
-
-        if is_chapter_line:
+        if s.startswith("# ") and is_placeholder_h1(s[2:]):
+            continue
+        if idx in chapter_idx_set:
             h1_count += 1
-            current_seq = h1_count
-            in_chapter = (current_seq in allowed_set)
-
+            in_chapter = (h1_count in allowed_set)
         if in_chapter:
             result.append(line)
 
@@ -199,70 +179,42 @@ def _count_content_chars(text: str) -> int:
 
 # ── 大纲层级解析与每节字数预算分配 ──
 
+def _get_chapter_line_span(lines: list[str], chapter_seq: int) -> tuple[int, int] | None:
+    """定位指定章在 lines 中的起止行号区间 [start, end)。"""
+    if chapter_seq <= 0:
+        return None
+    h1_indices = find_chapter_heading_indices(lines)
+    if not (1 <= chapter_seq <= len(h1_indices)):
+        return None
+    start = h1_indices[chapter_seq - 1]
+    end = h1_indices[chapter_seq] if chapter_seq < len(h1_indices) else len(lines)
+    return start, end
+
+
 def _extract_chapter_skeleton(outline_md: str, chapter_seq: int) -> str:
     """从大纲 Markdown 中提取指定章的纯结构骨架标题行（#、##、###、####、##### 等）。"""
-    if not outline_md or chapter_seq <= 0:
+    if not outline_md:
         return ""
-
     lines = outline_md.split('\n')
-    h1_indices = []
-    for idx, line in enumerate(lines):
-        s = line.strip()
-        if re.match(r'^#\s+[^#\n]+$', s):
-            if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
-                continue
-            h1_indices.append(idx)
-
-    # 防御性降级：若未找到任何一级章（例如公文式大纲全用 '## 一、' 或 '## 【导语】'），匹配二级标题章
-    if not h1_indices:
-        for idx, line in enumerate(lines):
-            s = line.strip()
-            if re.match(r'^##\s+((?:第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$', s):
-                h1_indices.append(idx)
-
-    if not (1 <= chapter_seq <= len(h1_indices)):
+    span = _get_chapter_line_span(lines, chapter_seq)
+    if not span:
         return ""
-
-    target_start_idx = h1_indices[chapter_seq - 1]
-    target_end_idx = h1_indices[chapter_seq] if chapter_seq < len(h1_indices) else len(lines)
-
-    skeleton_lines = []
-    for i in range(target_start_idx, target_end_idx):
-        s = lines[i].strip()
-        if s.startswith('#'):
-            skeleton_lines.append(s)
-
-    return '\n'.join(skeleton_lines)
+    return '\n'.join(
+        lines[i].strip() for i in range(span[0], span[1]) if lines[i].strip().startswith('#')
+    )
 
 
 def _parse_outline_hierarchy(outline_md: str, chapter_seq: int) -> dict:
     """解析给定章的 H2/H3 层级。"""
-    lines = outline_md.split('\n')
     result = {"chapter_title": "", "h2_sections": []}
-    if not outline_md or chapter_seq <= 0:
+    if not outline_md:
+        return result
+    lines = outline_md.split('\n')
+    span = _get_chapter_line_span(lines, chapter_seq)
+    if not span:
         return result
 
-    h1_indices = []
-    for idx, line in enumerate(lines):
-        s = line.strip()
-        if re.match(r'^#\s+[^#\n]+$', s):
-            if s.startswith("# 标题（") or s == "# 标题" or "（体现核心研判" in s:
-                continue
-            h1_indices.append(idx)
-
-    # 防御性降级：若未找到任何一级章，匹配二级公文序号章
-    if not h1_indices:
-        for idx, line in enumerate(lines):
-            s = line.strip()
-            if re.match(r'^##\s+((?:第[一二三四五六七八九十百零\d]+章|[一二三四五六七八九十]+[、\.\s]|【?(?:导语|内容摘要|前言|概述|附件|附表|附录)】?).+)$', s):
-                h1_indices.append(idx)
-
-    if not (1 <= chapter_seq <= len(h1_indices)):
-        return result
-
-    target_start_idx = h1_indices[chapter_seq - 1]
-    target_end_idx = h1_indices[chapter_seq] if chapter_seq < len(h1_indices) else len(lines)
-
+    target_start_idx, target_end_idx = span
     start_line = lines[target_start_idx]
     is_h2_chapter = start_line.strip().startswith('## ')
     result["chapter_title"] = re.sub(r'^#{1,2}\s+', '', start_line).strip()
@@ -1045,29 +997,8 @@ class ChapterWriter:
 
     @staticmethod
     def _parse_chapter_seq(chapter_title: str) -> int:
-        """从 '第X章 xxx'、公文序号等提取章序号。"""
-        seq = parse_chapter_seq(chapter_title)
-        if seq > 0:
-            return seq
-        cn_num_map = {
-            '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-            '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
-            '零': 0,
-        }
-        m = re.match(r'第([一二三四五六七八九十百零\d]+)章', chapter_title or "")
-        if not m:
-            return 0
-        num_str = m.group(1)
-        if num_str.isdigit():
-            return int(num_str)
-        result = 0
-        if num_str.startswith('十'):
-            result = 10
-            num_str = num_str[1:]
-        for ch in num_str:
-            if ch in cn_num_map:
-                result += cn_num_map[ch]
-        return result if result > 0 else 0
+        """从 '第X章 xxx'、公文序号等提取章序号（复用 outline.parse_chapter_seq 单一事实源）。"""
+        return parse_chapter_seq(chapter_title)
 
     def _build_prev_context(self, predecessor_chapters: dict) -> str:
         """构建前序章正文。按章节自然升序排列格式化供大模型参考。"""

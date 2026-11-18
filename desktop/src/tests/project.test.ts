@@ -2458,5 +2458,53 @@ describe("Pinia useProjectStore", () => {
       isThinking = isWriting && stage !== "writing" && (!text || text.trim().length === 0);
       expect(isThinking).toBe(false);
     });
+
+    it("streamParagraphRevision & JSON chunk 解包: 统一 SSE 解析器兼容段落修订流与参考资料 JSON 分片", async () => {
+      mockFetch.mockResolvedValueOnce(
+        mockSSEResponse([
+          '{"type": "stage", "stage": "locate", "message": "锁定段落..."}',
+          '{"type": "thought", "chunk": "推演依据"}',
+          '{"type": "chunk", "chunk": "重构前半段"}',
+          '{"type": "done", "revised_paragraph": "重构完整段落。"}',
+        ]),
+      );
+      const events: engineApi.ReviseStreamProgress[] = [];
+      const res = await engineApi.streamParagraphRevision(
+        BASE_URL,
+        {
+          paragraph_text: "原段落",
+          instruction: "补充参数",
+          llm_config: { api_key: "sk-k", base_url: "http://api", model: "m" },
+        },
+        (ev) => events.push(ev),
+      );
+      expect(res.revised_paragraph).toBe("重构完整段落。");
+      expect(events.map((e) => e.type)).toEqual(["stage", "thought", "chunk", "done"]);
+
+      // 同时验证 streamChapterWriting 对 JSON {"type": "chunk"} 尾随参考资料段的解包能力
+      mockFetch.mockResolvedValueOnce(
+        mockSSEResponse([
+          "正文主体。",
+          '{"type": "chunk", "chunk": "\\n\\n## 📎 本章参考资料"}',
+        ]),
+      );
+      const chunks: string[] = [];
+      await new Promise<void>((resolve) => {
+        engineApi.streamChapterWriting(
+          BASE_URL,
+          {
+            project: "项目A",
+            report_type: "可行性研究报告",
+            outline_md: "# 第一章",
+            chapter_seq: 1,
+            llm_config: { api_key: "sk-k", base_url: "http://api", model: "m" },
+          },
+          (c) => chunks.push(c),
+          () => resolve(),
+          () => {},
+        );
+      });
+      expect(chunks).toEqual(["正文主体。", "\n\n## 📎 本章参考资料"]);
+    });
   });
 });
