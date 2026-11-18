@@ -133,10 +133,8 @@ def build():
         "tkinter",
     ]
 
-    # 添加本地快速向量模型 (若存在)
-    model_dir = REPO_ROOT / "data" / "fastembed_models"
-    if model_dir.exists():
-        cmd.extend(["--add-data", f"{model_dir}{sep}data/fastembed_models"])
+    # 离线向量模型由 pack_portable.py 直接置于外层 data/fastembed_models/，
+    # 不再压入 --onefile 内部，避免每次启动解压上百 MB 模型至 %TEMP% 拖慢启动速度。
     # 添加 Word 报告专属模板包 (若存在)
     pattern_dir = REPO_ROOT / "pattern"
     if pattern_dir.exists():

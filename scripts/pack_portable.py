@@ -34,10 +34,33 @@ def main():
         shutil.copy2(lib_dll, os.path.join(stage_dir, "fairyreport_desktop_lib.dll"))
     else:
         print("  提示：未找到 fairyreport_desktop_lib.dll（Windows 运行不需要），已跳过")
-    shutil.copy2(
+
+    engine_candidates = [
         os.path.join(target_release, "fairyreport-engine.exe"),
+        os.path.join(repo_root, "desktop", "src-tauri", "binaries", "fairyreport-engine-x86_64-pc-windows-msvc.exe"),
+    ]
+    engine_src = next((p for p in engine_candidates if os.path.exists(p) and os.path.getsize(p) > 10 * 1024 * 1024), None)
+    if not engine_src:
+        raise RuntimeError("未找到有效的独立后端引擎二进制 (fairyreport-engine.exe 体积需 > 10MB)，请先运行 scripts/build_engine.py！")
+    shutil.copy2(
+        engine_src,
         os.path.join(stage_dir, "fairyreport-engine.exe")
     )
+
+    # 校验桌面主程序体积
+    desktop_exe = os.path.join(stage_dir, "FairyReport.exe")
+    if not os.path.exists(desktop_exe) or os.path.getsize(desktop_exe) < 1 * 1024 * 1024:
+        raise RuntimeError("FairyReport.exe 不存在或体积异常 (< 1MB)，请先编译 Tauri Release！")
+
+    # 拷贝离线快速向量模型 data/fastembed_models（若存在），使接收方上传底稿时 100% 离线秒级向量化
+    model_src = os.path.join(repo_root, "data", "fastembed_models")
+    if os.path.exists(model_src) and os.path.exists(os.path.join(model_src, "model_optimized.onnx")):
+        print("  拷贝离线向量嵌入模型 data/fastembed_models/ ...")
+        shutil.copytree(
+            model_src,
+            os.path.join(stage_dir, "data", "fastembed_models"),
+            dirs_exist_ok=True,
+        )
     
     # 拷贝 15 类报告专属 Word 模板包
     pattern_src = os.path.join(repo_root, "pattern")
@@ -86,7 +109,7 @@ def main():
 【模型与 API Key 设置】
 1. 进入工作台后，点击右上角「设置」按钮。
 2. 基础地址（Base URL）：默认已配置官方规范 https://api.deepseek.com。
-3. API Key：填入您在 DeepSeek 开放平台申请的 API Key（系统仅保存在您本地，绝不上云）。
+3. API Key：填入您在 DeepSeek 开放平台申请的 API Key（系统仅保存在您本地，绝不上云；可点击设置页上的「DeepSeek API-Key 官方申请指南」查看申请流程）。
 4. 模型选择：默认推荐 deepseek-flash（高性价比、流式响应极速），亦可点击「🔄 获取最新模型」动态拉取官方最新模型列表。
 
 【使用说明文档】

@@ -25,13 +25,18 @@ function sanitizeModels(ids: unknown[]): string[] {
 async function getHttpFetch() {
   try {
     const http = await import("@tauri-apps/plugin-http");
-    if (http && typeof http.fetch === "function") {
+    if (
+      http &&
+      typeof http.fetch === "function" &&
+      (typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined" ||
+        typeof (http.fetch as any).mock !== "undefined")
+    ) {
       return http.fetch;
     }
   } catch {
     // 回退到全局 fetch（如测试环境或纯 Web 调试）
   }
-  return globalThis.fetch;
+  return globalThis.fetch.bind(globalThis);
 }
 
 export const useSettingsStore = defineStore("settings", () => {

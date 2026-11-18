@@ -12,6 +12,20 @@ const engineTestResult = ref<string>("");
 const fetchingModels = ref(false);
 const modelFetchMsg = ref<string>("");
 const customModel = ref(false);
+const DEEPSEEK_GUIDE_URL = "https://api-docs.deepseek.com/zh-cn/";
+
+async function onOpenApiKeyGuide() {
+  try {
+    if (typeof (globalThis as any).__TAURI_INTERNALS__ !== "undefined") {
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(DEEPSEEK_GUIDE_URL);
+      return;
+    }
+  } catch {
+    /* 回退到浏览器打开 */
+  }
+  window.open(DEEPSEEK_GUIDE_URL, "_blank", "noopener,noreferrer");
+}
 
 function onPickModel(e: Event) {
   const picked = (e.target as HTMLSelectElement).value;
@@ -114,7 +128,15 @@ async function onTestEngine() {
     </section>
 
     <section class="group">
-      <h3>LLM 配置（用户自带 Key，仅本地保存，零上传云端）</h3>
+      <h3>
+        LLM 配置（<a
+          :href="DEEPSEEK_GUIDE_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="guide-link"
+          @click.prevent="onOpenApiKeyGuide"
+        >DeepSeek API-Key 官方申请指南</a>）
+      </h3>
       <div class="field">
         <label>API Key</label>
         <input v-model="settings.llmKey" type="password" placeholder="sk-..." />
@@ -188,6 +210,14 @@ h2 {
   margin: 0 0 14px;
   font-size: 15px;
   color: #333;
+}
+.guide-link {
+  color: #2b6cff;
+  text-decoration: none;
+  font-weight: 500;
+}
+.guide-link:hover {
+  text-decoration: underline;
 }
 .field {
   margin-bottom: 14px;

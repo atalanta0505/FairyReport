@@ -1,63 +1,66 @@
-# 客户端下载中心 📥
+# 下载
 
-获取最新的 **FairyReport** 客户端。推荐使用无需管理员权限、解压即用的 **绿色免安装便携版**。
-
----
-
-## 💻 最新发布版本：v1.6.5
-
-- **发布日期**：2026 年 11 月 1 日
-- **系统要求**：Windows 10 / Windows 11 (64 位)
-- **推荐硬件**：4GB 以上内存，预留 2GB 可用磁盘空间
+**FairyReport** 是一款完全开源免费的智能报告编制工具。Windows 版本提供完全自包含的 **绿色免安装便携版**，无需管理员权限、无需配置 Python 环境、无需注册登录，解压后双击 `FairyReport.exe` 即可使用。
 
 ---
 
-## 🚀 官方推荐下载通道
+## 💻 客户端下载（v1.6.5）
 
-::: tip 💡 绿色免安装版与安装包的区别
-- **免安装便携版 (.zip)**：包含所有运行所需组件，解压即可运行，支持放在 U 盘或任意文件夹，移动办公首选。
-- **独立安装包 (.exe / .msi)**：会自动向桌面和开始菜单创建快捷方式。
-:::
+我们提供 **百度网盘** 与 **夸克网盘** 两条分流通道，两个网盘内的压缩包 **100% 一致**，请任选您习惯的网盘下载：
 
-### 1. Windows x64 绿色免安装便携版（推荐）
-- **文件包名**：`FairyReport-Local-v1.6.5-Windows-x64.zip`
-- **文件体积**：370 MB (自包含完整后端计算引擎与内嵌模型)
-- **SHA-256 校验码**：`97B214137B32D1A7A4CC191FE34629487CE1E9A95588565ADA372A6D22B52D09`
-- **下载通道**：
-  - [⚡ 官方直链下载](/downloads/FairyReport-Local-v1.6.5-Windows-x64.zip)
-  - [🚀 百度网盘高速分流（提取码: 6dyu）](https://pan.baidu.com/s/1RecwmytG9KITEQ_0Djwn_A?pwd=6dyu)
+<div style="margin: 28px 0;">
+  <DownloadCards />
+</div>
 
----
-
-### 2. 国内主流云盘高速分流（推荐网络较慢用户使用）
-
-| 云盘平台 | 下载通道与链接 | 提取码 | 说明 |
+| 渠道 | 链接 | 提取码 / 说明 | 包体大小 |
 | :--- | :--- | :--- | :--- |
-| **百度网盘** | [🚀 点击前往百度网盘下载](https://pan.baidu.com/s/1RecwmytG9KITEQ_0Djwn_A?pwd=6dyu) | `6dyu` | 官方推荐分流通道，支持一键转存与高速下载 |
+| **百度网盘** | [下载](https://pan.baidu.com/s/1XG5DlAl6zpCWEoWfXmtvTg?pwd=i56v) | 提取码：`i56v` | `396 MB` |
+| **夸克网盘** | [下载](https://pan.quark.cn/s/893e062482e6?pwd=DymL) | 提取码：`DymL` | `396 MB` |
+| **GitHub 开源仓库** | [访问仓库源码](https://github.com/atalanta0505/FairyReport) | 查看前后端完整源码、提交 Issue 或自行编译 | 源码仓库 |
+
+> [!TIP]
+> **绿色免安装便携版包含什么？**
+> - **零环境依赖**：压缩包内已打包 Tauri 2 桌面客户端、独立 Python 引擎、离线向量嵌入模型与 **15 类报告标准模板（`generic_knowledge/templates/` & `pattern/`）**。
+> - **本地存储**：所有项目底稿与生成的报告均保存在本地目录，不写系统注册表，也可放在移动硬盘或 U 盘随身携带。
 
 ---
 
-### 3. Windows x64 标准安装包
-- **文件包名**：`FairyReport_1.6.5_x64-setup.exe`
-- **下载通道**：
-  - [⚡ 官方直链下载](/downloads/FairyReport_1.6.5_x64-setup.exe)
+## 🚀 三步启动说明
+
+### 第一步：解压便携包
+将下载好的 `FairyReport-Local-v1.6.5-Windows-x64.zip`（`396 MB`）右键解压至任意磁盘目录（例如 `D:\FairyReport\`）。
+
+### 第二步：双击启动程序
+打开解压后的文件夹，直接双击运行 **`FairyReport.exe`**。程序会在后台自动拉起本地引擎，直接进入五步工作台（免注册、免登录）。
+
+### 第三步：配置大模型 API Key
+首次使用时，点击主界面右上角的 **「设置」** 按钮：
+1. 填入你自己的 **DeepSeek API Key**；
+2. 接口地址保持默认官方地址 `https://api.deepseek.com`；
+3. 点击 **「保存配置」**，即可开始新建项目、导入底稿或直接留空创作智库专报。
 
 ---
 
-## 🔒 完整性与安全校验
+## 🔒 完整性校验（SHA-256）
 
-为了确保你下载的安装包未被篡改或损坏，建议在 PowerShell 中运行以下命令核验哈希值：
+如需核对网盘下载的压缩包是否完整无损，可在 Windows PowerShell 中运行以下命令：
 
 ```powershell
 Get-FileHash -Path "FairyReport-Local-v1.6.5-Windows-x64.zip" -Algorithm SHA256
 ```
-确认输出的 Hash 字符串与官方给出的 `97B214137B32D1A7A4CC191FE34629487CE1E9A95588565ADA372A6D22B52D09` 一致即可。
+
+确认输出的 `Hash` 值与以下校验码一致即可：
+
+```text
+97B214137B32D1A7A4CC191FE34629487CE1E9A95588565ADA372A6D22B52D09
+```
 
 ---
 
-## 📖 安装与使用指引
+## 📖 相关文档
 
-下载完成后，请参阅：
-- [🚀 5 分钟极速上手教程](/guide/getting-started)
-- [📦 绿色免安装便携版详细指南](/docs/portable)
-- [💬 常见问题与解答 FAQ](/guide/faq)
+- [🚀 快速上手操作指南](/guide/getting-started)
+- [📦 绿色免安装版运行与数据备份指南](/docs/portable)
+- [⚙️ 五步工作台深度解析](/docs/pipeline)
+- [🛡️ 系统架构与本地存储说明](/docs/architecture)
+- [💬 常见问题解答 (FAQ)](/guide/faq)

@@ -1,6 +1,6 @@
-# 系统架构与三源物理隔离 🛡️
+# 系统架构与本地数据存储 🛡️
 
-FairyReport 专为对**数据安全性**、**规范合规性**和**输出严谨度**有严苛要求的投资项目与工程咨询场景设计。整个系统建立在现代桌面混合架构与三源 RAG 智识矩阵之上。
+FairyReport 是一款开源、本地优先（Local-First）的智能报告编制桌面工具。整个系统建立在现代桌面混合架构与三源 RAG 检索体系之上，全部源码在 [GitHub (atalanta0505/FairyReport)](https://github.com/atalanta0505/FairyReport) 公开可查。
 
 ---
 
@@ -8,41 +8,57 @@ FairyReport 专为对**数据安全性**、**规范合规性**和**输出严谨�
 
 FairyReport 采用轻量高效的 **Tauri 2 + 原生 Web 前端 + 独立高性能 Python 引擎** 架构：
 
-```mermaid
-flowchart TD
-    subgraph Client["用户桌面端 (Tauri 2 + Vue 3)"]
-        UI["Vue 3 + TypeScript 现代化交互界面"]
-        Tauri["Rust 原生安全底座与生命周期管理"]
-        UI <--> Tauri
-    end
-
-    subgraph LocalEngine["本地 Python 核心引擎 (FastAPI)"]
-        Parser["材料解析引擎 (PDF/Word/Excel)"]
-        Embedder["本地向量计算 (FastEmbed / 纯离线)"]
-        Chroma["本地向量数据库 (ChromaDB)"]
-        Writer["流式撰写与自洽性核验管线"]
-        Exporter["出版级 Word/Markdown 导出器"]
-        
-        Parser --> Embedder --> Chroma
-        Chroma --> Writer
-        Writer --> Exporter
-    end
-
-    subgraph DataIsolation["本地物理隔离存储 (用户磁盘)"]
-        RawDocs["原始项目文件 (.docx/.pdf/.xlsx)"]
-        VectorDB["项目私有向量数据 (SQLite/Chroma)"]
-        GenericLib["行业标准规程与编制规范库 (JSON)"]
-    end
-
-    subgraph CloudLLM["外部安全大模型 API (仅按需调用)"]
-        LLM["DeepSeek 官方 API / DeepSeek 系列模型"]
-    end
-
-    Tauri <--> LocalEngine
-    LocalEngine <--> DataIsolation
-    Writer -- "仅发送章节Prompt与检索摘录" --> LLM
-    LLM -- "流式文本与三线表" --> Writer
-```
+<div class="fr-arch-diagram">
+<div class="fr-arch-layer">
+<div class="fr-arch-layer-title">🖥️ 用户桌面端（Tauri 2 + Vue 3）</div>
+<div class="fr-arch-boxes two-col">
+<div class="fr-arch-box">
+<b>Vue 3 + TypeScript 现代化交互界面</b>
+<span>五步端到端工作台 · 实时思维链 · 审阅抽屉</span>
+</div>
+<div class="fr-arch-box">
+<b>Rust 原生安全底座与生命周期管理</b>
+<span>本地回环安全通信 · 进程守护与文件定位</span>
+</div>
+</div>
+</div>
+<div class="fr-flow-arrow">⇅ 本地内部回环高速通信 (127.0.0.1)</div>
+<div class="fr-arch-layer highlight">
+<div class="fr-arch-layer-title">⚙️ 本地 Python 核心计算引擎（FastAPI）</div>
+<div class="fr-arch-pipeline">
+<div class="fr-arch-pipe-node"><b>1. 材料解析</b><small>PDF / Word / Excel</small></div>
+<div class="fr-arch-pipe-node"><b>2. 离线向量化</b><small>FastEmbed 本机推理</small></div>
+<div class="fr-arch-pipe-node"><b>3. 本地向量库</b><small>ChromaDB 持久化</small></div>
+<div class="fr-arch-pipe-node"><b>4. 撰写与审阅</b><small>三源 RAG + 专家把关</small></div>
+<div class="fr-arch-pipe-node"><b>5. 出版级导出</b><small>Word / Markdown</small></div>
+</div>
+</div>
+<div class="fr-flow-arrow">⇅ 本地磁盘读写 &amp; 最小化摘要推理</div>
+<div class="fr-arch-layer safe">
+<div class="fr-arch-layer-title">🔒 本地物理隔离存储（用户本机磁盘 · 100% 不出机）</div>
+<div class="fr-arch-boxes three-col">
+<div class="fr-arch-box">
+<b>原始项目底稿</b>
+<span>.docx / .pdf / .xlsx 原件留存本机</span>
+</div>
+<div class="fr-arch-box">
+<b>项目私有向量库</b>
+<span>SQLite / Chroma 本地离线索引</span>
+</div>
+<div class="fr-arch-box">
+<b>内置标准规程库</b>
+<span>15 类报告模板与现行国标规范</span>
+</div>
+</div>
+</div>
+<div class="fr-arch-layer cloud">
+<div class="fr-arch-layer-title">☁️ 外部大模型 API（仅按需最小化调用）</div>
+<div class="fr-arch-box">
+<b>DeepSeek 官方 API / 私有化算力接口</b>
+<span>仅发送当前章节提示词与百字检索摘要片段 ←→ 返回流式正文与标准三线表</span>
+</div>
+</div>
+</div>
 
 ---
 

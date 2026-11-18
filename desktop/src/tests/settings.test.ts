@@ -1,10 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
-import { fetch as pluginFetch } from "@tauri-apps/plugin-http";
 import { useSettingsStore } from "../stores/settings";
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
-const mockFetch = vi.mocked(pluginFetch);
+const { mockFetch, pluginState } = vi.hoisted(() => ({
+  mockFetch: vi.fn(),
+  pluginState: { plainBrowserMode: false },
+}));
+
+vi.mock("@tauri-apps/plugin-http", () => ({
+  get fetch() {
+    return pluginState.plainBrowserMode
+      ? () => Promise.reject(new TypeError("Cannot read properties of undefined (reading 'invoke')"))
+      : mockFetch;
+  },
+}));
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -90,5 +99,28 @@ describe("Settings Store - DeepSeek API 配置与动态拉取", () => {
     expect((call[1]?.headers as any)["Authorization"]).toBe(
       "Bearer sk-test-mock-key"
     );
+  });
+
+  it("纯浏览器环境下（无 __TAURI_INTERNALS__ 且 plugin-http 非 mock）自动回退至 globalThis.fetch", async () => {
+    const origFetch = globalThis.fetch;
+    pluginState.plainBrowserMode = true;
+    try {
+      const browserFetch = vi.fn().mockResolvedValue(
+        jsonResponse({
+          object: "list",
+          data: [{ id: "deepseek-chat", object: "model" }],
+        })
+      );
+      globalThis.fetch = browserFetch as any;
+
+      const store = useSettingsStore();
+      store.llmKey = "sk-browser-key";
+      const models = await store.fetchRemoteModels();
+      expect(models).toEqual(["deepseek-chat"]);
+      expect(browserFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      pluginState.plainBrowserMode = false;
+      globalThis.fetch = origFetch;
+    }
   });
 });

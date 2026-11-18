@@ -111,7 +111,14 @@ export async function pollHealth(
         if (ok) return;
       } else {
         const resp = await fetcher(`${baseUrl}/health`);
-        if (resp.ok) return;
+        if (resp.ok) {
+          if (typeof resp.json === "function") {
+            const data = await resp.json();
+            if (data && data.status === "ok") return;
+          } else {
+            return;
+          }
+        }
       }
     } catch {
       /* 引擎尚未就绪，重试 */

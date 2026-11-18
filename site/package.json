@@ -6,6 +6,7 @@
   "scripts": {
     "docs:dev": "vitepress dev",
     "docs:build": "vitepress build",
+    "docs:build:gh": "vitepress build --base /FairyReport/",
     "docs:preview": "vitepress preview"
   },
   "devDependencies": {

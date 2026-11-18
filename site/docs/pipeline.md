@@ -23,21 +23,31 @@ FairyReport 将传统工程咨询与投资项目编制中繁杂低效的“资�
 
 目录是报告的灵魂与骨架。FairyReport 内置针对 15 类不同审批与研究要求的报告规范体系：
 
-```mermaid
-graph TD
-    A[选择报告类型] --> B1[项目可行性研究报告]
-    A --> B2[项目资金申请报告]
-    A --> B3[项目申请书/报告]
-    A --> B4[智库专报]
-    A --> B5[规划/特许经营/评估等其他 11 类报告]
-    B1 --> C[行业编制指南与技术规程校验]
-    B2 --> C
-    B3 --> C
-    B4 --> C
-    B5 --> C
-    C --> D[一键生成多级标准大纲]
-    D --> E[工程师自主微调/新增/重命名章节]
-```
+<div class="fr-flow-diagram">
+<div class="fr-flow-step">
+<div class="fr-flow-node primary">1. 选择目标报告类型</div>
+</div>
+<div class="fr-flow-arrow">↓</div>
+<div class="fr-flow-branches">
+<div class="fr-flow-chip">可行性研究报告</div>
+<div class="fr-flow-chip">项目资金申请报告</div>
+<div class="fr-flow-chip">项目申请书（报告）</div>
+<div class="fr-flow-chip gold">智库专报（支持资料留空）</div>
+<div class="fr-flow-chip">初步可研 / 项目建议书 / 特许经营 / 规划等其余 11 类</div>
+</div>
+<div class="fr-flow-arrow">↓</div>
+<div class="fr-flow-step">
+<div class="fr-flow-node">2. 行业编制指南与技术规程自动校验</div>
+</div>
+<div class="fr-flow-arrow">↓</div>
+<div class="fr-flow-step">
+<div class="fr-flow-node">3. 一键生成多级标准合规大纲（支持骨架锁定）</div>
+</div>
+<div class="fr-flow-arrow">↓</div>
+<div class="fr-flow-step">
+<div class="fr-flow-node accent">4. 工程师自主微调 / 增删 / 拖拽重排章节与提示词</div>
+</div>
+</div>
 
 - **规程自适应**：自动根据报告类型注入行业最新编制体例要求。
 - **自由交互**：支持拖拽重排序、增删子章节、修改写作侧重点。

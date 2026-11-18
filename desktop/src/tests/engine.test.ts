@@ -50,6 +50,31 @@ describe("pollHealth", () => {
     ).rejects.toThrow("引擎健康检查超时");
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
+
+  it("当 /health 返回 200 HTML（如 Vite SPA 兜底）而非 JSON status=ok 时不误判就绪", async () => {
+    const htmlResp = {
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new SyntaxError("Unexpected token '<'")),
+    } as unknown as Response;
+    const fetcher = vi.fn().mockResolvedValue(htmlResp);
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      pollHealth("http://127.0.0.1:1420", { fetcher, sleep, maxAttempts: 2 }),
+    ).rejects.toThrow("引擎健康检查超时");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("当 /health 返回 200 JSON { status: 'ok' } 时正常通过", async () => {
+    const jsonOkResp = {
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ status: "ok", host: "127.0.0.1" }),
+    } as unknown as Response;
+    const fetcher = vi.fn().mockResolvedValue(jsonOkResp);
+    await pollHealth("http://127.0.0.1:8001", { fetcher });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("startEngine", () => {
