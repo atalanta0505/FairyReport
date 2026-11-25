@@ -3,6 +3,7 @@ name: Deploy FairyReport Site to GitHub Pages
 on:
   push:
     branches:
+      - master
       - main
     paths:
       - 'site/**'

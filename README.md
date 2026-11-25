@@ -11,9 +11,9 @@
 [![Tauri 2](https://img.shields.io/badge/Desktop-Tauri_2_%2B_Vue_3-24c8db.svg)](desktop/)
 [![FastAPI](https://img.shields.io/badge/Engine-FastAPI_%2B_ChromaDB-009688.svg)](engine/)
 [![MCP Ready](https://img.shields.io/badge/MCP-Server_Ready-7c3aed.svg)](docs/MCP_GUIDE.md)
-[![Portable Release](https://img.shields.io/badge/Windows_便携版-v1.6.5_免安装-success.svg)](https://atalanta0505.github.io/FairyReport/download)
+[![Portable Release](https://img.shields.io/badge/Windows_便携版-v1.6.5_免安装-success.svg)](#方式一windows-绿色免安装桌面端适合工程咨询师规划与研究人员)
 
-[**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 官方网站与在线手册**](https://atalanta0505.github.io/FairyReport/) | [**📦 绿色免安装版下载**](https://atalanta0505.github.io/FairyReport/download) | [**🔌 MCP 接入指南**](docs/MCP_GUIDE.md)
+[**简体中文**](README.md) | [**English**](README_EN.md) | [**📦 绿色免安装版下载（网盘直链）**](#方式一windows-绿色免安装桌面端适合工程咨询师规划与研究人员) | [**🔌 MCP 接入指南**](docs/MCP_GUIDE.md) | [**📖 快速上手指南**](docs/BEGINNER_GUIDE.md) | [**🌐 在线文档站**](https://atalanta0505.github.io/FairyReport/)
 
 </div>
 
