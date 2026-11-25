@@ -4,9 +4,6 @@ name: Release FairyReport Desktop (Windows)
 # 只做 Windows —— 不再构建 macOS / Linux 桌面版，也不再产出未签名的安装包。
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 jobs:
