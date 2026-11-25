@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.atalanta0505/fairyreport-mcp",
+  "description": "Local-first structured consulting & engineering report MCP server: 15 authoritative report blueprints, 3-source RAG (local materials + standards + web), cross-chapter numerical consistency verification, and publication-grade three-line-table DOCX export.",
+  "status": "active",
+  "repository": {
+    "url": "https://github.com/atalanta0505/FairyReport",
+    "source": "github"
+  },
+  "version_detail": {
+    "version": "1.6.5"
+  },
+  "packages": [
+    {
+      "registry_name": "pypi",
+      "name": "fairyreport-mcp",
+      "version": "1.6.5",
+      "runtime_hint": "uvx",
+      "environment_variables": [
+        {
+          "name": "ENGINE_DATA_DIR",
+          "description": "Optional local directory for storing project materials, vector indexes, and exported DOCX reports (defaults to ./data).",
+          "is_required": false
+        },
+        {
+          "name": "DEEPSEEK_API_KEY",
+          "description": "Optional LLM API key if using the autonomous engine chapter drafting tool; not required for the 6 core Host-LLM tools.",
+          "is_required": false,
+          "is_secret": true
+        }
+      ]
+    }
+  ]
+}

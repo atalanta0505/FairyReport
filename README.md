@@ -1,28 +1,111 @@
+<div align="center">
+
+<img src="desktop/src-tauri/icons/icon.png" alt="FairyReport Logo" width="96" />
+
 # FairyReport 🧚‍♂️
 
-> **FairyReport 智能报告编制应用**  
-> 基于 **Tauri 2 + Vue 3 + FastAPI + LLM + 三源 RAG** 架构，面向 15 类主流专业报告交付物打造的全流程深度撰写与专家级质检系统。
+**面向工程咨询、投资立项与智库研究的本地优先 AI 报告工作台 & MCP 工具链**  
+*Local-First Structured Consulting & Engineering Report Workbench + MCP Server*
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tauri 2](https://img.shields.io/badge/Desktop-Tauri_2_%2B_Vue_3-24c8db.svg)](desktop/)
+[![FastAPI](https://img.shields.io/badge/Engine-FastAPI_%2B_ChromaDB-009688.svg)](engine/)
+[![MCP Ready](https://img.shields.io/badge/MCP-Server_Ready-7c3aed.svg)](docs/MCP_GUIDE.md)
+[![Portable Release](https://img.shields.io/badge/Windows_便携版-v1.6.5_免安装-success.svg)](https://atalanta0505.github.io/FairyReport/download)
+
+[**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 官方网站与在线手册**](https://atalanta0505.github.io/FairyReport/) | [**📦 绿色免安装版下载**](https://atalanta0505.github.io/FairyReport/download) | [**🔌 MCP 接入指南**](docs/MCP_GUIDE.md)
+
+</div>
 
 ---
 
-## 🌟 项目定位与核心价值
+## ✨ 为什么选择 FairyReport？
 
-传统投资项目与工程技术报告（可行性研究报告、项目建议书、资金申请报告、特许经营方案等）编写面临**资料繁杂、标准规程多变、数据逻辑链冗长、合规性要求极高**的痛点。普通大模型在长文生成时容易出现“幻觉捏造、空泛套话、结构失控、格式混乱”等问题。
+用通用聊天大模型（ChatGPT / Claude / DeepSeek 网页端）直接写 **可行性研究报告、项目建议书、资金申请报告、特许经营方案** 等数万字专业报告时，通常会遇到 **四大致命痛点**：
 
-**FairyReport** 专注于工程与投资项目垂直领域，通过**结构化大纲骨架锁定**、**三源深度 RAG 检索**、**实时流式思维链**、**专家级多维诊断与段落级靶向修订**，真正实现“专业、严谨、详实、可追溯”的高品质研究报告初稿成果交付。
+1. **不懂行业法定大纲与规程**：章节结构随意发挥，遗漏发改/行业规定的必填论证项与财务比选表；
+2. **幻觉捏造与虚假引用**：凭空编造政策文号、技术标准和工程参数，无法溯源核查；
+3. **跨章节财务与工程指标前后打架**：第一章写“总投资 1.2 亿元”，第七章写“总投资 10,500 万元”，人工核对极其痛苦；
+4. **Word 排版灾难**：Markdown 粘进 Word 后标题正文粘连、没有标准三线表、参考文献编号错乱。
+
+**FairyReport** 通过 **“独立桌面工作台（Tauri 2）” + “标准 MCP Server（可被任意桌面端 AI Agent 调用）”** 双形态，提供从底稿建库、骨架锁定撰文、跨章节量纲自洽核验到出版级 Word（`.docx`）导出的端到端闭环：
+
+![FairyReport 章节流式撰写与三线表排版实机界面](docs/images/step3_writing.png)
 
 ---
 
-## 📋 支持的 15 类主流专业报告交付物
+## 🚀 两种使用方式（任选其一，或协同使用）
 
-FairyReport 内置权威标准大纲体系与 15 类主流专业报告模板知识库：
+### 方式一：Windows 绿色免安装桌面端（适合工程咨询师、规划与研究人员）
 
-1. **可行性研究报告**（含行业通用编制大纲标准范式）
+无需配置 Python / Node 环境、**免注册免登录**、纯本地存储（支持放进移动硬盘随身携带）：
+
+| 下载渠道 | 获取链接 | 提取码 / 说明 | 包体大小 |
+| :--- | :--- | :--- | :--- |
+| **🌐 官方网站下载页** | [https://atalanta0505.github.io/FairyReport/download](https://atalanta0505.github.io/FairyReport/download) | 含 SHA-256 校验码与详细图文指引 | `396 MB` |
+| **☁️ 百度网盘** | [点击下载 FairyReport-Local-v1.6.5-Windows-x64.zip](https://pan.baidu.com/s/1XG5DlAl6zpCWEoWfXmtvTg?pwd=i56v) | 提取码：`i56v` | `396 MB` |
+| **⚡ 夸克网盘** | [点击下载 FairyReport-Local-v1.6.5-Windows-x64.zip](https://pan.quark.cn/s/893e062482e6?pwd=DymL) | 提取码：`DymL` | `396 MB` |
+
+> **三步即用**：① 解压压缩包到任意目录 ➔ ② 双击 `FairyReport.exe` ➔ ③ 右上角「设置」填入你自己的 DeepSeek / OpenAI 兼容 API Key 即可开始编制。
+
+---
+
+### 方式二：作为 MCP Server 接入主流桌面端 AI Agent（零额外 API Key）
+
+如果你平时常驻 **Cherry Studio、Claude Desktop（含 Cowork）、Trae、Cursor、Windsurf、Antigravity、OpenClaw / QClaw、ChatWise** 等桌面端 Agent，无需单独配 Key，即可将 FairyReport 的 **15 类权威报告蓝图、三源深度 RAG、跨章节数值自洽核验、出版级三线表 Word 导出** 直接挂载给客户端里现有的大模型调用！
+
+在客户端的 `mcpServers` 配置文件中添加：
+
+```json
+{
+  "mcpServers": {
+    "fairyreport": {
+      "command": "python",
+      "args": ["-m", "engine.mcp_server"],
+      "cwd": "D:/Repo/FairyReport"
+    }
+  }
+}
+```
+
+*(支持 `uvx` / 虚拟环境启动及 Streamable HTTP 模式，完整客户端配置与对话指令详见 **[🔌 FairyReport MCP 接入指南 (docs/MCP_GUIDE.md)](docs/MCP_GUIDE.md)**。)*
+
+| MCP 工具名称 | 是否需要额外 LLM Key | 核心能力说明 |
+| :--- | :---: | :--- |
+| `list_report_templates` | **否（零 Key）** | 列出 15 类专业报告模板、总字数上限、推荐写作顺序及拓扑理由 |
+| `get_report_blueprint` | **否（零 Key）** | 获取指定报告的标准章节大纲骨架、各章字数配额与 12 项三线表写作规范 |
+| `ingest_project_materials` | **否（零 Key）** | 将本地 PDF / Word / Excel / TXT 工程底稿切片并建立本地 ChromaDB 向量库 |
+| `retrieve_report_evidence` | **否（零 Key）** | 执行三源深度 RAG（底稿 `【源:...】` + 国标 `【标:...】` + 免 Key 权威联网 `【网:...】`） |
+| `verify_report_consistency` | **否（零 Key）** | 跨章节核验总投资、用地、建筑面积、工期、FIRR、营业收入量纲一致性与引用断链 |
+| `export_consulting_docx` | **否（零 Key）** | 一键编译带封面、自动目录、标准三线表、标题防粘连与 `[1][2]` 参考文献的 `.docx` |
+| `draft_chapter_with_engine` | 可选（配 `.env`） | 将超长工程章节卸载给本地引擎配置的低成本模型（如 DeepSeek）后台生成 |
+
+---
+
+## 🖥️ 五步全流程工作台实机预览
+
+| Step 1 项目资料建库 | Step 2 规范大纲拟定 |
+| :---: | :---: |
+| ![Step 1 项目资料建库](docs/images/step1_materials.png) | ![Step 2 规范大纲拟定](docs/images/step2_outline.png) |
+| 多格式工程底稿（PDF/Word/Excel/TXT）上传解析与本地向量化入库 | 15 类标准报告网格选择、定位说明与交互式多级大纲骨架锁定 |
+
+| Step 4 专家多维审阅与单项销号 | Step 5 跨章自洽核验与出版级导出 |
+| :---: | :---: |
+| ![Step 4 专家多维审阅](docs/images/step4_review.png) | ![Step 5 出版级导出](docs/images/step5_export.png) |
+| 5 种审阅模式、4 态章节徽标流转、段落级外科手术式精准修订销号 | 自动跨章节经济技术指标交叉核验、参考文献按序编号与出版级 Word 导出 |
+
+---
+
+## 📋 内置支持的 15 类主流专业报告交付物
+
+FairyReport 内置权威标准大纲体系与 15 类专业报告模板知识库（位于 `generic_knowledge/templates/` 与 `pattern/`，开箱即用）：
+
+1. **可行性研究报告**（含行业通用编制大纲标准范式，目标 50,000 字）
 2. **初步可行性研究报告**（预可行性研究）
 3. **项目建议书**（立项申报）
 4. **资金申请报告**（专项债、政府扶持专项投资、政策性金融工具）
 5. **项目申请书(报告)**（企业投资核准类项目）
-6. **政府和社会资本合作项目特许经营方案**（特许经营/PPP方案）
+6. **政府和社会资本合作项目特许经营方案**（特许经营 / PPP 方案）
 7. **项目评估报告**（第三方独立再论证与复核）
 8. **投资机会研究报告**（产业与项目投资机会鉴别）
 9. **后评价报告**（全流程回顾与综合效益评价）
@@ -35,175 +118,107 @@ FairyReport 内置权威标准大纲体系与 15 类主流专业报告模板知�
 
 ---
 
-## 🚀 核心架构与功能特性
+## 🛠️ 核心技术架构与差异化亮点
 
 ### 1. 🔍 三源深度 RAG 检索融合体系
-- **工程底稿向量库**：自动解析项目地质勘探、立项批复、技术方案等上传底稿（PDF / Word / Excel / TXT），分块向量化检索；
-- **行业规程标准库**：内置数千部通用技术标准（GB/GB-T）、行业规范、环保节能与产业投资政策；
-- **百度免 Key 权威联网检索**：高可用公网免 Key 检索（百度优先调度，Bing / DuckDuckGo 备用），严格自媒体黑名单拦截，实时采信权威部门及官方公示信息。
+- **工程底稿向量库（`【源:文件名】`）**：自动解析项目地质勘探、立项批复、技术方案等本地底稿，离线向量化持久化；
+- **行业规程标准库（`【标:标准全称】`）**：支持通用技术标准（GB / GB-T）、行业规范、环保节能与产业投资政策匹配；
+- **百度免 Key 权威联网检索（`【网:标题】`）**：高可用公网免 Key 检索（百度优先调度，Bing / DuckDuckGo 备用），内置自媒体黑名单拦截，优先采信发改、工信、统计局及权威智库公示信息。
 
-### 2. 📝 五步全流程端到端工作台
-- **Step 1 项目资料建库**：新建/切换项目，上传并智能解析多格式工程底稿，自动建立本地向量知识库；
-- **Step 2 规范大纲拟定**：
-  - 支持 15 类标准报告类型网格选择（含智库专报等），卡片采用高度一致的规整外框设计；
-  - 选中即时展现纯业务维度的**报告类型介绍**（专注于报告本身的编制定位与业务要点）；
-  - 根据选定类型自动生成合规全层级大纲，支持交互式拖拽、结构骨架锁定与章节提示词定制；
-- **Step 3 章节流式撰写**：
-  - 支持**大模型思考过程实时流式展示与耗时秒级统计**；
-  - 骨架锁定模式严格防篡改标题层级；
-  - 自动插入合规引用标记（`【源:...】`、`【标:...】`、`【网:...】`）；
-  - 右侧资料台账抽屉支持**正文引用实时定位高亮**，联网文献**点击标题直达系统浏览器**；
-  - 自动强制输出**标准工程经济三线表格**（主要技术经济指标、设备比选、投资估算、财务分析等）；
-  - **流式撰写安全防泄露锁**：写作流式生成期间严密锁定步骤向导与流转按钮，严格防止未完成流式文字污染后续审阅模块。
-- **Step 4 专家多维审阅与靶向精准修订**：
-  - 支持**常规快速体检**、**专项合规核验**、**数据自洽性复核**、**技术方案可行性**以及**全维专家诊断**；
-  - **严格先后依赖与互斥锁**：确立“未审阅禁止修订”依赖门禁，且智能修订与审阅双向互斥加锁，杜绝并发调用与清单冲突；
-  - **目录导航 4 态标准流转**：清晰呈现①待撰写、②已撰写、③已审阅共XX个问题、④已修改X/Y个问题 规范状态徽标；
-  - **局部修改单项精准销号**：针对单一缺陷执行段落精准原位替换，仅对被修复问题销号，本章其余问题完好保留；
-  - 支持实时思考流与流式重构输出。
-- **Step 5 出版级初稿排版与成果导出**：
-  - **出版级初稿排版规范**：严格遵循专业排版标准，生成带有规范专业标识的《初稿》；
-  - **多章节容错导出**：即使非全本写作，无论完成多少章节，均可完整规范导出带封面、目录与正文的出版级 Word 初稿；
-  - **自动数据自洽性核验**：进入导出页面自动触发前后章节关键技术经济指标交叉校验，数据 100% 吻合提示；
-  - **学术级参考文献自动排序**：全书所有引用按首次出现顺序统一编号为 `[1]`, `[2]`, `[3]...`，文末自动生成标准的《参考文献》章，联网文献 100% 完整附带原始 URL；
-  - **多级节标题粘连智能清洗**：基于 50+ 种工程技术特征词自动切分紧凑标题，Word 中 100% 独立成 Heading 样式段落；
-  - **支持一键导出 Word (`.docx`) 与 Markdown (`.md`)**，点击直接在资源管理器中定位并高亮选中成果文件。
+### 2. ⚖️ 跨章节工程经济指标自洽性核验引擎（`context_verifier.py`）
+- 自动跨章节抽取 **总投资、建设用地、总建筑面积、建设工期、财务内部收益率（FIRR）、资本金内部收益率、达产年营业收入** 等核心量纲指标；
+- 支持 **跨单位自动换算比对**（如前文写 `1.2 亿元` 与后文 `12,000 万元` 自动识别为一致，`2 年` 与 `24 个月` 自动对齐），并智能区分“本项目基准估算”与“敏感性分析/地方储备库引用”，精准揪出真正的前后数值冲突。
 
----
-
-## 🛠️ 技术栈
+### 3. 📄 出版级 Word（`.docx`）排版与清洗编译器（`docx_builder.py`）
+- **12 项规定动作标准三线表**：主要技术经济指标、场址比选、工艺路线比选、设备清单、投资估算、财务评价、风险矩阵等自动编译为规范三线表；
+- **多级标题粘连智能拆分**：基于 50+ 种工程技术特征词与公文序号规则，自动切分大模型常见的“标题与正文连写”顽疾，100% 映射为 Word 原生 `Heading` 样式；
+- **学术级参考文献重编号**：全书所有 `【源:...】【标:...】【网:...】` 按首次出现顺序统一编号为 `[1]`, `[2]`, `[3]...`，文末自动生成标准《参考文献》章（联网文献 100% 保留原始 URL）。
 
 | 模块 | 技术选型 | 说明 |
 | :--- | :--- | :--- |
 | **桌面壳层** | **Tauri 2 (Rust)** | 轻量、跨平台、极速原生桌面体验 |
-| **前端界面** | **Vue 3 + TypeScript + Vite + Pinia** | 组件化架构、响应式状态管理、Monaco / Diff 视图 |
-| **后端引擎** | **Python 3.10+ / FastAPI / Pydantic** | 高性能异步 API、SSE 事件流、分块向量化 |
-| **向量数据库** | **ChromaDB / SQLite** | 本地离线持久化存储，保护企业工程数据隐私安全 |
-| **大模型集成** | **OpenAI 兼容客户端** | 完美支持 DeepSeek-V3 / R1、Qwen、OpenAI 等主流模型 |
-| **文档生成** | **python-docx / openpyxl** | 规范排版、样式映射与三线表自动构建 |
+| **前端界面** | **Vue 3 + TypeScript + Vite + Pinia** | 组件化架构、响应式状态管理、Diff 视图与实时排版 |
+| **后端与 MCP 引擎** | **Python 3.10+ / FastAPI / Official MCP SDK** | 同时支持桌面 HTTP/SSE 流式接口与标准 MCP `stdio` / `streamable-http` 协议 |
+| **向量数据库** | **ChromaDB + FastEmbed + SQLite** | 纯本地离线持久化存储，保护企业与涉密工程数据隐私安全 |
+| **大模型集成** | **OpenAI 兼容接口 / 宿主 Agent 模型** | 完美支持 DeepSeek-V3 / R1、Qwen、OpenAI、Claude 等主流模型 |
+| **文档编译** | **python-docx / openpyxl** | 出版级封面、目录、样式映射与标准三线表自动构建 |
 
 ---
 
-## 💻 快速开始
+## 💻 开发者从源码快速启动
 
-### 1. 环境准备
+### 1. 环境准备与依赖安装
+
 - **Node.js**：`>= 18.0.0`
 - **Python**：`>= 3.10`
-- **Rust**（如需构建 Tauri 桌面安装包）：`cargo >= 1.75`
+- **Rust**（仅编译 Tauri 桌面安装包时需要）：`cargo >= 1.75`
 
-### 2. 依赖安装
-
-#### 后端 Python 引擎依赖
 ```bash
-# 建议在虚拟环境中安装
+# 1. 创建并激活 Python 虚拟环境
 python -m venv .venv
-# Windows 激活
+# Windows:
 .venv\Scripts\activate
-# Linux/macOS 激活
+# Linux / macOS:
 source .venv/bin/activate
 
+# 2. 安装后端与 MCP 引擎依赖
 pip install -r requirements.txt
+
+# 3. 安装前端桌面依赖
+cd desktop && npm install && cd ..
 ```
 
-#### 前端桌面依赖
-```bash
-cd desktop
-npm install
-cd ..
-```
+### 2. 启动运行
 
-### 3. 配置环境变量
-在项目根目录下创建 `.env` 文件（或在桌面客户端右上角「设置」中直接配置）：
-
-```env
-# 核心大模型 API Key（以 DeepSeek 为例）
-DEEPSEEK_API_KEY=sk-your-deepseek-key
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-DEEPSEEK_MODEL=deepseek-chat
-
-# 可选：SiliconFlow Rerank 重排序 Key
-# SILICONFLOW_API_KEY=sk-your-siliconflow-key
-
-# 可选：数据存储根目录（默认开发模式为 ./data，打包后为 %LOCALAPPDATA%/FairyReport）
-# FRL_DATA_DIR=./data
-```
-
-### 4. 启动运行
-
-#### 方式 A：启动桌面窗口模式（Tauri 2 客户端）
+#### 模式 A：启动本地 Web / 桌面开发工作台
 ```bash
 # 终端 1：启动本地 Python 后端引擎服务
 python -m uvicorn engine.app.main:app --host 127.0.0.1 --port 8001
 
-# 终端 2：启动桌面客户端工作台
-cd desktop
-npm run tauri dev
+# 终端 2（浏览器极速开发模式，无需 Rust）：
+cd desktop && npm run dev
+# 访问 http://localhost:5173
+
+# 或 终端 2（Tauri 2 原生桌面窗口模式）：
+cd desktop && npm run tauri dev
 ```
 
-#### 方式 B：启动浏览器极速开发模式（无需 Rust 环境）
+#### 模式 B：启动 MCP Server
 ```bash
-# 终端 1：启动本地 Python 后端引擎服务
-python -m uvicorn engine.app.main:app --host 127.0.0.1 --port 8001
+# 标准 STDIO 模式（供 Cherry Studio / Claude Desktop / Cursor / Trae 挂载）
+python -m engine.mcp_server
 
-# 终端 2：启动前端调试服务
-cd desktop
-npm run dev
-# 浏览器直接访问 http://localhost:5173
+# Streamable HTTP 模式（监听 127.0.0.1:8002）
+python -m engine.mcp_server --transport streamable-http --port 8002
 ```
 
-#### 方式 C：绿色免安装便携版（解压即用 · 生产分发）
-1. 直接解压发布的 `dist/FairyReport-Local-v1.6.5-Windows-x64.zip` 至任意目录；
-2. 双击运行 `FairyReport.exe` 即可启动，系统在后台静默唤起本地独立计算引擎；
-3. **便携数据隔离**：根目录包含 `.portable` 标记文件，所有项目底稿与向量数据均存放在解压目录同级的 `data/` 文件夹中，不写入系统注册表；
-4. **自主打包构建**：
-```bash
-# 编译桌面 Release 版本并运行便携版打包脚本
-cd desktop && npm run build && npm run tauri build
-cd ..
-python scripts/pack_portable.py
-# 产物输出至：dist/FairyReport-Local-v1.6.5-Windows-x64.zip (约 370MB)
+### 3. 全量质量门禁验证
+
+仓库配备一条命令的 5 项全量门禁脚本（前端单测、Vue 类型检查、前端构建、后端与 MCP 全量 Pytest、Rust 壳层编译检查）：
+
+```powershell
+powershell -NoProfile -File scripts\verify.ps1
 ```
 
 ---
 
-## 🧪 测试与质量保证
+## 📖 文档与指南导航
 
-项目遵循严格的 **PMC (Planner-Maker-Checker)** 协作开发流水线，配备 5 项全量门禁检验：
-
-```bash
-# 1. 运行前端自动化测试
-cd desktop && npx vitest run
-
-# 2. 运行 Vue 类型严格检查
-cd desktop && npx vue-tsc --noEmit
-
-# 3. 运行前端构建打包
-cd desktop && npm run build
-
-# 4. 运行后端全量单元测试
-python -m pytest engine/tests/
-
-# 5. 运行 Rust 壳层编译核验
-cd desktop/src-tauri && cargo check
-```
+- 🌐 **[在线官方网站与完整文档](https://atalanta0505.github.io/FairyReport/)**
+- 🔌 **[MCP Server 多客户端接入指南 (docs/MCP_GUIDE.md)](docs/MCP_GUIDE.md)**（Cherry Studio / Claude Desktop / Trae / Cursor / OpenClaw）
+- 📖 **[快速上手操作指南 (docs/BEGINNER_GUIDE.md)](docs/BEGINNER_GUIDE.md)**
+- 📘 **[用户操作详细手册 (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**
 
 ---
 
-## 🔒 数据安全与隐私保障
+## 🔒 数据安全与隐私承诺
 
-- **纯本地持久化**：所有上传的工程资料、向量索引和生成报告均存储于本地数据目录，绝不上云；
-- **凭据零泄露**：API 密钥仅保存在本地客户端内存及 `.env` 中，严禁任何形式的日志打印或远端上传；
+- **纯本地持久化**：所有上传的工程底稿、向量索引和生成报告均存储于本地 `data/` 目录，绝不上传至任何第三方云端；
+- **凭据零泄露**：API 密钥仅保存在本地客户端或本地 `.env` 中，严禁任何形式的日志打印或远端上传；
 - **全异常静默熔断**：外部检索超时或网络抖动时自动降级，绝不阻塞报告编写主流程。
-
----
-
-## 📖 用户文档与操作手册
-
-- 📖 **[快速上手操作指南 (docs/BEGINNER_GUIDE.md)](docs/BEGINNER_GUIDE.md)**：包含系统真实界面步骤演示与核心操作要点。
-- 📘 **[用户操作详细手册 (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**：五步全流程专业操作指南、PDF 扫描件解析机制、多维专家审阅与疑难 FAQ。
 
 ---
 
 ## 📄 开源许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+本项目基于 [MIT License](LICENSE) 开源。如果 FairyReport 对你的报告编制或 Agent 工作流有帮助，欢迎点亮一颗 **Star ⭐** 支持我们！
