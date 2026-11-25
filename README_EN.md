@@ -75,10 +75,15 @@ See **[docs/MCP_GUIDE.md](docs/MCP_GUIDE.md)** for full step-by-step setup acros
 | ![Step 1 Materials](docs/images/step1_materials.png) | ![Step 2 Outline](docs/images/step2_outline.png) |
 | Parse & vectorize local PDF, Word, Excel, and TXT engineering documents offline | Choose from 15 authoritative report templates with topological writing order |
 
-| Step 4: Multi-Mode Expert Review & Surgical Revision | Step 5: Cross-Chapter Verification & DOCX Export |
+| Step 3: Streaming Drafting & Three-Line Tables | Step 4: Multi-Mode Expert Review & Surgical Revision |
 | :---: | :---: |
-| ![Step 4 Review](docs/images/step4_review.png) | ![Step 5 Export](docs/images/step5_export.png) |
-| 5 diagnostic modes, 4-state chapter badges, and paragraph-level issue resolution | Automated cross-chapter numerical consistency checks and publication-grade Word export |
+| ![Step 3 Writing](docs/images/step3_writing.png) | ![Step 4 Review](docs/images/step4_review.png) |
+| Skeleton-locked streaming generation, inline green citation pills, and standard three-line tables | 5 diagnostic modes, 4-state chapter badges, and paragraph-level issue resolution |
+
+| Step 5: Cross-Chapter Verification & Publication DOCX Export |
+| :---: |
+| ![Step 5 Export](docs/images/step5_export.png) |
+| Automated cross-chapter numerical consistency checks, ordered `[1][2]` bibliography, and one-click `.docx` export |
 
 ---
 

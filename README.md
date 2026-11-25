@@ -89,10 +89,15 @@
 | ![Step 1 项目资料建库](docs/images/step1_materials.png) | ![Step 2 规范大纲拟定](docs/images/step2_outline.png) |
 | 多格式工程底稿（PDF/Word/Excel/TXT）上传解析与本地向量化入库 | 15 类标准报告网格选择、定位说明与交互式多级大纲骨架锁定 |
 
-| Step 4 专家多维审阅与单项销号 | Step 5 跨章自洽核验与出版级导出 |
+| Step 3 章节流式撰写与三线表实时排版 | Step 4 专家多维审阅与单项销号 |
 | :---: | :---: |
-| ![Step 4 专家多维审阅](docs/images/step4_review.png) | ![Step 5 出版级导出](docs/images/step5_export.png) |
-| 5 种审阅模式、4 态章节徽标流转、段落级外科手术式精准修订销号 | 自动跨章节经济技术指标交叉核验、参考文献按序编号与出版级 Word 导出 |
+| ![Step 3 章节流式撰写](docs/images/step3_writing.png) | ![Step 4 专家多维审阅](docs/images/step4_review.png) |
+| 骨架锁定流式撰文、绿色溯源胶囊（`【源/标/网】`）与标准工程经济三线表 | 5 种审阅模式、4 态章节徽标流转、段落级外科手术式精准修订销号 |
+
+| Step 5 跨章节指标自洽核验与出版级 Word 导出 |
+| :---: |
+| ![Step 5 出版级导出](docs/images/step5_export.png) |
+| 自动跨章节经济技术指标交叉核验、参考文献按序编号与出版级 Word（`.docx`）/ Markdown 一键导出 |
 
 ---
 
