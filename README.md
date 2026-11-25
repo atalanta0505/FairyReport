@@ -11,9 +11,9 @@
 [![Tauri 2](https://img.shields.io/badge/Desktop-Tauri_2_%2B_Vue_3-24c8db.svg)](desktop/)
 [![FastAPI](https://img.shields.io/badge/Engine-FastAPI_%2B_ChromaDB-009688.svg)](engine/)
 [![MCP Ready](https://img.shields.io/badge/MCP-Server_Ready-7c3aed.svg)](docs/MCP_GUIDE.md)
-[![Portable Release](https://img.shields.io/badge/Windows_便携版-v1.6.5_免安装-success.svg)](#方式一windows-绿色免安装桌面端适合工程咨询师规划与研究人员)
+[![Portable Release](https://img.shields.io/badge/Windows_便携版-v1.6.5_免安装-success.svg)](http://101.42.9.223/download)
 
-[**简体中文**](README.md) | [**English**](README_EN.md) | [**📦 绿色免安装版下载（网盘直链）**](#方式一windows-绿色免安装桌面端适合工程咨询师规划与研究人员) | [**🔌 MCP 接入指南**](docs/MCP_GUIDE.md) | [**📖 快速上手指南**](docs/BEGINNER_GUIDE.md) | [**🌐 在线文档站**](https://atalanta0505.github.io/FairyReport/)
+[**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 国内官方网站**](http://101.42.9.223/) | [**📦 绿色免安装版下载**](http://101.42.9.223/download) | [**🔌 MCP 接入指南**](docs/MCP_GUIDE.md) | [**📖 快速上手指南**](docs/BEGINNER_GUIDE.md)
 
 </div>
 
@@ -42,11 +42,11 @@
 
 | 下载渠道 | 获取链接 | 提取码 / 说明 | 包体大小 |
 | :--- | :--- | :--- | :--- |
-| **🌐 官方网站下载页** | [https://atalanta0505.github.io/FairyReport/download](https://atalanta0505.github.io/FairyReport/download) | 含 SHA-256 校验码与详细图文指引 | `396 MB` |
+| **🌐 国内官方网站下载页** | [http://101.42.9.223/download](http://101.42.9.223/download) | 腾讯云国内直连，含 SHA-256 校验码与图文指引 | `396 MB` |
 | **☁️ 百度网盘** | [点击下载 FairyReport-Local-v1.6.5-Windows-x64.zip](https://pan.baidu.com/s/1XG5DlAl6zpCWEoWfXmtvTg?pwd=i56v) | 提取码：`i56v` | `396 MB` |
 | **⚡ 夸克网盘** | [点击下载 FairyReport-Local-v1.6.5-Windows-x64.zip](https://pan.quark.cn/s/893e062482e6?pwd=DymL) | 提取码：`DymL` | `396 MB` |
 
-> **三步即用**：① 解压压缩包到任意目录 ➔ ② 双击 `FairyReport.exe` ➔ ③ 右上角「设置」填入你自己的 DeepSeek / OpenAI 兼容 API Key 即可开始编制。
+> **三步即用**：① 解压压缩包到任意目录 ➔ ② 双击 `FairyReport.exe` ➔ ③ 右上角「设置」填入你自己的大模型 API Key（原生支持 **DeepSeek、通义千问、Kimi、硅基流动** 及 **OpenAI、Claude、Gemini、OpenRouter**）即可开始编制。
 
 ---
 
@@ -145,7 +145,7 @@ FairyReport 内置权威标准大纲体系与 15 类专业报告模板知识库�
 | **前端界面** | **Vue 3 + TypeScript + Vite + Pinia** | 组件化架构、响应式状态管理、Diff 视图与实时排版 |
 | **后端与 MCP 引擎** | **Python 3.10+ / FastAPI / Official MCP SDK** | 同时支持桌面 HTTP/SSE 流式接口与标准 MCP `stdio` / `streamable-http` 协议 |
 | **向量数据库** | **ChromaDB + FastEmbed + SQLite** | 纯本地离线持久化存储，保护企业与涉密工程数据隐私安全 |
-| **大模型集成** | **OpenAI 兼容接口 / 宿主 Agent 模型** | 完美支持 DeepSeek-V3 / R1、Qwen、OpenAI、Claude 等主流模型 |
+| **大模型集成** | **国内外多厂商自适应客户端** | 原生支持 DeepSeek、Qwen、Kimi、硅基流动，以及 OpenAI（含 o1/o3/GPT-5）、Anthropic Claude 原生直连、Google Gemini、OpenRouter |
 | **文档编译** | **python-docx / openpyxl** | 出版级封面、目录、样式映射与标准三线表自动构建 |
 
 ---
@@ -209,7 +209,7 @@ powershell -NoProfile -File scripts\verify.ps1
 
 ## 📖 文档与指南导航
 
-- 🌐 **[在线官方网站与完整文档](https://atalanta0505.github.io/FairyReport/)**
+- 🌐 **[国内官方网站与完整在线手册 (http://101.42.9.223/)](http://101.42.9.223/)**
 - 🔌 **[MCP Server 多客户端接入指南 (docs/MCP_GUIDE.md)](docs/MCP_GUIDE.md)**（Cherry Studio / Claude Desktop / Trae / Cursor / OpenClaw）
 - 📖 **[快速上手操作指南 (docs/BEGINNER_GUIDE.md)](docs/BEGINNER_GUIDE.md)**
 - 📘 **[用户操作详细手册 (docs/USER_GUIDE.md)](docs/USER_GUIDE.md)**

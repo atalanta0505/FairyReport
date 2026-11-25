@@ -81,16 +81,56 @@ export const useSettingsStore = defineStore("settings", () => {
     if (!key) {
       throw new Error("请先输入 API Key，再拉取官方模型列表");
     }
-    const base = (llmBaseUrl.value || DEFAULT_LLM_BASE_URL).replace(/\/+$/, "");
+    let base = (llmBaseUrl.value || DEFAULT_LLM_BASE_URL).trim().replace(/\/+$/, "");
+    let isAnthropic = false;
+    try {
+      const u = new URL(base);
+      const host = u.hostname.toLowerCase();
+      const path = u.pathname.replace(/\/+$/, "");
+      if (host === "api.anthropic.com") {
+        isAnthropic = true;
+        if (!path) base = `${base}/v1`;
+      } else if (host === "generativelanguage.googleapis.com") {
+        if (!path) base = `${base}/v1beta/openai`;
+        else if (path === "/v1beta") base = `${base}/openai`;
+      } else if (host === "openrouter.ai") {
+        if (!path) base = `${base}/api/v1`;
+        else if (path === "/api") base = `${base}/v1`;
+      } else if (host === "dashscope.aliyuncs.com" && !path) {
+        base = `${base}/compatible-mode/v1`;
+      } else if (
+        [
+          "api.openai.com",
+          "api.siliconflow.cn",
+          "api.siliconflow.com",
+          "api.moonshot.cn",
+          "api.moonshot.ai",
+          "api.x.ai",
+        ].includes(host) &&
+        !path
+      ) {
+        base = `${base}/v1`;
+      }
+    } catch {
+      /* 非标准 URL 保持原样 */
+    }
     const url = `${base}/models`;
     const doFetch = await getHttpFetch();
 
+    const headers: Record<string, string> = isAnthropic
+      ? {
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        }
+      : {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        };
+
     const resp = await doFetch(url, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
+      headers,
     });
 
     if (!resp.ok) {

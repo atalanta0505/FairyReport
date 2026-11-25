@@ -14,7 +14,7 @@
   ```
 - **Website**：
   ```text
-  https://atalanta0505.github.io/FairyReport/
+  http://101.42.9.223/
   ```
 - **Topics（复制逐个添加，覆盖工程报告、RAG 与 MCP 三大搜索流量池）**：
   ```text
@@ -88,7 +88,7 @@
 >
 > 为了彻底解决这几个问题，我开发并开源了 **FairyReport**（MIT 协议，纯本地存储，免注册开箱即用）：
 > - 🔗 **GitHub 仓库**：https://github.com/atalanta0505/FairyReport
-> - 🌐 **在线文档与 Windows 绿色便携版下载**：https://atalanta0505.github.io/FairyReport/
+> - 🌐 **国内官方网站与 Windows 绿色便携版下载**：http://101.42.9.223/
 >
 > #### 核心做了哪几件硬核的事？
 > 1. **15 类专业报告标准骨架与拓扑写作顺序**：内置可研、初可研、项目建议书、资金申请、PPP 特许经营、产业/园区/企业规划、智库专报等 15 套标准大纲与字数配额，先写主体技术与投资论证章，最后汇总生成首尾综述章。

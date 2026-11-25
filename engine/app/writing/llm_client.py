@@ -1,7 +1,11 @@
 """
-LLM 客户端 — httpx 直连 OpenAI 兼容 chat/completions。
+LLM 客户端 — httpx 直连 OpenAI 兼容 chat/completions 及 Anthropic 原生 /v1/messages。
 
 - Key 只从请求 llm_config 取，不落盘、日志脱敏
+- 自动补全常见国内外云厂商缺失的 /v1（OpenAI、SiliconFlow、Moonshot、OpenRouter、DashScope、Gemini 等），
+  同时保持 DeepSeek 与自定义测试桩 URL 原样不变
+- 针对 OpenAI 推理系列（o1/o3/o4/gpt-5）、DeepSeek-R1 与 Google Gemini 自动剥离不兼容采样惩罚参数，防止 400 报错
+- 原生兼容 Anthropic Claude 官方接口（https://api.anthropic.com -> /v1/messages + x-api-key）
 - 非流式 chat() 与流式 chat_stream()（SSE 透传，generator）
 - 1+3 指数退避重试（上游 5xx/429/超时/连接错误）；4xx 非 429 不重试
 - 上游 5xx/连接错误 → 502；超时 → 504
@@ -13,6 +17,7 @@ import json
 import logging
 import time
 from typing import Iterator
+from urllib.parse import urlparse
 
 import httpx
 
@@ -20,6 +25,8 @@ _logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 4  # 1 initial + 3 retries
 RETRY_DELAYS = [2, 4, 8]  # 秒；测试可 monkeypatch 为 0
+ANTHROPIC_DEFAULT_MAX_TOKENS = 8192
+ANTHROPIC_VERSION = "2023-06-01"
 
 # ── 可注入 HTTP 传输层（测试用 MockTransport 替换）──
 _transport: httpx.BaseTransport | None = None
@@ -50,6 +57,87 @@ def mask_key(key: str) -> str:
     if len(key) <= 6:
         return key[:2] + "***"
     return f"{key[:2]}***{key[-4:]}"
+
+
+def normalize_llm_base_url(raw_url: str) -> tuple[str, str]:
+    """规范化国内外主流大模型 Base URL 并识别协议类型（'openai' | 'anthropic'）。
+
+    仅对已知要求特定路径前缀的官方云域名做无损补全；
+    DeepSeek 官方域名与任意本地/测试桩地址保持原样不改动。
+    """
+    cleaned = (raw_url or "").strip().rstrip("/")
+    if not cleaned:
+        return cleaned, "openai"
+
+    parsed = urlparse(cleaned)
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").rstrip("/")
+
+    if host == "api.anthropic.com":
+        if not path:
+            cleaned = f"{cleaned}/v1"
+        return cleaned, "anthropic"
+
+    if host == "generativelanguage.googleapis.com":
+        if not path:
+            cleaned = f"{cleaned}/v1beta/openai"
+        elif path == "/v1beta":
+            cleaned = f"{cleaned}/openai"
+        return cleaned, "openai"
+
+    if host == "openrouter.ai":
+        if not path:
+            cleaned = f"{cleaned}/api/v1"
+        elif path == "/api":
+            cleaned = f"{cleaned}/v1"
+        return cleaned, "openai"
+
+    if host == "dashscope.aliyuncs.com":
+        if not path:
+            cleaned = f"{cleaned}/compatible-mode/v1"
+        return cleaned, "openai"
+
+    v1_hosts = {
+        "api.openai.com",
+        "api.siliconflow.cn",
+        "api.siliconflow.com",
+        "api.moonshot.cn",
+        "api.moonshot.ai",
+        "api.x.ai",
+    }
+    if host in v1_hosts and not path:
+        cleaned = f"{cleaned}/v1"
+
+    return cleaned, "openai"
+
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    """判断是否为拒绝 temperature / penalty 参数的 OpenAI o 系列推理模型。"""
+    m = (model or "").strip().lower().split("/")[-1]
+    return (
+        m in ("o1", "o3", "o4-mini")
+        or m.startswith(("o1-", "o3-", "o4-"))
+    )
+
+
+def _is_penalty_unsupported_model(model: str, base_url: str) -> bool:
+    """判断是否应剥离 frequency_penalty / presence_penalty（Gemini、DeepSeek-R1、GPT-5 等）。"""
+    m = (model or "").strip().lower().split("/")[-1]
+    host = (urlparse(base_url).hostname or "").lower()
+    if _is_openai_reasoning_model(m):
+        return True
+    if host == "generativelanguage.googleapis.com" or m.startswith("gemini-"):
+        return True
+    if m.startswith(("gpt-5", "deepseek-reasoner", "deepseek-r1", "claude-")):
+        return True
+    return False
+
+
+def _is_stream_options_unsupported(model: str, base_url: str) -> bool:
+    """判断上游流式接口是否不兼容 stream_options: {include_usage: true}。"""
+    m = (model or "").strip().lower().split("/")[-1]
+    host = (urlparse(base_url).hostname or "").lower()
+    return host == "generativelanguage.googleapis.com" or m.startswith("gemini-")
 
 
 def _is_retryable_status(status: int) -> bool:
@@ -93,20 +181,27 @@ def _retry(fn):
 
 
 class LLMClient:
-    """OpenAI 兼容 chat/completions 客户端（用户自带 Key，不存储）。"""
+    """多厂商兼容大模型客户端（支持 OpenAI 兼容协议与 Anthropic 原生协议，用户自带 Key 不落盘）。"""
 
     def __init__(self, llm_config: dict) -> None:
         self.api_key = (llm_config.get("api_key") or "").strip()
-        self.base_url = (llm_config.get("base_url") or "").strip()
+        raw_base = (llm_config.get("base_url") or "").strip()
         self.model = (llm_config.get("model") or "").strip()
         if not self.api_key:
             raise LLMError(422, "llm_config.api_key 缺失")
-        if not self.base_url:
+        if not raw_base:
             raise LLMError(422, "llm_config.base_url 缺失")
         if not self.model:
             raise LLMError(422, "llm_config.model 缺失")
+        self.base_url, self.provider = normalize_llm_base_url(raw_base)
 
     def _headers(self) -> dict:
+        if self.provider == "anthropic":
+            return {
+                "x-api-key": self.api_key,
+                "anthropic-version": ANTHROPIC_VERSION,
+                "Content-Type": "application/json",
+            }
         return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -114,26 +209,75 @@ class LLMClient:
 
     def _url(self) -> str:
         base = self.base_url.rstrip("/")
+        if self.provider == "anthropic":
+            return f"{base}/messages"
         return f"{base}/chat/completions"
 
     def _payload(
         self, messages, temperature, frequency_penalty, presence_penalty,
         top_p, max_tokens, stream=False,
     ) -> dict:
+        if self.provider == "anthropic":
+            sys_parts: list[str] = []
+            anth_messages: list[dict] = []
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "system":
+                    if content:
+                        sys_parts.append(str(content))
+                else:
+                    anth_messages.append({"role": role, "content": content})
+            payload: dict = {
+                "model": self.model,
+                "messages": anth_messages or [{"role": "user", "content": ""}],
+                "max_tokens": int(max_tokens) if max_tokens else ANTHROPIC_DEFAULT_MAX_TOKENS,
+                "temperature": temperature,
+            }
+            if sys_parts:
+                payload["system"] = "\n\n".join(sys_parts)
+            if stream:
+                payload["stream"] = True
+            return payload
+
+        is_o_series = _is_openai_reasoning_model(self.model)
+        drop_penalties = _is_penalty_unsupported_model(self.model, self.base_url)
+
         payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature,
-            "frequency_penalty": frequency_penalty,
-            "presence_penalty": presence_penalty,
-            "top_p": top_p,
         }
+        if not is_o_series:
+            payload["temperature"] = temperature
+            payload["top_p"] = top_p
+
+        if not drop_penalties:
+            payload["frequency_penalty"] = frequency_penalty
+            payload["presence_penalty"] = presence_penalty
+
         if max_tokens:
-            payload["max_tokens"] = max_tokens
+            if is_o_series:
+                payload["max_completion_tokens"] = max_tokens
+            else:
+                payload["max_tokens"] = max_tokens
+
         if stream:
             payload["stream"] = True
-            payload["stream_options"] = {"include_usage": True}
+            if not _is_stream_options_unsupported(self.model, self.base_url):
+                payload["stream_options"] = {"include_usage": True}
         return payload
+
+    @staticmethod
+    def _extract_non_stream_text(data: dict, provider: str) -> str:
+        if provider == "anthropic":
+            blocks = data.get("content") or []
+            texts = [
+                b.get("text", "")
+                for b in blocks
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            return "".join(texts)
+        return (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
 
     @_retry
     def _post_json(self, payload: dict) -> dict:
@@ -162,7 +306,7 @@ class LLMClient:
                     top_p, max_tokens, stream=False,
                 )
             )
-            return (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            return self._extract_non_stream_text(data, self.provider)
         except LLMError:
             raise
 
@@ -176,7 +320,7 @@ class LLMClient:
                     messages, temperature, 0.0, 0.0, 1.0, max_tokens, stream=False,
                 )
             )
-            return (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            return self._extract_non_stream_text(data, self.provider)
         except LLMError:
             raise
 
@@ -236,6 +380,25 @@ class LLMClient:
                                 obj = json.loads(data_str)
                             except (ValueError, json.JSONDecodeError):
                                 continue
+
+                            if self.provider == "anthropic":
+                                ev_type = obj.get("type")
+                                if ev_type == "message_stop":
+                                    return
+                                if ev_type == "content_block_delta":
+                                    delta = obj.get("delta") or {}
+                                    d_type = delta.get("type")
+                                    if d_type == "thinking_delta" and delta.get("thinking"):
+                                        yielded = True
+                                        yield json.dumps(
+                                            {"type": "thought", "chunk": delta["thinking"]},
+                                            ensure_ascii=False,
+                                        )
+                                    elif d_type == "text_delta" and delta.get("text"):
+                                        yielded = True
+                                        yield delta["text"]
+                                continue
+
                             choices = obj.get("choices") or []
                             if not choices:
                                 continue

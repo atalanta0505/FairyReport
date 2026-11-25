@@ -11,11 +11,16 @@
 [![Tauri 2](https://img.shields.io/badge/Desktop-Tauri_2_%2B_Vue_3-24c8db.svg)](desktop/)
 [![FastAPI](https://img.shields.io/badge/Engine-FastAPI_%2B_ChromaDB-009688.svg)](engine/)
 [![MCP Ready](https://img.shields.io/badge/MCP-Server_Ready-7c3aed.svg)](docs/MCP_GUIDE.md)
-[![Portable Release](https://img.shields.io/badge/Windows_Portable-v1.6.5-success.svg)](README.md#方式一windows-绿色免安装桌面端适合工程咨询师规划与研究人员)
+[![Portable Release](https://img.shields.io/badge/Windows_Portable-v1.6.5-success.svg)](http://101.42.9.223/download)
 
-[**简体中文**](README.md) | [**English**](README_EN.md) | [**📦 Portable Download**](README.md#方式一windows-绿色免安装桌面端适合工程咨询师规划与研究人员) | [**🔌 MCP Integration Guide**](docs/MCP_GUIDE.md) | [**📖 Beginner Guide**](docs/BEGINNER_GUIDE.md) | [**🌐 Official Website**](https://atalanta0505.github.io/FairyReport/)
+[**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 Official Website**](http://101.42.9.223/) | [**📦 Portable Download**](http://101.42.9.223/download) | [**🔌 MCP Integration Guide**](docs/MCP_GUIDE.md) | [**📖 Beginner Guide**](docs/BEGINNER_GUIDE.md)
 
 </div>
+
+> [!NOTE]
+> **Language & LLM Compatibility Scope**
+> - **UI & Built-in Regulatory Templates**: The desktop workbench interface and all 15 built-in report templates (Feasibility Study, Project Proposal, Special Bond Application, PPP Scheme, etc.) are currently in **Simplified Chinese**, specifically engineered around Chinese engineering consulting and NDRC / GB-T regulatory standards.
+> - **Domestic & International LLM Keys**: Both the Desktop Workbench and Engine natively support **DeepSeek, Qwen, Moonshot/Kimi, SiliconFlow**, as well as **OpenAI (`gpt-4o`, `o1`/`o3`/`gpt-5` reasoning models), Anthropic Claude (native `sk-ant-...` `/v1/messages` API), Google Gemini (`generativelanguage.googleapis.com`), and OpenRouter** with automatic `/v1` path resolution and parameter sanitization. In **MCP Server Mode**, zero extra API keys are required — your host client (Claude Desktop, Cursor, Cherry Studio, Trae) uses its own configured model.
 
 ---
 

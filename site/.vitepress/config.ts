@@ -33,6 +33,7 @@ export default defineConfig({
         items: [
           { text: '系统架构与本地存储', link: '/docs/architecture' },
           { text: '五步工作台解析', link: '/docs/pipeline' },
+          { text: 'MCP Server 多客户端接入', link: '/docs/mcp' },
           { text: '绿色免安装版运行指南', link: '/docs/portable' },
           { text: '扫描件 PDF 离线 OCR 处理', link: '/docs/pdf-ocr' },
         ],
@@ -68,6 +69,7 @@ export default defineConfig({
           text: '深度工作流',
           items: [
             { text: '五步工作台深度解析', link: '/docs/pipeline' },
+            { text: 'MCP Server 多客户端接入', link: '/docs/mcp' },
             { text: '扫描件 PDF 离线 OCR 处理', link: '/docs/pdf-ocr' },
           ],
         },

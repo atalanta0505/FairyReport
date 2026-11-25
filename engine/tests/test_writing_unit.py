@@ -638,5 +638,62 @@ def test_find_chapter_heading_indices_and_cn_seq_parsing():
     assert parse_chapter_seq("二十一、专项保障") == 21
 
 
+def test_llm_multi_provider_compatibility_openai_gemini_anthropic():
+    """验证 OpenAI o 系列推理模型、Google Gemini 与 Anthropic Claude 原生接口兼容性。"""
+    import json as _json
+
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _json.loads(request.content.decode("utf-8")) if request.content else {}
+        captured.append((str(request.url), dict(request.headers), body))
+        if "api.anthropic.com" in str(request.url):
+            if body.get("stream"):
+                sse = (
+                    'data: {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "先梳理框架"}}\n\n'
+                    'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Claude正文输出"}}\n\n'
+                    'data: {"type": "message_stop"}\n\n'
+                )
+                return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
+            return httpx.Response(200, json={"content": [{"type": "text", "text": "Claude非流式结果"}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
+
+    llm_mod.set_transport(httpx.MockTransport(handler))
+    try:
+        # 1. OpenAI 根域名自动补 /v1，且 o3-mini 自动剥离 temperature/penalties 并转换 max_completion_tokens
+        c_o3 = LLMClient({"api_key": "sk-openai", "base_url": "https://api.openai.com", "model": "o3-mini"})
+        assert c_o3.chat("你好", frequency_penalty=0.4, presence_penalty=0.25, max_tokens=2048) == "OK"
+        url_o3, _, body_o3 = captured[-1]
+        assert url_o3 == "https://api.openai.com/v1/chat/completions"
+        assert "temperature" not in body_o3
+        assert "frequency_penalty" not in body_o3
+        assert "presence_penalty" not in body_o3
+        assert body_o3["max_completion_tokens"] == 2048
+
+        # 2. Google Gemini 自动补 /v1beta/openai 且剥离不支持的 penalties 与 stream_options
+        c_gem = LLMClient({"api_key": "AIza-test", "base_url": "https://generativelanguage.googleapis.com", "model": "gemini-2.5-pro"})
+        payload_gem = c_gem._payload([{"role": "user", "content": "hi"}], 0.2, 0.4, 0.25, 0.85, None, stream=True)
+        assert c_gem._url() == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        assert "frequency_penalty" not in payload_gem
+        assert "presence_penalty" not in payload_gem
+        assert "stream_options" not in payload_gem
+
+        # 3. Anthropic Claude 原生 /v1/messages（x-api-key + system 顶层提取 + 非流式/流式解析）
+        c_anth = LLMClient({"api_key": "sk-ant-test", "base_url": "https://api.anthropic.com", "model": "claude-sonnet-4-5"})
+        assert c_anth.chat("写一段摘要", system_prompt="你是工程专家") == "Claude非流式结果"
+        url_anth, hdr_anth, body_anth = captured[-1]
+        assert url_anth == "https://api.anthropic.com/v1/messages"
+        assert hdr_anth.get("x-api-key") == "sk-ant-test"
+        assert hdr_anth.get("anthropic-version") == "2023-06-01"
+        assert body_anth["system"] == "你是工程专家"
+        assert body_anth["max_tokens"] == 8192
+
+        chunks = list(c_anth.chat_stream_iter([{"role": "user", "content": "流式测试"}]))
+        assert any("先梳理框架" in ch for ch in chunks)
+        assert "Claude正文输出" in chunks
+    finally:
+        llm_mod.set_transport(None)
+
+
 
 
