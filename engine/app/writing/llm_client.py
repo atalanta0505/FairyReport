@@ -4,7 +4,7 @@ LLM 客户端 — httpx 直连 OpenAI 兼容 chat/completions 及 Anthropic 原�
 - Key 只从请求 llm_config 取，不落盘、日志脱敏
 - 自动补全常见国内外云厂商缺失的 /v1（OpenAI、SiliconFlow、Moonshot、OpenRouter、DashScope、Gemini 等），
   同时保持 DeepSeek 与自定义测试桩 URL 原样不变
-- 针对 OpenAI 推理系列（o1/o3/o4/gpt-5）、DeepSeek-R1 与 Google Gemini 自动剥离不兼容采样惩罚参数，防止 400 报错
+- 按厂商协议层自适应（OpenAI、Google Gemini、Anthropic Claude）自动过滤不兼容的采样惩罚参数，防止 400 报错
 - 原生兼容 Anthropic Claude 官方接口（https://api.anthropic.com -> /v1/messages + x-api-key）
 - 非流式 chat() 与流式 chat_stream()（SSE 透传，generator）
 - 1+3 指数退避重试（上游 5xx/429/超时/连接错误）；4xx 非 429 不重试
@@ -111,24 +111,24 @@ def normalize_llm_base_url(raw_url: str) -> tuple[str, str]:
     return cleaned, "openai"
 
 
-def _is_openai_reasoning_model(model: str) -> bool:
-    """判断是否为拒绝 temperature / penalty 参数的 OpenAI o 系列推理模型。"""
+def _is_openai_strict_model(model: str, base_url: str) -> bool:
+    """判断是否为使用 max_completion_tokens 且不接收传统采样惩罚参数的 OpenAI 现代模型（如 GPT-5/GPT-6 等）。"""
     m = (model or "").strip().lower().split("/")[-1]
-    return (
-        m in ("o1", "o3", "o4-mini")
-        or m.startswith(("o1-", "o3-", "o4-"))
-    )
+    host = (urlparse(base_url).hostname or "").lower()
+    if host == "api.openai.com":
+        return True
+    return m.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
 
 
 def _is_penalty_unsupported_model(model: str, base_url: str) -> bool:
-    """判断是否应剥离 frequency_penalty / presence_penalty（Gemini、DeepSeek-R1、GPT-5 等）。"""
+    """判断上游厂商协议是否不支持 frequency_penalty / presence_penalty。"""
     m = (model or "").strip().lower().split("/")[-1]
     host = (urlparse(base_url).hostname or "").lower()
-    if _is_openai_reasoning_model(m):
+    if _is_openai_strict_model(m, base_url):
         return True
     if host == "generativelanguage.googleapis.com" or m.startswith("gemini-"):
         return True
-    if m.startswith(("gpt-5", "deepseek-reasoner", "deepseek-r1", "claude-")):
+    if "reasoner" in m or m.startswith("claude-"):
         return True
     return False
 
@@ -240,14 +240,14 @@ class LLMClient:
                 payload["stream"] = True
             return payload
 
-        is_o_series = _is_openai_reasoning_model(self.model)
+        is_openai_modern = _is_openai_strict_model(self.model, self.base_url)
         drop_penalties = _is_penalty_unsupported_model(self.model, self.base_url)
 
         payload = {
             "model": self.model,
             "messages": messages,
         }
-        if not is_o_series:
+        if not is_openai_modern:
             payload["temperature"] = temperature
             payload["top_p"] = top_p
 
@@ -256,7 +256,7 @@ class LLMClient:
             payload["presence_penalty"] = presence_penalty
 
         if max_tokens:
-            if is_o_series:
+            if is_openai_modern:
                 payload["max_completion_tokens"] = max_tokens
             else:
                 payload["max_tokens"] = max_tokens

@@ -145,7 +145,7 @@ FairyReport 内置权威标准大纲体系与 15 类专业报告模板知识库�
 | **前端界面** | **Vue 3 + TypeScript + Vite + Pinia** | 组件化架构、响应式状态管理、Diff 视图与实时排版 |
 | **后端与 MCP 引擎** | **Python 3.10+ / FastAPI / Official MCP SDK** | 同时支持桌面 HTTP/SSE 流式接口与标准 MCP `stdio` / `streamable-http` 协议 |
 | **向量数据库** | **ChromaDB + FastEmbed + SQLite** | 纯本地离线持久化存储，保护企业与涉密工程数据隐私安全 |
-| **大模型集成** | **国内外多厂商自适应客户端** | 原生支持 DeepSeek、Qwen、Kimi、硅基流动，以及 OpenAI（含 o1/o3/GPT-5）、Anthropic Claude 原生直连、Google Gemini、OpenRouter |
+| **大模型集成** | **国内外多厂商自适应客户端** | 原生支持 DeepSeek（V4 / Flash）、通义千问 Qwen、Kimi、硅基流动，以及 OpenAI GPT 系列、Anthropic Claude、Google Gemini、OpenRouter |
 | **文档编译** | **python-docx / openpyxl** | 出版级封面、目录、样式映射与标准三线表自动构建 |
 
 ---

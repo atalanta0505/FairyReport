@@ -20,7 +20,7 @@
 > [!NOTE]
 > **Language & LLM Compatibility Scope**
 > - **UI & Built-in Regulatory Templates**: The desktop workbench interface and all 15 built-in report templates (Feasibility Study, Project Proposal, Special Bond Application, PPP Scheme, etc.) are currently in **Simplified Chinese**, specifically engineered around Chinese engineering consulting and NDRC / GB-T regulatory standards.
-> - **Domestic & International LLM Keys**: Both the Desktop Workbench and Engine natively support **DeepSeek, Qwen, Moonshot/Kimi, SiliconFlow**, as well as **OpenAI (`gpt-4o`, `o1`/`o3`/`gpt-5` reasoning models), Anthropic Claude (native `sk-ant-...` `/v1/messages` API), Google Gemini (`generativelanguage.googleapis.com`), and OpenRouter** with automatic `/v1` path resolution and parameter sanitization. In **MCP Server Mode**, zero extra API keys are required — your host client (Claude Desktop, Cursor, Cherry Studio, Trae) uses its own configured model.
+> - **Domestic & International LLM Keys**: Both the Desktop Workbench and Engine natively support **DeepSeek (`deepseek-flash` / `deepseek-v4-pro`), Qwen, Moonshot/Kimi, SiliconFlow**, as well as **OpenAI GPT series, Anthropic Claude (native `/v1/messages` API), Google Gemini, and OpenRouter** with automatic `/v1` path resolution and provider-level parameter adaptation. In **MCP Server Mode**, zero extra API keys are required — your host client (Claude Desktop, Cursor, Cherry Studio, Trae) uses its own configured model.
 
 ---
 

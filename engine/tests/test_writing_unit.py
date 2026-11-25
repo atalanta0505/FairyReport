@@ -660,18 +660,18 @@ def test_llm_multi_provider_compatibility_openai_gemini_anthropic():
 
     llm_mod.set_transport(httpx.MockTransport(handler))
     try:
-        # 1. OpenAI 根域名自动补 /v1，且 o3-mini 自动剥离 temperature/penalties 并转换 max_completion_tokens
-        c_o3 = LLMClient({"api_key": "sk-openai", "base_url": "https://api.openai.com", "model": "o3-mini"})
-        assert c_o3.chat("你好", frequency_penalty=0.4, presence_penalty=0.25, max_tokens=2048) == "OK"
-        url_o3, _, body_o3 = captured[-1]
-        assert url_o3 == "https://api.openai.com/v1/chat/completions"
-        assert "temperature" not in body_o3
-        assert "frequency_penalty" not in body_o3
-        assert "presence_penalty" not in body_o3
-        assert body_o3["max_completion_tokens"] == 2048
+        # 1. OpenAI 官方根域名自动补 /v1，且自动剥离不兼容惩罚参数并转换 max_completion_tokens
+        c_openai = LLMClient({"api_key": "sk-openai", "base_url": "https://api.openai.com", "model": "gpt-6-sol"})
+        assert c_openai.chat("你好", frequency_penalty=0.4, presence_penalty=0.25, max_tokens=2048) == "OK"
+        url_oai, _, body_oai = captured[-1]
+        assert url_oai == "https://api.openai.com/v1/chat/completions"
+        assert "temperature" not in body_oai
+        assert "frequency_penalty" not in body_oai
+        assert "presence_penalty" not in body_oai
+        assert body_oai["max_completion_tokens"] == 2048
 
         # 2. Google Gemini 自动补 /v1beta/openai 且剥离不支持的 penalties 与 stream_options
-        c_gem = LLMClient({"api_key": "AIza-test", "base_url": "https://generativelanguage.googleapis.com", "model": "gemini-2.5-pro"})
+        c_gem = LLMClient({"api_key": "AIza-test", "base_url": "https://generativelanguage.googleapis.com", "model": "gemini-3.1-pro"})
         payload_gem = c_gem._payload([{"role": "user", "content": "hi"}], 0.2, 0.4, 0.25, 0.85, None, stream=True)
         assert c_gem._url() == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         assert "frequency_penalty" not in payload_gem
@@ -679,7 +679,7 @@ def test_llm_multi_provider_compatibility_openai_gemini_anthropic():
         assert "stream_options" not in payload_gem
 
         # 3. Anthropic Claude 原生 /v1/messages（x-api-key + system 顶层提取 + 非流式/流式解析）
-        c_anth = LLMClient({"api_key": "sk-ant-test", "base_url": "https://api.anthropic.com", "model": "claude-sonnet-4-5"})
+        c_anth = LLMClient({"api_key": "sk-ant-test", "base_url": "https://api.anthropic.com", "model": "claude-4-6-sonnet"})
         assert c_anth.chat("写一段摘要", system_prompt="你是工程专家") == "Claude非流式结果"
         url_anth, hdr_anth, body_anth = captured[-1]
         assert url_anth == "https://api.anthropic.com/v1/messages"
