@@ -180,6 +180,74 @@ def get_report_blueprint(report_type: str = "可行性研究报告") -> dict[str
     }
 
 
+_SKIP_DIRS = {".git", ".hg", ".svn", ".venv", "venv", "__pycache__", "node_modules", "$RECYCLE.BIN"}
+
+
+def _expand_input_paths(
+    raw_paths: list[str] | str,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """将输入的文件或文件夹路径列表展开为去重后的合法文档绝对路径列表。"""
+    items = [raw_paths] if isinstance(raw_paths, str) else list(raw_paths or [])
+    expanded: list[str] = []
+    errors: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for raw in items:
+        if not raw or not str(raw).strip():
+            continue
+        abspath = os.path.abspath(str(raw).strip())
+        if os.path.isdir(abspath):
+            found_in_dir = 0
+            for root, dirs, files in os.walk(abspath):
+                dirs[:] = sorted(
+                    d for d in dirs if not d.startswith(".") and d not in _SKIP_DIRS
+                )
+                for fname in sorted(files):
+                    if fname.startswith(".") or fname.startswith("~$"):
+                        continue
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext not in ALLOWED_EXTS:
+                        continue
+                    full_file = os.path.abspath(os.path.join(root, fname))
+                    norm_key = os.path.normcase(full_file)
+                    if norm_key not in seen:
+                        seen.add(norm_key)
+                        expanded.append(full_file)
+                    found_in_dir += 1
+            if found_in_dir == 0:
+                errors.append(
+                    {
+                        "file_path": raw,
+                        "status": "error",
+                        "error": f"文件夹内未找到支持的文档（仅支持 {sorted(ALLOWED_EXTS)}）: {abspath}",
+                    }
+                )
+        elif os.path.isfile(abspath):
+            ext = os.path.splitext(abspath)[1].lower()
+            if ext not in ALLOWED_EXTS:
+                errors.append(
+                    {
+                        "file_path": raw,
+                        "status": "error",
+                        "error": f"不支持的文件格式 '{ext}'，仅支持: {sorted(ALLOWED_EXTS)}",
+                    }
+                )
+                continue
+            norm_key = os.path.normcase(abspath)
+            if norm_key not in seen:
+                seen.add(norm_key)
+                expanded.append(abspath)
+        else:
+            errors.append(
+                {
+                    "file_path": raw,
+                    "status": "error",
+                    "error": f"文件或文件夹不存在: {abspath}",
+                }
+            )
+    return expanded, errors
+
+
 @mcp.tool()
 def ingest_project_materials(
     project: str,
@@ -187,13 +255,26 @@ def ingest_project_materials(
 ) -> dict[str, Any]:
     """将本地工程底稿或参考资料（支持 .pdf, .docx, .xlsx, .txt, .md）解析、分块并向量化入库到指定项目知识库。
 
+    支持直接传入整个文件夹路径：当列表元素为文件夹时，会自动递归扫描并导入该目录下所有受支持的文档（自动跳过隐藏文件与 Office `~$` 临时锁文件），用户无需逐一列出文件名。
+
     参数:
         project: 项目名称（如 "长三角算力中心可研项目"）。
-        file_paths: 本地文件绝对路径列表。
+        file_paths: 本地文件或文件夹绝对路径列表（可混传单个文件路径与文件夹路径）。
     """
     project_name = _normalize_project_name(project)
     if not file_paths:
         return {"status": "error", "error": "file_paths 不能为空"}
+
+    target_files, pre_errors = _expand_input_paths(file_paths)
+    if not target_files:
+        return {
+            "status": "error",
+            "project": project_name,
+            "ingested_files": 0,
+            "total_files": len(pre_errors),
+            "total_vector_chunks": 0,
+            "results": pre_errors,
+        }
 
     session_gen = db_module.get_db()
     session = next(session_gen)
@@ -203,30 +284,9 @@ def ingest_project_materials(
         embedder = get_embedder()
         dest_dir = str(settings.files_dir(project_name))
 
-        results: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = list(pre_errors)
         success_count = 0
-        for raw_path in file_paths:
-            fpath = os.path.abspath(raw_path)
-            ext = os.path.splitext(fpath)[1].lower()
-            if not os.path.isfile(fpath):
-                results.append(
-                    {
-                        "file_path": raw_path,
-                        "status": "error",
-                        "error": f"文件不存在: {fpath}",
-                    }
-                )
-                continue
-            if ext not in ALLOWED_EXTS:
-                results.append(
-                    {
-                        "file_path": raw_path,
-                        "status": "error",
-                        "error": f"不支持的文件格式 '{ext}'，仅支持: {sorted(ALLOWED_EXTS)}",
-                    }
-                )
-                continue
-
+        for fpath in target_files:
             res = _process_file(
                 session=session,
                 proj=proj,
@@ -244,7 +304,7 @@ def ingest_project_materials(
             "status": "ok" if success_count > 0 else "error",
             "project": project_name,
             "ingested_files": success_count,
-            "total_files": len(file_paths),
+            "total_files": len(target_files) + len(pre_errors),
             "total_vector_chunks": store.count(),
             "results": results,
         }

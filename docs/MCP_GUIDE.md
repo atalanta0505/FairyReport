@@ -1,6 +1,6 @@
 # FairyReport MCP Server 多客户端接入指南
 
-**FairyReport MCP Server** 将原本内置于桌面工作台的四大核心专业能力封装为标准 **Model Context Protocol (MCP)** 工具，使国内外主流桌面端 AI Agent（**Cherry Studio、Claude Desktop / Cowork、Trae、Cursor、Windsurf、Antigravity、OpenClaw / QClaw、ChatWise** 等）能够直接调用。
+**FairyReport MCP Server** 将原本内置于桌面工作台的四大核心专业能力封装为标准 **Model Context Protocol (MCP)** 工具，使国内外主流桌面端办公与开发 AI Agent（**Cherry Studio、腾讯 WorkBuddy、豆包电脑版、千问桌面端 / Qoder、Claude Desktop / Cowork、Trae、Cursor、Windsurf、Antigravity、OpenClaw / QClaw** 等）能够直接调用。
 
 > [!TIP]
 > **零额外 API Key 设计（Host-LLM Mode）**
@@ -121,7 +121,15 @@ pip install -e .
 
 ---
 
-### 4. OpenClaw / QClaw / 远程 Agent（Streamable HTTP 模式）
+### 4. 国内桌面办公 Agent（腾讯 WorkBuddy / 豆包电脑版 / 千问桌面端 / Qoder）
+
+- **腾讯 WorkBuddy**：打开侧边栏 **「专家·技能·连接器 ➔ 连接器 ➔ 自定义连接器」**（或编辑用户目录下的 `~/.workbuddy/mcp.json`），填入上方相同的 `mcpServers` 配置后点击 **「信任」** 并启用。
+- **豆包电脑版**：进入桌面客户端的 **「技能 / 自定义连接器」**，添加本地 `stdio` 启动命令（如 `uvx --from git+https://github.com/atalanta0505/FairyReport.git fairyreport-mcp` 或本地便携包 `fairyreport-engine.exe --mcp`）。
+- **阿里 Qoder / 千问桌面端**：按 `Ctrl+Shift+,` 打开设置 ➔ **MCP ➔ My Servers ➔ + Add**（或从魔搭社区 MCP 广场搜索 **「斐语报告 / FairyReport」** 一键导入）。
+
+---
+
+### 5. OpenClaw / QClaw / 远程 Agent（Streamable HTTP 模式）
 
 对于需要通过 HTTP 端点挂载的本地网关或远程 Agent 容器，可将 FairyReport MCP Server 启动为 `streamable-http` 或 `sse` 服务：
 
@@ -137,7 +145,7 @@ python -m engine.mcp_server --transport streamable-http --host 127.0.0.1 --port 
 | :--- | :--- | :--- |
 | `list_report_templates` | 查看支持的全部 15 类专业报告名称、总字数上限与推荐写作顺序 | 无参数 |
 | `get_report_blueprint` | 获取指定报告类型的权威标准章节骨架（`outline_md`）、单章配额及三线表规范 | `report_type`（如 `"可行性研究报告"`） |
-| `ingest_project_materials` | 将本地 `.pdf` / `.docx` / `.xlsx` / `.txt` / `.md` 底稿切片并建立项目向量库 | `project`、`file_paths`（本地文件绝对路径列表） |
+| `ingest_project_materials` | 将本地 `.pdf` / `.docx` / `.xlsx` / `.txt` / `.md` 底稿切片并建立项目向量库 | `project`、`file_paths`（文件**或文件夹**路径列表，传文件夹自动递归扫描） |
 | `retrieve_report_evidence` | 执行三源深度 RAG 检索（底稿 `【源:...】` + 国标 `【标:...】` + 免 Key 权威联网 `【网:...】`） | `query`、`project`、`chapter_title`、`report_type` |
 | `verify_report_consistency` | 跨章节核验总投资、用地面积、建筑面积、建设工期、FIRR、营业收入自洽性（自动换算亿元/万元、公顷/亩） | `chapters`（如 `{"1": "# 第一章...", "7": "# 第七章..."}`） |
 | `export_consulting_docx` | 将各章 Markdown 一键编译为带封面、目录、标准三线表、标题防粘连与自动编号《参考文献》的 `.docx` | `chapters`、`title`、`project`、`report_type`、`author_org` |
@@ -145,11 +153,16 @@ python -m engine.mcp_server --transport streamable-http --host 127.0.0.1 --port 
 
 ---
 
-## 四、 开箱即用的对话指令示例（直接复制给你的 Agent）
+## 四、 开箱即用的对话指令示例（无需敲英文工具名，直接说大白话）
 
-挂载成功后，你可以在 Cherry Studio / Claude Desktop / Trae 中直接发送以下指令体验完整闭环：
+挂载成功后，你无需记忆任何英文工具名称，在 Cherry Studio / WorkBuddy / 豆包电脑版 / Trae 中直接用自然语言交流，大模型会在后台自动匹配调度工具：
 
-### 场景 1：带本地底稿的《可行性研究报告》编制与跨章核验导出
+### 场景 0：纯自然语言对话（甩整个文件夹路径一键开写）
+> “项目资料都放在 `D:/我的项目底稿` 这个文件夹里了，你帮我全部读进去看看，然后按《可行性研究报告》标准拟一份大纲出来，报告标题叫《长三角智能算力中心建设项目可行性研究报告》。”
+>
+> *(确认大纲后继续说)*：“大纲没问题，帮我先写出第一章和第七章，核对一下两章的投资额有没有前后打架，最后导出成标准三线表 Word 文档放到桌面。”
+
+### 场景 1：带本地底稿的《可行性研究报告》全闭环指令（精确指定步骤）
 > “请调用 `fairyreport` 工具：
 > 1. 先查看《可行性研究报告》的标准大纲蓝图与推荐写作顺序；
 > 2. 将我本地的 `D:/资料/算力中心立项批复.pdf` 导入到项目 `长三角智算中心`；

@@ -200,3 +200,35 @@ def test_pyproject_bundles_templates_and_patterns():
     assert "pattern*" in find_cfg["include"]
     pkg_data = data["tool"]["setuptools"]["package-data"].get("*", [])
     assert "*.json" in pkg_data and "*.docx" in pkg_data
+
+
+def test_ingest_project_materials_supports_directory_scan(tmp_path: Path):
+    """支持直接传入整个文件夹路径：自动递归扫描有效文档，跳过 Office ~$ 锁文件与不支持格式。"""
+    folder = tmp_path / "项目底稿目录"
+    sub = folder / "财务附件"
+    sub.mkdir(parents=True)
+
+    (folder / "01_立项批复.md").write_text("项目估算总投资 26000 万元，工期 18 个月。", encoding="utf-8")
+    (sub / "02_技术参数.txt").write_text("规划新建智算机柜 2000 架，设计 PUE 1.15。", encoding="utf-8")
+    # 干扰项：Office 临时锁文件、隐藏文件与不支持后缀均应被静默跳过
+    (folder / "~$01_立项批复.docx").write_text("lock", encoding="utf-8")
+    (folder / ".DS_Store").write_text("meta", encoding="utf-8")
+    (folder / "logo.png").write_bytes(b"\x89PNG\r\n")
+
+    res = ingest_project_materials(
+        project="test_folder_ingest",
+        file_paths=[str(folder)],
+    )
+    assert res["status"] == "ok"
+    assert res["ingested_files"] == 2
+    assert res["total_files"] == 2
+    assert res["total_vector_chunks"] >= 2
+
+    empty_dir = tmp_path / "空文件夹"
+    empty_dir.mkdir()
+    empty_res = ingest_project_materials(
+        project="test_folder_ingest_empty",
+        file_paths=[str(empty_dir)],
+    )
+    assert empty_res["status"] == "error"
+    assert empty_res["ingested_files"] == 0
