@@ -42,9 +42,9 @@
 
 | 下载渠道 | 获取链接 | 提取码 / 说明 | 包体大小 |
 | :--- | :--- | :--- | :--- |
-| **🌐 国内官方网站下载页** | [http://101.42.9.223/download](http://101.42.9.223/download) | 腾讯云国内直连，含 SHA-256 校验码与图文指引 | `396 MB` |
-| **☁️ 百度网盘** | [点击下载 FairyReport-Local-v1.6.5-Windows-x64.zip](https://pan.baidu.com/s/1XG5DlAl6zpCWEoWfXmtvTg?pwd=i56v) | 提取码：`i56v` | `396 MB` |
-| **⚡ 夸克网盘** | [点击下载 FairyReport-Local-v1.6.5-Windows-x64.zip](https://pan.quark.cn/s/893e062482e6?pwd=DymL) | 提取码：`DymL` | `396 MB` |
+| **🌐 国内官方网站下载页** | [http://101.42.9.223/download](http://101.42.9.223/download) | 腾讯云国内直连，含 SHA-256 校验码与图文指引 | `407 MB` |
+| **☁️ 百度网盘** | [点击下载 FairyReport-Local-v1.6.5-Windows-x64.zip](https://pan.baidu.com/s/1IroAZAqSjjhP2hbhPoI7ZA?pwd=t8ii) | 提取码：`t8ii` | `407 MB` |
+| **⚡ 夸克网盘** | [点击下载 FairyReport-Local-v1.6.5-Windows-x64.zip](https://pan.quark.cn/s/e5c9d5a33c8c) | 免提取码（直连） | `407 MB` |
 
 > **三步即用**：① 解压压缩包到任意目录 ➔ ② 双击 `FairyReport.exe` ➔ ③ 右上角「设置」填入你自己的大模型 API Key（原生支持 **DeepSeek、通义千问、Kimi、硅基流动** 及 **OpenAI、Claude、Gemini、OpenRouter**）即可开始编制。
 
@@ -54,7 +54,21 @@
 
 如果你平时常驻 **Cherry Studio、Claude Desktop（含 Cowork）、Trae、Cursor、Windsurf、Antigravity、OpenClaw / QClaw、ChatWise** 等桌面端 Agent，无需单独配 Key，即可将 FairyReport 的 **15 类权威报告蓝图、三源深度 RAG、跨章节数值自洽核验、出版级三线表 Word 导出** 直接挂载给客户端里现有的大模型调用！
 
-在客户端的 `mcpServers` 配置文件中添加：
+在客户端的 `mcpServers` 配置文件中添加（**方式 A：Windows 绿色便携包零 Python 环境直接挂载**；或 **方式 B：开发者源码挂载**）：
+
+```json
+{
+  "mcpServers": {
+    "fairyreport": {
+      "command": "D:/Tools/FairyReport/fairyreport-engine.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+<details>
+<summary>开发者从源码挂载配置（macOS / Linux / Python 虚拟环境）</summary>
 
 ```json
 {
@@ -67,6 +81,8 @@
   }
 }
 ```
+
+</details>
 
 *(支持 `uvx` / 虚拟环境启动及 Streamable HTTP 模式，完整客户端配置与对话指令详见 **[🔌 FairyReport MCP 接入指南 (docs/MCP_GUIDE.md)](docs/MCP_GUIDE.md)**。)*
 

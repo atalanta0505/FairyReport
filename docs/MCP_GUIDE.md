@@ -8,7 +8,30 @@
 
 ---
 
-## 一、 环境准备
+## 一、 环境准备（两种方式任选其一）
+
+### 方式 A：零 Python 环境直接使用 Windows 绿色便携包（推荐）
+
+下载并解压 `FairyReport-Local-v1.6.5-Windows-x64.zip` 至任意本地目录（例如 `D:/Tools/FairyReport`），无需安装 Python 或 `pip` 依赖，包内自带的 `fairyreport-engine.exe` 已内置完整 MCP Server、离线向量模型与 15 类标准报告模板：
+
+```json
+{
+  "mcpServers": {
+    "fairyreport": {
+      "command": "D:/Tools/FairyReport/fairyreport-engine.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+> **便携数据自动互通**：便携包同级自带 `.portable` 标记，直接运行 `fairyreport-engine.exe --mcp` 时会自动将项目数据库、向量索引与导出的 Word 保存在 `<解压目录>/data/` 下，与 `FairyReport.exe` 桌面端共享数据（也可通过 `env.ENGINE_DATA_DIR` 自定义数据目录）。  
+> 如需以 Streamable HTTP 模式启动，直接执行：
+> ```bash
+> D:/Tools/FairyReport/fairyreport-engine.exe --mcp --transport streamable-http --host 127.0.0.1 --port 8002
+> ```
+
+### 方式 B：开发者从源码安装（Windows / macOS / Linux）
 
 在本地克隆仓库并安装依赖（推荐 Python `>= 3.10`）：
 

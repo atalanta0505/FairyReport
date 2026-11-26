@@ -14,7 +14,23 @@ def main():
     with open(os.path.join(repo_root, "desktop", "package.json"), encoding="utf-8") as f:
         version = json.load(f)["version"]
     dist_dir = os.path.join(repo_root, "dist")
-    target_release = os.path.join(repo_root, "desktop", "src-tauri", "target", "release")
+    target_root = os.path.join(repo_root, "desktop", "src-tauri", "target")
+    release_candidates = [
+        os.path.join(target_root, "release"),
+        os.path.join(target_root, "x86_64-pc-windows-gnu", "release"),
+        os.path.join(target_root, "x86_64-pc-windows-msvc", "release"),
+    ]
+    valid_releases = [
+        d for d in release_candidates
+        if os.path.exists(os.path.join(d, "fairyreport-desktop.exe"))
+    ]
+    if not valid_releases:
+        raise RuntimeError("未找到 fairyreport-desktop.exe，请先编译 Tauri Release！")
+    target_release = max(
+        valid_releases,
+        key=lambda d: os.path.getmtime(os.path.join(d, "fairyreport-desktop.exe")),
+    )
+    print(f"  使用最新桌面端 Release 目录：{target_release}")
     
     stage_dir = os.path.join(dist_dir, f"FairyReport-Local-v{version}-Windows-x64")
     if os.path.exists(stage_dir):
@@ -28,6 +44,11 @@ def main():
         os.path.join(target_release, "fairyreport-desktop.exe"),
         os.path.join(stage_dir, "FairyReport.exe")
     )
+    # GNU 工具链动态链接 WebView2Loader.dll（MSVC 静态链接时不存在），有则必拷
+    webview2_dll = os.path.join(target_release, "WebView2Loader.dll")
+    if os.path.exists(webview2_dll):
+        shutil.copy2(webview2_dll, os.path.join(stage_dir, "WebView2Loader.dll"))
+        print("  已拷贝 WebView2Loader.dll")
     # cdylib 只在部分目标上生成，Windows 桌面运行不需要它：有就拷，没有就跳过
     lib_dll = os.path.join(target_release, "fairyreport_desktop_lib.dll")
     if os.path.exists(lib_dll):
@@ -36,12 +57,18 @@ def main():
         print("  提示：未找到 fairyreport_desktop_lib.dll（Windows 运行不需要），已跳过")
 
     engine_candidates = [
-        os.path.join(target_release, "fairyreport-engine.exe"),
         os.path.join(repo_root, "desktop", "src-tauri", "binaries", "fairyreport-engine-x86_64-pc-windows-msvc.exe"),
+        os.path.join(repo_root, "desktop", "src-tauri", "binaries", "fairyreport-engine-x86_64-pc-windows-gnu.exe"),
+        os.path.join(target_release, "fairyreport-engine.exe"),
     ]
-    engine_src = next((p for p in engine_candidates if os.path.exists(p) and os.path.getsize(p) > 10 * 1024 * 1024), None)
-    if not engine_src:
+    valid_engines = [
+        p for p in engine_candidates
+        if os.path.exists(p) and os.path.getsize(p) > 10 * 1024 * 1024
+    ]
+    if not valid_engines:
         raise RuntimeError("未找到有效的独立后端引擎二进制 (fairyreport-engine.exe 体积需 > 10MB)，请先运行 scripts/build_engine.py！")
+    engine_src = max(valid_engines, key=os.path.getmtime)
+    print(f"  使用最新后端引擎二进制：{engine_src}")
     shutil.copy2(
         engine_src,
         os.path.join(stage_dir, "fairyreport-engine.exe")
@@ -76,18 +103,19 @@ def main():
             dirs_exist_ok=True,
         )
 
-    # 拷贝使用说明：两份指南的 Word 版与 Markdown 源文件
+    # 拷贝使用说明：指南 Word/Markdown 版与 MCP 接入指南
     guide_dir = os.path.join(stage_dir, "使用说明")
     os.makedirs(guide_dir, exist_ok=True)
-    for name in (
-        "FairyReport_快速上手操作指南.docx",
-        "FairyReport_用户操作手册.docx",
-        "BEGINNER_GUIDE.md",
-        "USER_GUIDE.md",
+    for src_name, dst_name in (
+        ("FairyReport_快速上手操作指南.docx", "FairyReport_快速上手操作指南.docx"),
+        ("FairyReport_用户操作手册.docx", "FairyReport_用户操作手册.docx"),
+        ("BEGINNER_GUIDE.md", "BEGINNER_GUIDE.md"),
+        ("USER_GUIDE.md", "USER_GUIDE.md"),
+        ("MCP_GUIDE.md", "MCP接入指南.md"),
     ):
-        src = os.path.join(repo_root, "docs", name)
+        src = os.path.join(repo_root, "docs", src_name)
         if os.path.exists(src):
-            shutil.copy2(src, os.path.join(guide_dir, name))
+            shutil.copy2(src, os.path.join(guide_dir, dst_name))
         else:
             print(f"  提示：未找到 {src}，已跳过")
 
@@ -98,23 +126,44 @@ def main():
     else:
         print(f"  提示：未找到 {changelog}，已跳过")
 
-    readme_text = f"""FairyReport 智能报告编制应用 (v{version} 本地安全专业版)
-==================================================
+    readme_text = f"""FairyReport 智能报告编制应用 & MCP Server (v{version} 绿色免安装便携版)
+======================================================================
 
-【快速启动】
+【方式一：独立桌面工作台快速启动】
 1. 解压本压缩包至任意磁盘文件夹（例如 D:\\Tools\\FairyReport）。
 2. 双击运行「FairyReport.exe」即可直接进入五步编制工作台（免注册、免登录、完全免费使用）。
    （首次启动时若出现 Windows Defender 安全拦截提示，点击“更多信息” -> “仍要运行”即可）
 
-【模型与 API Key 设置】
+【模型与 API Key 设置（支持国内外主流厂商）】
 1. 进入工作台后，点击右上角「设置」按钮。
-2. 基础地址（Base URL）：默认已配置官方规范 https://api.deepseek.com。
-3. API Key：填入您在 DeepSeek 开放平台申请的 API Key（系统仅保存在您本地，绝不上云；可点击设置页上的「DeepSeek API-Key 官方申请指南」查看申请流程）。
-4. 模型选择：默认推荐 deepseek-flash（高性价比、流式响应极速），亦可点击「🔄 获取最新模型」动态拉取官方最新模型列表。
+2. 原生支持国内外主流大模型接口：
+   - 国内平台：DeepSeek、通义千问（DashScope）、Kimi（Moonshot）、硅基流动（SiliconFlow）等；
+   - 国际平台：OpenAI（GPT 系列）、Anthropic Claude（原生 /v1/messages）、Google Gemini、OpenRouter 等。
+3. 填入 Base URL 与 API Key 后（仅保存在您本地，绝不上云），点击「🔄 获取最新模型」即可动态拉取厂商最新模型列表，或手动填写任意自定义模型 ID。
+
+【方式二：零 Python 环境接入 MCP Server（供桌面端 AI Agent 调用）】
+本便携包内的 fairyreport-engine.exe 已内置标准 MCP Server，无需安装 Python 或任何依赖，
+即可直接挂载到 Cherry Studio、Claude Desktop / Cowork、Trae、Cursor、Windsurf、Antigravity 等客户端
+（默认零额外 API Key，由客户端自带大模型负责推理写作）：
+
+1. STDIO 挂载配置示例（将路径替换为您实际解压目录）：
+   {{
+     "mcpServers": {{
+       "fairyreport": {{
+         "command": "D:/Tools/FairyReport/fairyreport-engine.exe",
+         "args": ["--mcp"]
+       }}
+     }}
+   }}
+2. Streamable HTTP 模式启动命令（适合 OpenClaw / 远程网关挂载）：
+   fairyreport-engine.exe --mcp --transport streamable-http --port 8002
+3. 便携数据互通：因同级存在 .portable 标记，MCP 模式会自动读写本目录下的 data\\ 文件夹，
+   直接复用包内离线向量模型（data\\fastembed_models\\），并与 FairyReport.exe 桌面端共享项目数据。
 
 【使用说明文档】
 本包内「使用说明」文件夹含：
 - 《快速上手操作指南》与《用户操作手册》Word 版（.docx）及 Markdown 源文件；
+- MCP接入指南.md：各主流 AI Agent 客户端配置教程与对话指令示例；
 - 更新历史.md：本软件的版本更新记录。
 
 【核心安全与便携特性】

@@ -4,6 +4,7 @@ FairyReport 本地引擎 — 全局配置（pydantic-settings）。
 优先级：环境变量 > 默认值。ENGINE_DATA_DIR 默认 %LOCALAPPDATA%/FairyReport。
 """
 import os
+import sys
 import warnings
 from pathlib import Path
 
@@ -11,10 +12,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _default_engine_data_dir() -> str:
-    """解析引擎数据根目录：环境变量 ENGINE_DATA_DIR 优先，否则 %LOCALAPPDATA%/FairyReport。"""
+    """解析引擎数据根目录：
+    1. 环境变量 ENGINE_DATA_DIR 优先；
+    2. 便携模式：PyInstaller 冻结运行且可执行文件同级存在 .portable 标记时，自动使用 <exe同级>/data
+       （确保独立调用 fairyreport-engine.exe --mcp 时与桌面端共享便携数据与离线向量模型）；
+    3. 系统默认：%LOCALAPPDATA%/FairyReport（非 Windows 回退至 ~/FairyReport）。
+    """
     env = os.environ.get("ENGINE_DATA_DIR")
     if env:
         return env
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        if (exe_dir / ".portable").exists():
+            return str(exe_dir / "data")
     local = os.environ.get("LOCALAPPDATA")
     if local:
         return str(Path(local) / "FairyReport")

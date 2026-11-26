@@ -64,10 +64,9 @@ build_engine_pyinstaller/
 engine/generic_pack/*.zip
 scratch/
 
-# Documentation website build artifacts
-site/node_modules/
-site/.vitepress/dist/
-site/.vitepress/cache/
+# Documentation website & private deploy script (kept locally, not published to GitHub)
+site/
+scripts/deploy_site.ps1
 
 # Test exports and generated packs
 standard_export_demo.docx

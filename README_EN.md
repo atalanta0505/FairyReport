@@ -20,7 +20,7 @@
 > [!NOTE]
 > **Language & LLM Compatibility Scope**
 > - **UI & Built-in Regulatory Templates**: The desktop workbench interface and all 15 built-in report templates (Feasibility Study, Project Proposal, Special Bond Application, PPP Scheme, etc.) are currently in **Simplified Chinese**, specifically engineered around Chinese engineering consulting and NDRC / GB-T regulatory standards.
-> - **Domestic & International LLM Keys**: Both the Desktop Workbench and Engine natively support **DeepSeek (`deepseek-flash` / `deepseek-v4-pro`), Qwen, Moonshot/Kimi, SiliconFlow**, as well as **OpenAI GPT series, Anthropic Claude (native `/v1/messages` API), Google Gemini, and OpenRouter** with automatic `/v1` path resolution and provider-level parameter adaptation. In **MCP Server Mode**, zero extra API keys are required — your host client (Claude Desktop, Cursor, Cherry Studio, Trae) uses its own configured model.
+> - **Domestic & International LLM Keys**: Both the Desktop Workbench and Engine natively support **DeepSeek, Qwen, Moonshot/Kimi, SiliconFlow**, as well as **OpenAI GPT series, Anthropic Claude (native `/v1/messages` API), Google Gemini, and OpenRouter** with automatic `/v1` path resolution and provider-level parameter adaptation. In **MCP Server Mode**, zero extra API keys are required — your host client (Claude Desktop, Cursor, Cherry Studio, Trae) uses its own configured model.
 
 ---
 
@@ -45,7 +45,21 @@ Drafting 30,000–50,000 word consulting, engineering, and investment reports (F
 
 When connected to your favorite desktop AI Agent, FairyReport operates in **Host-LLM Mode** by default: your desktop client's existing LLM handles reasoning and prose generation, while FairyReport provides deterministic tools that general-purpose agents lack.
 
-Add this to your client's `mcpServers` config (`claude_desktop_config.json`, Cherry Studio, Cursor, Trae, etc.):
+Add this to your client's `mcpServers` config (`claude_desktop_config.json`, Cherry Studio, Cursor, Trae, etc.) — either **zero-Python via the Windows Portable package** or **from source**:
+
+```json
+{
+  "mcpServers": {
+    "fairyreport": {
+      "command": "D:/Tools/FairyReport/fairyreport-engine.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+<details>
+<summary>Run from source (Python / macOS / Linux)</summary>
 
 ```json
 {
@@ -58,6 +72,8 @@ Add this to your client's `mcpServers` config (`claude_desktop_config.json`, Che
   }
 }
 ```
+
+</details>
 
 | MCP Tool | Requires Extra LLM Key? | Capability |
 | :--- | :---: | :--- |

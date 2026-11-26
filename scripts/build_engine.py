@@ -1,7 +1,9 @@
 """
 FairyReport 独立引擎打包脚本 (PyInstaller)
 
-将 engine/app/main.py 冻结为独立可执行二进制，供 Tauri Sidecar 或独立运行。
+将 engine/entrypoint.py 冻结为独立可执行二进制，同时支持：
+  - 桌面端 Tauri Sidecar FastAPI 引擎（默认运行）
+  - 零 Python 环境 MCP Server（传入 --mcp 参数）
 产物路径：desktop/src-tauri/binaries/fairyreport-engine-<target-triple>.exe
 """
 import os
@@ -63,6 +65,8 @@ def build():
         "fastembed",
         "--collect-all",
         "onnxruntime",
+        "--collect-all",
+        "mcp",
         # 隐藏导入
         "--hidden-import",
         "uvicorn.logging",
@@ -74,6 +78,12 @@ def build():
         "uvicorn.lifespan.on",
         "--hidden-import",
         "engine.app.main",
+        "--hidden-import",
+        "engine.mcp_server",
+        "--hidden-import",
+        "sse_starlette",
+        "--hidden-import",
+        "jsonschema",
         "--hidden-import",
         "engine.app.projects.router",
         "--hidden-import",
@@ -149,7 +159,21 @@ def build():
 
     print(f"[*] 开始构建独立引擎二进制：{binary_name}{ext}")
     print(f"[*] 执行命令：{' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=str(REPO_ROOT))
+
+    # 净化 Windows 构建期 PATH：确保 C:\Windows\System32 排在最前，并剔除声卡驱动 / TexLive / WPT 等目录，
+    # 防止 PyInstaller 误收集第三方目录中过旧的 msvcp140.dll 或 api-ms-win-* 垫片导致 onnxruntime 初始化崩溃(WinError 1114)。
+    build_env = os.environ.copy()
+    if system == "windows":
+        sys_root = build_env.get("SystemRoot", r"C:\Windows")
+        sys32 = os.path.join(sys_root, "System32")
+        poison_keywords = ("hwaudiodriver", "windows performance toolkit", "texlive")
+        filtered_paths = [
+            p for p in build_env.get("PATH", "").split(os.pathsep)
+            if p and not any(k in p.lower() for k in poison_keywords)
+        ]
+        build_env["PATH"] = os.pathsep.join([sys32, *filtered_paths])
+
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=build_env)
     if result.returncode != 0:
         print(f"[!] PyInstaller 构建失败，退出码：{result.returncode}")
         sys.exit(result.returncode)
@@ -158,8 +182,13 @@ def build():
     if target_file.exists():
         print(f"[+] 成功构建独立引擎：{target_file} ({target_file.stat().st_size / (1024*1024):.1f} MB)")
         import shutil
-        for sub in ["debug", "release"]:
-            dest_dir = REPO_ROOT / "desktop" / "src-tauri" / "target" / sub
+        sync_dirs = [
+            REPO_ROOT / "desktop" / "src-tauri" / "target" / "debug",
+            REPO_ROOT / "desktop" / "src-tauri" / "target" / "release",
+            REPO_ROOT / "desktop" / "src-tauri" / "target" / "x86_64-pc-windows-gnu" / "release",
+            REPO_ROOT / "desktop" / "src-tauri" / "target" / "x86_64-pc-windows-msvc" / "release",
+        ]
+        for dest_dir in sync_dirs:
             if dest_dir.exists():
                 dest_file = dest_dir / f"fairyreport-engine{ext}"
                 try:

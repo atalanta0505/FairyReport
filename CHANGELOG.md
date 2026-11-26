@@ -4,6 +4,8 @@
 
 - 全面开源免费化与免注册改造：移除云端注册/登录拦截与云端网关，启动直达五步主工作台。
 - 内置 15 套标准报告模板开箱即用：未同步云端知识包时自动加载本地内置 `generic_knowledge/templates/`，清理非公开政策文献与私有服务器部署资产。
+- 新增零 Key 宿主驱动 MCP Server（`engine.mcp_server`），便携包内的 `fairyreport-engine.exe --mcp` 原生内置 MCP 能力与 `.portable` 便携数据目录自动识别，无需 Python 环境即可接入 Cherry Studio、Claude Desktop、Trae、Cursor 等客户端。
+- 全面兼容国内外主流大模型协议：原生支持 DeepSeek、通义千问、Kimi、硅基流动，以及 OpenAI、Anthropic Claude、Google Gemini、OpenRouter。
 
 ## v1.6.4 — 2026-10-06
 

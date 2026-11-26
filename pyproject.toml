@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://atalanta0505.github.io/FairyReport/"
+Homepage = "https://github.com/atalanta0505/FairyReport"
 Repository = "https://github.com/atalanta0505/FairyReport"
 Issues = "https://github.com/atalanta0505/FairyReport/issues"
 
