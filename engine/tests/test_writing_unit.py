@@ -697,3 +697,29 @@ def test_llm_multi_provider_compatibility_openai_gemini_anthropic():
 
 
 
+
+
+def test_normalize_chapter_markdown_preserves_building_numbers_and_spaced_titles():
+    """工程编号（如 1#~4# 厂房、2# 主变）及含空格短标题（如 1.3 编制 依据）不得被误拆行或破坏表格。"""
+    from engine.app.writing.writer import normalize_chapter_markdown
+
+    raw_prose = "本项目新建 1#~4# 数字化重型厂房及 2# 变配电站，单栋跨度 24 米。"
+    assert normalize_chapter_markdown(raw_prose) == raw_prose
+
+    raw_table = (
+        "| 序号 | 建构筑物名称 | 结构形式 |\n"
+        "| :--- | :--- | :--- |\n"
+        "| 1 | 1#~4# 数字化重型厂房 | 装配式钢结构 |\n"
+    )
+    norm_table = normalize_chapter_markdown(raw_table)
+    assert "| 1 | 1#~4# 数字化重型厂房 | 装配式钢结构 |" in norm_table
+    assert "\n# 数字化重型厂房" not in norm_table
+
+    spaced_short_h2 = "## 1.3 编制 依据"
+    assert normalize_chapter_markdown(spaced_short_h2) == "## 1.3 编制 依据"
+
+    spaced_glued_h3 = "### 1.1.1 建设地点 本项目位于芜湖高新区南区，交通便利。"
+    assert (
+        normalize_chapter_markdown(spaced_glued_h3)
+        == "### 1.1.1 建设地点\n\n本项目位于芜湖高新区南区，交通便利。"
+    )

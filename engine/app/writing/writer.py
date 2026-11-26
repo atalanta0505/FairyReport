@@ -392,15 +392,33 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
     elif re.match(r'^#{1,2}\s+参考文献\b', cleaned):
         return cleaned
 
-    # 1. 在所有非换行符/非#紧邻的 #{1,6} 前强制补双换行符
-    cleaned = re.sub(r'([^#\n])\s*(#{1,6}\s+)', r'\1\n\n\2', cleaned)
-
-    # 2. 表格单行 || 还原
+    # 1. 表格单行 || 还原（先于 # 断行执行，确保各表格行独立以 | 开头）
     cleaned = re.sub(r'\|\s*\|', '|\n|', cleaned)
     cleaned = re.sub(r'^([^|\n].*?)(\|.+?\|\s*\n\s*\|[-: ]+?\|)', r'\1\n\n\2', cleaned, flags=re.MULTILINE)
 
-    # 3. 标题与加粗/引用/表格粘连拆解
-    cleaned = re.sub(r'(#{1,6}\s+[^\n*|【]*?)\s*(\*\*|【源|\|)', r'\1\n\n\2', cleaned)
+    # 2. 在非表格行中，对紧邻正文的 Markdown 标题符强制补双换行符
+    #    保护工程编号写法（如 "1# 厂房"、"1#~4# 数字化重型厂房"、"2# 主变"、"A# 地块"）：
+    #    单个 "#" 前紧邻字母/数字时不视为一级标题粘连；"##" 及以上正常拆分。
+    def _split_inline_hashes_outside_tables(src: str) -> str:
+        out_lines: list[str] = []
+        for ln in src.split("\n"):
+            if ln.lstrip().startswith("|"):
+                out_lines.append(ln)
+                continue
+            ln = re.sub(r'([^#\n])\s*(#{2,6}\s+)', r'\1\n\n\2', ln)
+            ln = re.sub(r'([^#0-9A-Za-z\n])\s*(#\s+)', r'\1\n\n\2', ln)
+            out_lines.append(ln)
+        return "\n".join(out_lines)
+
+    cleaned = _split_inline_hashes_outside_tables(cleaned)
+
+    # 3. 标题与加粗/引用/表格粘连拆解（仅作用于行首 Markdown 标题，严禁破坏表格内部如 "1#~4# 厂房 | 钢结构"）
+    cleaned = re.sub(
+        r'^(#{1,6}\s+[^\n*|【]*?)\s*(\*\*|【源|\|)',
+        r'\1\n\n\2',
+        cleaned,
+        flags=re.MULTILINE,
+    )
 
     # 4. 骨架已知标题匹配断行
     if skeleton:
@@ -455,17 +473,31 @@ def normalize_chapter_markdown(text: str, skeleton: str = "") -> str:
 
         is_zhiku_section = bool(re.match(r'^（[一二三四五六七八九十\d]+）', num_part) or re.search(r'^（[一二三四五六七八九十\d]+）', rest))
 
-        # 6.1 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导 num_part 时生效
-        sep_pattern = (
-            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:\s+|[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{2,})$'
-            if num_part else
-            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:[:：。—\-\u2014\u2013]+)([\u4e00-\u9fa5].{2,})$'
+        # 6.1 显式分隔标点（如 标题：正文、标题。正文）；纯空格分隔仅在有序号引导且右侧确系正文句子时才切分（防止将 "1.3 编制 依据" 误拆）
+        m_punct_sep = re.match(
+            r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)(?:[:：。—\-\u2014\u2013]+)\s*([\u4e00-\u9fa5].{2,})$',
+            rest,
         )
-        m_sep = re.match(sep_pattern, rest)
-        if m_sep:
-            h_text = m_sep.group(1).strip()
-            body_text = m_sep.group(2).strip()
+        if m_punct_sep:
+            h_text = m_punct_sep.group(1).strip()
+            body_text = m_punct_sep.group(2).strip()
             return f"{lead}{num_lead}{h_text}\n\n{body_text}"
+
+        if num_part:
+            m_space_sep = re.match(
+                r'^([^\n.:：。—\-\u2014\u2013\s]{2,35}?)\s+([\u4e00-\u9fa5].{2,})$',
+                rest,
+            )
+            if m_space_sep:
+                h_text = m_space_sep.group(1).strip()
+                body_text = m_space_sep.group(2).strip()
+                is_real_sentence = (
+                    len(body_text) >= 8
+                    or bool(re.search(r'[，。；！？]', body_text))
+                    or any(body_text.startswith(s) for s in _SENTENCE_STARTERS)
+                )
+                if is_real_sentence:
+                    return f"{lead}{num_lead}{h_text}\n\n{body_text}"
 
         # 6.2 纯净短标题保护：无任何中文标点（顿号逗号句号等）且长度 <= 30 字，说明是正常独立标题，绝不拆分
         all_punct = re.search(r'[，。；！？、]', rest)

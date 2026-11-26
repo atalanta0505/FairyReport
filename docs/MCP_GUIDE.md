@@ -129,7 +129,45 @@ pip install -e .
 
 ---
 
-### 5. OpenClaw / QClaw / 远程 Agent（Streamable HTTP 模式）
+### 5. OpenCode / DeepSeek Harness（终端 CLI Agent 运行时）
+
+- **OpenCode（`~/.config/opencode/opencode.json` 或项目根目录 `opencode.json`）**：
+  ```json
+  {
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {
+      "fairyreport": {
+        "type": "local",
+        "command": ["C:/Python314/python.exe", "-m", "engine.mcp_server"],
+        "enabled": true,
+        "environment": {
+          "PYTHONPATH": "D:/Repo/FairyReport",
+          "ENGINE_DATA_DIR": "D:/Repo/FairyReport/data"
+        }
+      }
+    }
+  }
+  ```
+- **DeepSeek Harness（`dsh` / `~/.dsh/cordis.patch.yml`）**：
+  ```yaml
+  - insert:
+      - id: mcp-fairyreport
+        name: '@deepseek-ai/dsh-mcp-client'
+        config:
+          serverName: fairyreport
+          transport: stdio
+          command: C:/Python314/python.exe
+          args:
+            - '-m'
+            - 'engine.mcp_server'
+          cwd: D:/Repo/FairyReport
+          env:
+            ENGINE_DATA_DIR: D:/Repo/FairyReport/data
+  ```
+
+---
+
+### 6. OpenClaw / QClaw / 远程 Agent（Streamable HTTP 模式）
 
 对于需要通过 HTTP 端点挂载的本地网关或远程 Agent 容器，可将 FairyReport MCP Server 启动为 `streamable-http` 或 `sse` 服务：
 
