@@ -185,3 +185,18 @@ def test_prompt_and_no_key_fallback(monkeypatch):
     )
     assert no_key_res["status"] == "no_engine_api_key"
     assert "retrieve_report_evidence" in no_key_res["message"]
+
+
+def test_pyproject_bundles_templates_and_patterns():
+    """确保 uvx / pip 从仓库安装时，15 类大纲 JSON 与 15 套封面模板均随包打入。"""
+    import tomllib
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    data = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    find_cfg = data["tool"]["setuptools"]["packages"]["find"]
+    assert find_cfg.get("namespaces") is True
+    assert "generic_knowledge*" in find_cfg["include"]
+    assert "pattern*" in find_cfg["include"]
+    pkg_data = data["tool"]["setuptools"]["package-data"].get("*", [])
+    assert "*.json" in pkg_data and "*.docx" in pkg_data

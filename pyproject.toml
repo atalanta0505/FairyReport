@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/atalanta0505/FairyReport"
+Homepage = "http://101.42.9.223/"
 Repository = "https://github.com/atalanta0505/FairyReport"
 Issues = "https://github.com/atalanta0505/FairyReport/issues"
 
@@ -54,4 +54,9 @@ fairyreport-engine = "engine.app.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["engine*"]
+include = ["engine*", "generic_knowledge*", "pattern*"]
+exclude = ["engine.tests*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.docx"]
