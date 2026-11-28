@@ -12,6 +12,7 @@
 [![FastAPI](https://img.shields.io/badge/Engine-FastAPI_%2B_ChromaDB-009688.svg)](engine/)
 [![MCP Ready](https://img.shields.io/badge/MCP-Server_Ready-7c3aed.svg)](docs/MCP_GUIDE.md)
 [![ModelScope MCP](https://img.shields.io/badge/ModelScope_MCP-FairyReport-624aff.svg)](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport)
+[![Glama MCP](https://glama.ai/mcp/servers/atalanta0505/FairyReport/badges/score.svg)](https://glama.ai/mcp/servers/atalanta0505/FairyReport)
 [![Portable Release](https://img.shields.io/badge/Windows_Portable-v1.6.5-success.svg)](http://101.42.9.223/download)
 
 [**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 Official Website**](http://101.42.9.223/) | [**📦 Portable Download**](http://101.42.9.223/download) | [**🧩 ModelScope MCP**](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport) | [**🔌 MCP Integration Guide**](docs/MCP_GUIDE.md) | [**📖 Beginner Guide**](docs/BEGINNER_GUIDE.md)
