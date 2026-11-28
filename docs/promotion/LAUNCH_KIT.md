@@ -38,8 +38,8 @@
 
 仓库现已内置符合规范的 [server.json](file:///d:/Repo/FairyReport/server.json)、[pyproject.toml](file:///d:/Repo/FairyReport/pyproject.toml) 与 [MCP_GUIDE.md](file:///d:/Repo/FairyReport/docs/MCP_GUIDE.md)，建议依次提交至以下渠道：
 
-1. **魔搭社区（ModelScope）MCP 广场**（国内流量最大，**Cherry Studio 客户端内置同步**）：
-   - 地址：`https://www.modelscope.cn/mcp`
+1. **魔搭社区（ModelScope）MCP 广场**（国内流量最大，**Cherry Studio 客户端内置同步**，已上架）：
+   - 地址：`https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport`
    - 亮点标签：`报告生成`、`工程咨询`、`Word 排版`、`三源 RAG`、`零 API Key`
 2. **punkpeye/awesome-mcp-servers** & **appcypher/awesome-mcp-servers**（GitHub 高星 MCP 导航榜）：
    - 提交一行 PR 到 `Document / Knowledge & RAG` 分类：
@@ -96,7 +96,7 @@
 > 3. **跨章节工程经济指标自洽核验引擎（`context_verifier.py`）**：纯确定性规则抽取各章的总投资、建设用地、建筑面积、工期、FIRR、营业收入，自动做单位换算（亿元 <-> 万元、公顷 <-> 亩、年 <-> 月），并区分基准方案与敏感性分析情景，毫秒级输出冲突诊断清单。
 > 4. **出版级 `.docx` 与三线表编译器（`docx_builder.py`）**：自动清洗 50+ 种工程标题粘连，强制渲染 12 项规定动作标准三线表，并将全书引用按首次出现顺序重排为 `[1], [2], [3]...` 附于文末《参考文献》。
 > 5. **双形态支持（独立 Tauri 2 桌面端 + 零 Key MCP Server）**：
->    - 不懂命令行的工程咨询/规划朋友，可以直接下载 `396 MB` 的 Windows 绿色便携包，解压双击 `FairyReport.exe` 即用；
+>    - 不懂命令行的工程咨询/规划朋友，可以直接下载 `407 MB` 的 Windows 绿色便携包，解压双击 `FairyReport.exe` 即用；
 >    - 习惯用 **Cherry Studio、Claude Desktop、Trae、Cursor、OpenClaw** 的开发者，只需配 5 行 JSON 挂载 `engine.mcp_server`，**无需在工具里额外配大模型 API Key**，直接让你客户端里现有的大模型获得上述全部专业报告能力！
 >
 > 欢迎大家试用、提 Issue 或点个 Star ⭐ 支持！

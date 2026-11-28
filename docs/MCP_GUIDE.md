@@ -77,7 +77,7 @@ pip install -e .
 }
 ```
 
-> 若使用了虚拟环境，可将 `"command"` 设为虚拟环境 Python 绝对路径（例如 `"D:/Repo/FairyReport/.venv/Scripts/python.exe"`）；若已执行 `pip install -e .` 或通过 PyPI 安装，可直接设置 `"command": "fairyreport-mcp", "args": []`。
+> 若使用了虚拟环境，可将 `"command"` 设为虚拟环境 Python 绝对路径（例如 `"D:/Repo/FairyReport/.venv/Scripts/python.exe"`）；若已执行 `pip install -e .` 或通过 PyPI 安装，可直接设置 `"command": "fairyreport-mcp", "args": []`。此外，你也可以在 Cherry Studio 内置的「魔搭 MCP 同步」或访问 **[斐语报告 · 魔搭 MCP 广场](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport)** 查看并导入。
 
 ---
 
@@ -125,7 +125,7 @@ pip install -e .
 
 - **腾讯 WorkBuddy**：打开侧边栏 **「专家·技能·连接器 ➔ 连接器 ➔ 自定义连接器」**（或编辑用户目录下的 `~/.workbuddy/mcp.json`），填入上方相同的 `mcpServers` 配置后点击 **「信任」** 并启用。
 - **豆包电脑版**：进入桌面客户端的 **「技能 / 自定义连接器」**，添加本地 `stdio` 启动命令（如 `uvx --from git+https://github.com/atalanta0505/FairyReport.git fairyreport-mcp` 或本地便携包 `fairyreport-engine.exe --mcp`）。
-- **阿里 Qoder / 千问桌面端**：按 `Ctrl+Shift+,` 打开设置 ➔ **MCP ➔ My Servers ➔ + Add**（或从魔搭社区 MCP 广场搜索 **「斐语报告 / FairyReport」** 一键导入）。
+- **阿里 Qoder / 千问桌面端**：按 `Ctrl+Shift+,` 打开设置 ➔ **MCP ➔ My Servers ➔ + Add**（或访问 **[魔搭社区 MCP 广场 · 斐语报告](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport)** 搜索 **「斐语报告 / FairyReport」** 一键导入）。
 
 ---
 

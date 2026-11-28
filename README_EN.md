@@ -11,9 +11,10 @@
 [![Tauri 2](https://img.shields.io/badge/Desktop-Tauri_2_%2B_Vue_3-24c8db.svg)](desktop/)
 [![FastAPI](https://img.shields.io/badge/Engine-FastAPI_%2B_ChromaDB-009688.svg)](engine/)
 [![MCP Ready](https://img.shields.io/badge/MCP-Server_Ready-7c3aed.svg)](docs/MCP_GUIDE.md)
+[![ModelScope MCP](https://img.shields.io/badge/ModelScope_MCP-FairyReport-624aff.svg)](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport)
 [![Portable Release](https://img.shields.io/badge/Windows_Portable-v1.6.5-success.svg)](http://101.42.9.223/download)
 
-[**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 Official Website**](http://101.42.9.223/) | [**📦 Portable Download**](http://101.42.9.223/download) | [**🔌 MCP Integration Guide**](docs/MCP_GUIDE.md) | [**📖 Beginner Guide**](docs/BEGINNER_GUIDE.md)
+[**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 Official Website**](http://101.42.9.223/) | [**📦 Portable Download**](http://101.42.9.223/download) | [**🧩 ModelScope MCP**](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport) | [**🔌 MCP Integration Guide**](docs/MCP_GUIDE.md) | [**📖 Beginner Guide**](docs/BEGINNER_GUIDE.md)
 
 </div>
 
@@ -75,6 +76,22 @@ Add this to your client's `mcpServers` config (`claude_desktop_config.json`, Che
 
 </details>
 
+<details>
+<summary>Run directly via uvx (zero clone required)</summary>
+
+```json
+{
+  "mcpServers": {
+    "fairyreport": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/atalanta0505/FairyReport.git", "fairyreport-mcp"]
+    }
+  }
+}
+```
+
+</details>
+
 | MCP Tool | Requires Extra LLM Key? | Capability |
 | :--- | :---: | :--- |
 | `list_report_templates` | **No** | Lists all 15 built-in consulting/engineering report templates, word budgets, and topological writing orders |
@@ -85,7 +102,7 @@ Add this to your client's `mcpServers` config (`claude_desktop_config.json`, Che
 | `export_consulting_docx` | **No** | Compiles multi-chapter Markdown into a publication-grade `.docx` with cover page, TOC, three-line tables, unglued headings, and ordered `[1][2]` bibliography |
 | `draft_chapter_with_engine` | Optional (`.env`) | Offloads ultra-long single-chapter drafting to a configured local/cost-efficient OpenAI-compatible endpoint (e.g., DeepSeek) |
 
-See **[docs/MCP_GUIDE.md](docs/MCP_GUIDE.md)** for full step-by-step setup across Cherry Studio, Claude Desktop, Trae, Cursor, and OpenClaw.
+Also listed on **[🧩 ModelScope MCP Plaza (FairyReport)](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport)**. See **[docs/MCP_GUIDE.md](docs/MCP_GUIDE.md)** for full step-by-step setup across Cherry Studio, Claude Desktop, Trae, Cursor, and OpenClaw.
 
 ---
 

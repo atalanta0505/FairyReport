@@ -11,9 +11,10 @@
 [![Tauri 2](https://img.shields.io/badge/Desktop-Tauri_2_%2B_Vue_3-24c8db.svg)](desktop/)
 [![FastAPI](https://img.shields.io/badge/Engine-FastAPI_%2B_ChromaDB-009688.svg)](engine/)
 [![MCP Ready](https://img.shields.io/badge/MCP-Server_Ready-7c3aed.svg)](docs/MCP_GUIDE.md)
+[![ModelScope MCP](https://img.shields.io/badge/ModelScope_MCP-斐语报告-624aff.svg)](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport)
 [![Portable Release](https://img.shields.io/badge/Windows_便携版-v1.6.5_免安装-success.svg)](http://101.42.9.223/download)
 
-[**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 国内官方网站**](http://101.42.9.223/) | [**📦 绿色免安装版下载**](http://101.42.9.223/download) | [**🔌 MCP 接入指南**](docs/MCP_GUIDE.md) | [**📖 快速上手指南**](docs/BEGINNER_GUIDE.md)
+[**简体中文**](README.md) | [**English**](README_EN.md) | [**🌐 国内官方网站**](http://101.42.9.223/) | [**📦 绿色免安装版下载**](http://101.42.9.223/download) | [**🧩 魔搭 MCP 广场**](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport) | [**🔌 MCP 接入指南**](docs/MCP_GUIDE.md) | [**📖 快速上手指南**](docs/BEGINNER_GUIDE.md)
 
 </div>
 
@@ -84,7 +85,23 @@
 
 </details>
 
-*(支持 `uvx` / 虚拟环境启动及 Streamable HTTP 模式，完整客户端配置与对话指令详见 **[🔌 FairyReport MCP 接入指南 (docs/MCP_GUIDE.md)](docs/MCP_GUIDE.md)**。)*
+<details>
+<summary>免克隆仓库一键拉起配置（已安装 uv 的用户，5 秒直连）</summary>
+
+```json
+{
+  "mcpServers": {
+    "fairyreport": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/atalanta0505/FairyReport.git", "fairyreport-mcp"]
+    }
+  }
+}
+```
+
+</details>
+
+*(现已上架 **[🧩 魔搭社区 MCP 广场 · 斐语报告](https://www.modelscope.cn/mcp/servers/atalanta0505/FairyReport)**，支持 `uvx` / 虚拟环境启动及 Streamable HTTP 模式，完整客户端配置与对话指令详见 **[🔌 FairyReport MCP 接入指南 (docs/MCP_GUIDE.md)](docs/MCP_GUIDE.md)**。)*
 
 | MCP 工具名称 | 是否需要额外 LLM Key | 核心能力说明 |
 | :--- | :---: | :--- |
