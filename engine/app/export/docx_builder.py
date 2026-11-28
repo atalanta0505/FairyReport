@@ -15,7 +15,9 @@ Markdown -> Word (.docx) 导出 — 移植自根目录 exporter.py（出版级�
 - 引用函数复用 engine/app/writing/refs.py
 """
 from datetime import datetime
+from pathlib import Path
 import re
+import sys
 
 from docx import Document
 from docx.enum.section import WD_SECTION

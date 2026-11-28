@@ -6,7 +6,7 @@ Context Verifier — 报告修改后的上下文与自洽性核验引擎。
 - 输出结构化核验诊断清单、自洽度得分与改进建议
 """
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 
